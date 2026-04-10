@@ -1,0 +1,28 @@
+# ESTIXE — Policy rules
+# Rules are evaluated in order. First "block" match stops evaluation.
+
+policies:
+  - name: block_prompt_injection
+    action: block
+    keywords:
+      - "ignore previous instructions"
+      - "ignore all previous"
+      - "disregard your instructions"
+      - "forget your rules"
+      - "you are now"
+      - "new persona"
+    reason: "Potential prompt injection detected"
+
+  - name: block_system_prompt_leak
+    action: block
+    keywords:
+      - "show me your system prompt"
+      - "what are your instructions"
+      - "repeat your system message"
+      - "print your prompt"
+    reason: "System prompt extraction attempt"
+
+  - name: sanitize_excessive_whitespace
+    action: transform
+    pattern: "\\s{3,}"
+    replacement: " "

@@ -1,0 +1,143 @@
+# ESTIXE — Intent definitions for semantic bypass
+# Add your own intents and examples below.
+# The classifier uses embedding similarity, so examples don't need to be exhaustive —
+# semantically similar inputs will be matched automatically.
+
+intents:
+  greeting:
+    action: bypass
+    examples:
+      # Portuguese - formal
+      - "bom dia"
+      - "boa tarde"
+      - "boa noite"
+      - "boa madrugada"
+      # Portuguese - informal
+      - "oi"
+      - "ola"
+      - "e ai"
+      - "fala"
+      - "fala ai"
+      - "beleza"
+      - "salve"
+      - "eae"
+      - "opa"
+      - "e ai beleza"
+      - "tudo bem"
+      - "tudo bom"
+      - "como vai"
+      - "como voce esta"
+      - "oi tudo bem"
+      - "ola tudo bem"
+      - "bom dia tudo bem"
+      # Portuguese - regional/slang
+      - "oi sumido"
+      - "e ai mano"
+      - "fala parceiro"
+      - "iae"
+      - "coé"
+      # English - formal
+      - "good morning"
+      - "good afternoon"
+      - "good evening"
+      - "greetings"
+      # English - informal
+      - "hi"
+      - "hello"
+      - "hey"
+      - "hey there"
+      - "hi there"
+      - "hello there"
+      - "what's up"
+      - "sup"
+      - "howdy"
+      - "yo"
+      - "heya"
+      - "hiya"
+      - "how are you"
+      - "how's it going"
+      - "what's going on"
+      # Spanish
+      - "hola"
+      - "buenos dias"
+      - "buenas tardes"
+      - "buenas noches"
+      - "que tal"
+      # Common typos/variations
+      - "oii"
+      - "oiii"
+      - "oie"
+      - "olaa"
+      - "hiii"
+      - "helloo"
+      - "heey"
+    responses:
+      - "Ola! Como posso ajudar?"
+      - "Oi! Em que posso ajudar?"
+      - "Ola! Como posso te ajudar hoje?"
+
+  farewell:
+    action: bypass
+    examples:
+      - "tchau"
+      - "ate mais"
+      - "ate logo"
+      - "falou"
+      - "valeu"
+      - "obrigado"
+      - "obrigada"
+      - "muito obrigado"
+      - "brigado"
+      - "vlw"
+      - "flw"
+      - "bye"
+      - "goodbye"
+      - "see you"
+      - "thanks"
+      - "thank you"
+      - "gracias"
+      - "adeus"
+      - "ate a proxima"
+      - "boa noite tchau"
+    responses:
+      - "Ate mais! Se precisar de algo, estou por aqui."
+      - "Tchau! Volte sempre que precisar."
+
+  gratitude:
+    action: bypass
+    examples:
+      - "obrigado pela ajuda"
+      - "muito obrigado mesmo"
+      - "valeu pela ajuda"
+      - "agradeco"
+      - "perfeito obrigado"
+      - "era isso obrigado"
+      - "thanks for the help"
+      - "thank you so much"
+      - "that was helpful thanks"
+    responses:
+      - "Por nada! Fico feliz em ajudar."
+      - "Disponha! Se precisar de mais alguma coisa, e so falar."
+
+  confirmation:
+    action: bypass
+    examples:
+      - "ok"
+      - "certo"
+      - "entendi"
+      - "beleza"
+      - "perfeito"
+      - "isso"
+      - "exato"
+      - "sim"
+      - "pode ser"
+      - "ta bom"
+      - "tudo certo"
+      - "okay"
+      - "got it"
+      - "understood"
+      - "sure"
+      - "right"
+    responses:
+      - "Certo! Precisa de mais alguma coisa?"
+      - "Entendido! Posso ajudar com mais algo?"

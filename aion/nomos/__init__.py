@@ -1,0 +1,67 @@
+"""NOMOS — Decision Engine. Escolhe rota, modelo, avalia contexto."""
+
+from __future__ import annotations
+
+import logging
+
+from aion.config import get_nomos_settings
+from aion.nomos.classifier import ComplexityClassifier
+from aion.nomos.registry import ModelRegistry
+from aion.nomos.router import Router
+from aion.shared.schemas import ChatCompletionRequest, PipelineContext
+
+logger = logging.getLogger("aion.nomos")
+
+
+class NomosModule:
+    """NOMOS pipeline module — classifies complexity and routes to best model."""
+
+    name = "nomos"
+
+    def __init__(self) -> None:
+        settings = get_nomos_settings()
+        self._registry = ModelRegistry(settings)
+        self._classifier = ComplexityClassifier()
+        self._router = Router(self._registry, self._classifier)
+        self._initialized = False
+
+    async def initialize(self) -> None:
+        if not self._initialized:
+            await self._registry.load()
+            self._initialized = True
+            logger.info("NOMOS initialized with %d models", self._registry.model_count)
+
+    async def process(
+        self, request: ChatCompletionRequest, context: PipelineContext
+    ) -> PipelineContext:
+        if not self._initialized:
+            await self.initialize()
+
+        route = self._router.route(request, context)
+
+        context.selected_model = route.model_name
+        context.selected_provider = route.provider
+        context.selected_base_url = route.base_url
+        context.metadata["complexity_score"] = route.complexity_score
+        context.metadata["route_reason"] = route.reason
+        context.metadata["estimated_cost"] = route.estimated_cost
+
+        logger.info(
+            "NOMOS route: model=%s provider=%s complexity=%.1f reason=%s",
+            route.model_name,
+            route.provider,
+            route.complexity_score,
+            route.reason,
+        )
+
+        return context
+
+
+_instance = None
+
+
+def get_module() -> NomosModule:
+    global _instance
+    if _instance is None:
+        _instance = NomosModule()
+    return _instance
