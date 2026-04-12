@@ -51,7 +51,9 @@ class ModuleStatus:
         self.consecutive_failures = 0
         if not self.healthy:
             self.healthy = True
-            logger.info("Module %s recovered", self.name)
+            logger.info(
+                '{"event":"module_recovered","module":"%s"}', self.name,
+            )
 
     def record_failure(self, reason: str) -> None:
         self.consecutive_failures += 1
@@ -59,10 +61,8 @@ class ModuleStatus:
         if self.consecutive_failures >= self.failure_threshold and self.healthy:
             self.healthy = False
             logger.warning(
-                "Module %s degraded after %d consecutive failures: %s",
-                self.name,
-                self.consecutive_failures,
-                reason,
+                '{"event":"module_degraded","module":"%s","failures":%d,"reason":"%s"}',
+                self.name, self.consecutive_failures, reason[:100],
             )
 
 
@@ -95,17 +95,25 @@ class Pipeline:
     def is_safe_mode(self) -> bool:
         return self._safe_mode
 
+    def _log_mode_transition(self, from_mode: str, to_mode: str, reason: str, actor: str = "system") -> None:
+        """Emit structured mode transition event."""
+        logger.warning(
+            '{"event":"mode_transition","from":"%s","to":"%s","reason":"%s","actor":"%s"}',
+            from_mode, to_mode, reason, actor,
+        )
+
     def activate_safe_mode(self, reason: str = "manual") -> None:
         """Kill switch — disable all modules, pure passthrough."""
+        prev_mode = "degraded" if any(not s.healthy for s in self._module_status.values()) else "normal"
         self._safe_mode = True
         self._safe_mode_reason = reason
-        logger.warning("SAFE_MODE activated: %s", reason)
+        self._log_mode_transition(prev_mode, "safe", reason)
 
     def deactivate_safe_mode(self) -> None:
         """Recover from safe mode."""
         self._safe_mode = False
         self._safe_mode_reason = ""
-        logger.info("SAFE_MODE deactivated")
+        self._log_mode_transition("safe", "normal", "manual_recovery")
 
     def get_health(self) -> dict:
         """Get health status per module."""

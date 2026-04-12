@@ -7,7 +7,7 @@ name = "aion"
 version = "0.1.0"
 description = "AION — Motor Realtime do Sentinela. Controla a IA em tempo real."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",

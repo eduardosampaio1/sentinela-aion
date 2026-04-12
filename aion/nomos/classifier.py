@@ -55,15 +55,11 @@ class ComplexityClassifier:
 
         Considers the last user message primarily, with context from history.
         """
-        # Get the last user message
+        # Get the last user message (supports both dict and object)
         user_message = ""
         for msg in reversed(messages):
-            if hasattr(msg, "role"):
-                role = msg.role
-                content = msg.content or ""
-            else:
-                role = msg.get("role", "")
-                content = msg.get("content", "") or ""
+            role = msg.role if hasattr(msg, "role") else msg.get("role", "")
+            content = (msg.content if hasattr(msg, "content") else msg.get("content", "")) or ""
             if role == "user":
                 user_message = content
                 break

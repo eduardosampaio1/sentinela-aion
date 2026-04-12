@@ -1,5 +1,6 @@
 # ESTIXE — Policy rules
 # Rules are evaluated in order. First "block" match stops evaluation.
+version: "1.0"
 
 policies:
   - name: block_prompt_injection

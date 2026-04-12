@@ -2,6 +2,7 @@
 # Add your own intents and examples below.
 # The classifier uses embedding similarity, so examples don't need to be exhaustive —
 # semantically similar inputs will be matched automatically.
+version: "1.0"
 
 intents:
   greeting:

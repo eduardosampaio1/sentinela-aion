@@ -1,4 +1,5 @@
 # NOMOS — Model registry
+version: "1.0"
 # Used by NOMOS to route requests to the best model based on complexity and cost.
 
 models:

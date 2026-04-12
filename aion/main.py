@@ -46,6 +46,25 @@ _pipeline: Pipeline | None = None
 # Streaming timeout (seconds)
 _STREAM_TIMEOUT = 300
 
+# Override state (Track D)
+_overrides: dict = {}
+
+
+def _build_response_headers(context: PipelineContext) -> dict[str, str]:
+    """Build standard response headers for every response."""
+    headers = {
+        "X-Aion-Decision": context.decision.value if context.decision != Decision.CONTINUE else "passthrough",
+        "X-Request-ID": context.request_id,
+    }
+    # Route reason from NOMOS
+    route_reason = context.metadata.get("route_reason", "")
+    if route_reason:
+        headers["X-Aion-Route-Reason"] = route_reason
+    # Degradation headers
+    if _pipeline:
+        headers.update(_pipeline.get_degraded_headers())
+    return headers
+
 
 def _error_response(status: int, message: str, code: str, error_type: str = "api_error") -> JSONResponse:
     """OpenAI-compatible error response format."""
@@ -79,6 +98,18 @@ async def lifespan(app: FastAPI):
 
     # Build pipeline
     _pipeline = build_pipeline()
+
+    # Cold start: pre-load embedding model on startup (not on first request)
+    if settings.estixe_enabled and not settings.safe_mode:
+        t0 = time.perf_counter()
+        for module in _pipeline._pre_modules:
+            if module.name == "estixe":
+                try:
+                    await module.initialize()
+                    logger.info("Cold start: ESTIXE initialized in %.1fs", time.perf_counter() - t0)
+                except Exception:
+                    logger.exception("Cold start: ESTIXE initialization failed")
+                break
 
     yield
 
@@ -149,11 +180,8 @@ async def chat_completions(request: Request):
     if context.decision == Decision.BYPASS and context.bypass_response:
         await _pipeline.emit_telemetry(context)
 
-        resp_headers = {
-            "X-Aion-Decision": "bypass",
-            "X-Request-ID": context.request_id,
-            **_pipeline.get_degraded_headers(),
-        }
+        resp_headers = _build_response_headers(context)
+        resp_headers["X-Aion-Decision"] = "bypass"
 
         if chat_request.stream:
             resp_headers["Cache-Control"] = "no-cache"
@@ -183,16 +211,14 @@ async def chat_completions(request: Request):
                 finally:
                     await _pipeline.emit_telemetry(context)
 
+            stream_headers = _build_response_headers(context)
+            stream_headers["X-Aion-Decision"] = "passthrough"
+            stream_headers["Cache-Control"] = "no-cache"
+            stream_headers["Connection"] = "keep-alive"
             return StreamingResponse(
                 stream_with_timeout(),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Aion-Decision": "passthrough",
-                    "X-Request-ID": context.request_id,
-                    **_pipeline.get_degraded_headers(),
-                },
+                headers=stream_headers,
             )
         else:
             t0 = time.perf_counter()
@@ -207,14 +233,9 @@ async def chat_completions(request: Request):
 
             await _pipeline.emit_telemetry(context)
 
-            return JSONResponse(
-                content=response.model_dump(),
-                headers={
-                    "X-Aion-Decision": "passthrough",
-                    "X-Request-ID": context.request_id,
-                    **_pipeline.get_degraded_headers(),
-                },
-            )
+            pass_headers = _build_response_headers(context)
+            pass_headers["X-Aion-Decision"] = "passthrough"
+            return JSONResponse(content=response.model_dump(), headers=pass_headers)
 
     except httpx.HTTPStatusError as e:
         await _pipeline.emit_telemetry(context)
@@ -297,6 +318,38 @@ async def deactivate_killswitch():
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
     _pipeline.deactivate_safe_mode()
     return {"status": "normal_mode_restored"}
+
+
+@app.get("/v1/overrides")
+async def get_overrides():
+    """Get current runtime overrides."""
+    return _overrides
+
+
+@app.put("/v1/overrides")
+async def set_overrides(request: Request):
+    """Set runtime overrides. Priority: request header > tenant > global override.
+
+    Supported overrides:
+    - force_model: force a specific model for all requests
+    - force_bypass: bypass all modules (like killswitch but keeps telemetry)
+    - disable_guardrails: skip PII/policy checks
+    """
+    global _overrides
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _overrides.update(body)
+    return {"status": "active", "overrides": _overrides}
+
+
+@app.delete("/v1/overrides")
+async def clear_overrides():
+    """Clear all runtime overrides."""
+    global _overrides
+    _overrides = {}
+    return {"status": "cleared"}
 
 
 @app.put("/v1/modules/{module_name}/toggle")

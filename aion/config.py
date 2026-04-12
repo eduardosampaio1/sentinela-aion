@@ -9,6 +9,10 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Resolve paths relative to the aion package directory, not cwd
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _PACKAGE_DIR.parent
+
 
 class FailMode(str, Enum):
     OPEN = "open"
@@ -52,8 +56,8 @@ class AionSettings(BaseSettings):
     tenant_header: str = "X-Aion-Tenant"
     default_tenant: str = "default"
 
-    # --- Paths ---
-    config_dir: Path = Path("config")
+    # --- Paths (resolved relative to project root) ---
+    config_dir: Path = _PROJECT_DIR / "config"
 
     # --- Circuit breaker ---
     circuit_breaker_threshold: int = 5
@@ -71,7 +75,7 @@ class EstixeSettings(BaseSettings):
     bypass_threshold: float = 0.85
     embedding_model: str = "all-MiniLM-L6-v2"
     max_tokens_per_request: int = 4096
-    intents_path: Path = Path("aion/estixe/data/intents.yaml")
+    intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
     cache_embeddings: bool = True
 
 
@@ -83,7 +87,7 @@ class NomosSettings(BaseSettings):
         extra="ignore",
     )
 
-    models_config_path: Path = Path("config/models.yaml")
+    models_config_path: Path = _PROJECT_DIR / "config" / "models.yaml"
     fallback_enabled: bool = True
     cost_optimization: bool = True
 
