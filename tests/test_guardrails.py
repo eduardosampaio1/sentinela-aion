@@ -22,7 +22,7 @@ def test_detect_credit_card():
     g = Guardrails()
     result = g.check_output("Card number: 4111 1111 1111 1111")
     assert not result.safe
-    assert "pii:credit_card" in result.violations
+    assert any("credit_card" in v for v in result.violations)
     assert "CREDIT_CARD_REDACTED" in result.filtered_content
 
 

@@ -1,18 +1,35 @@
-FROM python:3.11-slim AS base
+# ── Stage 1: Build dependencies ──
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build tools
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+
+# Copy only dependency definition first (layer caching)
+COPY pyproject.toml README.md ./
+
+# Install dependencies into a virtual env
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir .
+
+# ── Stage 2: Production image ──
+FROM python:3.11-slim AS production
 
 WORKDIR /app
 
-# Install system deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Copy virtual env from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python deps
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
+# Copy application code
+COPY aion/ ./aion/
+COPY config/ ./config/
 
-# Copy source
-COPY . .
+# Non-root user
+RUN useradd --create-home --shell /bin/bash aion
+USER aion
 
 EXPOSE 8080
 

@@ -178,6 +178,11 @@ class Pipeline:
         context.original_request = request
         context.modified_request = request.model_copy(deep=True)
 
+        # Tenant isolation: ensure context.tenant is set and immutable for this run
+        if not context.tenant:
+            context.tenant = "default"
+        _tenant_for_run = context.tenant  # captured — cannot be changed by modules
+
         # SAFE_MODE: skip everything
         if self._safe_mode:
             context.metadata["safe_mode"] = True
@@ -216,6 +221,14 @@ class Pipeline:
             finally:
                 elapsed_ms = (time.perf_counter() - t0) * 1000
                 context.module_latencies[module.name] = round(elapsed_ms, 2)
+
+        # Tenant isolation enforcement: ensure no module changed the tenant
+        if context.tenant != _tenant_for_run:
+            logger.error(
+                "TENANT ISOLATION VIOLATION: module changed tenant from '%s' to '%s' — reverting",
+                _tenant_for_run, context.tenant,
+            )
+            context.tenant = _tenant_for_run
 
         return context
 

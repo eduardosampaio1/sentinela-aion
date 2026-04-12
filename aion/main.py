@@ -17,7 +17,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from aion import __version__
 from aion.config import FailMode, get_settings
-from aion.middleware import AionSecurityMiddleware, get_audit_log, get_in_flight
+from aion.middleware import (
+    AionSecurityMiddleware,
+    audit,
+    get_audit_log,
+    get_in_flight,
+    get_overrides,
+    set_override,
+    clear_overrides,
+)
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import (
     build_bypass_stream,
@@ -321,34 +329,27 @@ async def deactivate_killswitch():
 
 
 @app.get("/v1/overrides")
-async def get_overrides():
+async def get_overrides_endpoint():
     """Get current runtime overrides."""
-    return _overrides
+    return get_overrides()
 
 
 @app.put("/v1/overrides")
-async def set_overrides(request: Request):
-    """Set runtime overrides. Priority: request header > tenant > global override.
-
-    Supported overrides:
-    - force_model: force a specific model for all requests
-    - force_bypass: bypass all modules (like killswitch but keeps telemetry)
-    - disable_guardrails: skip PII/policy checks
-    """
-    global _overrides
+async def set_overrides_endpoint(request: Request):
+    """Set runtime overrides. Priority: request header > tenant > global override."""
     try:
         body = await request.json()
     except Exception:
         body = {}
-    _overrides.update(body)
-    return {"status": "active", "overrides": _overrides}
+    for k, v in body.items():
+        set_override(k, v)
+    return {"status": "active", "overrides": get_overrides()}
 
 
 @app.delete("/v1/overrides")
-async def clear_overrides():
+async def clear_overrides_endpoint():
     """Clear all runtime overrides."""
-    global _overrides
-    _overrides = {}
+    clear_overrides()
     return {"status": "cleared"}
 
 
