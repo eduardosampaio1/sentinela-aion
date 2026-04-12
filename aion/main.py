@@ -26,6 +26,7 @@ from aion.middleware import (
     set_override,
     clear_overrides,
 )
+# Note: audit, get_audit_log, get_overrides, set_override, clear_overrides are all async now
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import (
     build_bypass_stream,
@@ -329,27 +330,33 @@ async def deactivate_killswitch():
 
 
 @app.get("/v1/overrides")
-async def get_overrides_endpoint():
-    """Get current runtime overrides."""
-    return get_overrides()
+async def get_overrides_endpoint(request: Request):
+    """Get current runtime overrides for tenant."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    return await get_overrides(tenant)
 
 
 @app.put("/v1/overrides")
 async def set_overrides_endpoint(request: Request):
     """Set runtime overrides. Priority: request header > tenant > global override."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     try:
         body = await request.json()
     except Exception:
         body = {}
     for k, v in body.items():
-        set_override(k, v)
-    return {"status": "active", "overrides": get_overrides()}
+        await set_override(k, v, tenant)
+    return {"status": "active", "overrides": await get_overrides(tenant)}
 
 
 @app.delete("/v1/overrides")
-async def clear_overrides_endpoint():
-    """Clear all runtime overrides."""
-    clear_overrides()
+async def clear_overrides_endpoint(request: Request):
+    """Clear all runtime overrides for tenant."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    await clear_overrides(tenant)
     return {"status": "cleared"}
 
 
@@ -403,9 +410,11 @@ async def list_models():
 
 
 @app.get("/v1/audit")
-async def audit_log(limit: int = 100):
-    """Get audit trail (Track E)."""
-    return get_audit_log(limit)
+async def audit_log_endpoint(request: Request, limit: int = 100):
+    """Get audit trail for tenant."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    return await get_audit_log(limit, tenant)
 
 
 # ──────────────────────────────────────────────

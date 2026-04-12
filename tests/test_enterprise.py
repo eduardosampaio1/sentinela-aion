@@ -144,8 +144,8 @@ class TestMiddlewareAuth:
         import aion.config
         aion.config._settings = None
         import aion.middleware
-        aion.middleware._STORE_INITIALIZED = False
-        aion.middleware._store = None
+        aion.middleware._redis_client = None
+        aion.middleware._redis_available = False
 
         from aion.main import app
         import aion.main as main_mod
@@ -158,7 +158,8 @@ class TestMiddlewareAuth:
 
         os.environ.pop("AION_ADMIN_KEY", None)
         aion.config._settings = None
-        aion.middleware._STORE_INITIALIZED = False
+        aion.middleware._redis_client = None
+        aion.middleware._redis_available = False
 
     @pytest.mark.asyncio
     async def test_admin_endpoint_requires_auth(self, client):
