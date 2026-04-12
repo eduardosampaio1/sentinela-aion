@@ -1,19 +1,23 @@
 """AION — Motor Realtime do Sentinela.
 
 FastAPI application serving as an OpenAI-compatible proxy gateway.
+Modes: Normal | Degraded | Safe (SAFE_MODE)
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from aion import __version__
 from aion.config import FailMode, get_settings
+from aion.middleware import AionSecurityMiddleware, get_audit_log, get_in_flight
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import (
     build_bypass_stream,
@@ -23,18 +27,32 @@ from aion.proxy import (
 )
 from aion.shared.schemas import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionChoice,
-    ChatMessage,
     Decision,
     PipelineContext,
 )
-from aion.shared.telemetry import get_recent_events, get_stats
+from aion.shared.telemetry import (
+    get_counters,
+    get_recent_events,
+    get_stats,
+    reset_counters,
+    shutdown_telemetry,
+)
 
 logger = logging.getLogger("aion")
 
 # --- Global state ---
 _pipeline: Pipeline | None = None
+
+# Streaming timeout (seconds)
+_STREAM_TIMEOUT = 300
+
+
+def _error_response(status: int, message: str, code: str, error_type: str = "api_error") -> JSONResponse:
+    """OpenAI-compatible error response format."""
+    return JSONResponse(
+        status_code=status,
+        content={"error": {"message": message, "type": error_type, "code": code}},
+    )
 
 
 @asynccontextmanager
@@ -42,11 +60,12 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown."""
     global _pipeline
 
-    # Configure logging
+    # Configure structured JSON logging (Track B)
     settings = get_settings()
+    log_format = '{"time":"%(asctime)s","name":"%(name)s","level":"%(levelname)s","message":"%(message)s"}'
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        format=log_format,
     )
 
     logger.info("AION v%s starting on port %d", __version__, settings.port)
@@ -63,17 +82,21 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # Graceful shutdown: flush telemetry, close clients
+    await shutdown_telemetry()
     await shutdown_client()
     logger.info("AION shutdown complete")
 
 
 app = FastAPI(
     title="AION",
-    description="Motor Realtime do Sentinela — controla a IA em tempo real",
+    description="Motor Realtime do Sentinela — AI Control Plane",
     version=__version__,
     lifespan=lifespan,
 )
+
+# Register security middleware (Track A1)
+app.add_middleware(AionSecurityMiddleware)
 
 
 # ──────────────────────────────────────────────
@@ -88,6 +111,12 @@ async def chat_completions(request: Request):
 
     # Parse request body
     body = await request.json()
+
+    # Validate message count (Track A1)
+    messages = body.get("messages", [])
+    if len(messages) > 100:
+        return _error_response(400, "Too many messages (max 100)", "too_many_messages", "invalid_request")
+
     chat_request = ChatCompletionRequest(**body)
 
     # Resolve tenant
@@ -96,7 +125,7 @@ async def chat_completions(request: Request):
     # Build pipeline context
     context = PipelineContext(tenant=tenant)
 
-    # Ensure pipeline is initialized (handles test environment where lifespan may not run)
+    # Ensure pipeline is initialized
     global _pipeline
     if _pipeline is None:
         _pipeline = build_pipeline()
@@ -105,129 +134,147 @@ async def chat_completions(request: Request):
     try:
         context = await _pipeline.run_pre(chat_request, context)
     except Exception:
-        logger.exception("Pipeline pre-LLM failed")
+        logger.exception("Pipeline pre-LLM failed (request_id=%s)", context.request_id)
         if settings.fail_mode == FailMode.CLOSED:
-            raise HTTPException(status_code=503, detail="AION pipeline error (fail-closed)")
-        # fail-open: proceed as if no modules exist
+            return _error_response(503, "AION pipeline error (fail-closed)", "pipeline_error")
         context.decision = Decision.CONTINUE
 
     # --- Handle BLOCK ---
     if context.decision == Decision.BLOCK:
         reason = context.metadata.get("block_reason", "Request blocked by policy")
         await _pipeline.emit_telemetry(context)
-        raise HTTPException(status_code=403, detail=reason)
+        return _error_response(403, reason, "blocked_by_policy", "policy_error")
 
     # --- Handle BYPASS ---
     if context.decision == Decision.BYPASS and context.bypass_response:
         await _pipeline.emit_telemetry(context)
 
+        resp_headers = {
+            "X-Aion-Decision": "bypass",
+            "X-Request-ID": context.request_id,
+            **_pipeline.get_degraded_headers(),
+        }
+
         if chat_request.stream:
-            stream_headers = {
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Aion-Decision": "bypass",
-                "X-Request-ID": context.request_id,
-                **_pipeline.get_degraded_headers(),
-            }
+            resp_headers["Cache-Control"] = "no-cache"
+            resp_headers["Connection"] = "keep-alive"
             return StreamingResponse(
                 build_bypass_stream(context.bypass_response),
                 media_type="text/event-stream",
-                headers=stream_headers,
+                headers=resp_headers,
             )
 
-        resp_headers = {"X-Aion-Decision": "bypass", "X-Request-ID": context.request_id}
-        resp_headers.update(_pipeline.get_degraded_headers())
-        return JSONResponse(
-            content=context.bypass_response.model_dump(),
-            headers=resp_headers,
-        )
+        return JSONResponse(content=context.bypass_response.model_dump(), headers=resp_headers)
 
     # --- Forward to LLM ---
     effective_request = context.modified_request or chat_request
 
     try:
         if chat_request.stream:
-            # Streaming mode
-            async def stream_with_telemetry():
-                async for chunk in forward_request_stream(
-                    effective_request, context, settings
-                ):
-                    yield chunk
-                await _pipeline.emit_telemetry(context)
+            async def stream_with_timeout():
+                try:
+                    async with asyncio.timeout(_STREAM_TIMEOUT):
+                        async for chunk in forward_request_stream(
+                            effective_request, context, settings
+                        ):
+                            yield chunk
+                except asyncio.TimeoutError:
+                    logger.warning("Stream timeout after %ds (request_id=%s)", _STREAM_TIMEOUT, context.request_id)
+                finally:
+                    await _pipeline.emit_telemetry(context)
 
-            pass_stream_headers = {
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Aion-Decision": "passthrough",
-                "X-Request-ID": context.request_id,
-                **_pipeline.get_degraded_headers(),
-            }
             return StreamingResponse(
-                stream_with_telemetry(),
+                stream_with_timeout(),
                 media_type="text/event-stream",
-                headers=pass_stream_headers,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Aion-Decision": "passthrough",
+                    "X-Request-ID": context.request_id,
+                    **_pipeline.get_degraded_headers(),
+                },
             )
         else:
-            # Batch mode
             t0 = time.perf_counter()
             response = await forward_request(effective_request, context, settings)
             llm_latency = (time.perf_counter() - t0) * 1000
             context.module_latencies["llm"] = round(llm_latency, 2)
 
-            # Run post-LLM pipeline
             try:
                 response = await _pipeline.run_post(response, context)
             except Exception:
-                logger.exception("Pipeline post-LLM failed")
-                # fail-open: return original response
+                logger.exception("Pipeline post-LLM failed (request_id=%s)", context.request_id)
 
             await _pipeline.emit_telemetry(context)
 
-            pass_headers = {
-                "X-Aion-Decision": "passthrough",
-                "X-Request-ID": context.request_id,
-                **_pipeline.get_degraded_headers(),
-            }
             return JSONResponse(
                 content=response.model_dump(),
-                headers=pass_headers,
+                headers={
+                    "X-Aion-Decision": "passthrough",
+                    "X-Request-ID": context.request_id,
+                    **_pipeline.get_degraded_headers(),
+                },
             )
 
     except httpx.HTTPStatusError as e:
         await _pipeline.emit_telemetry(context)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        return _error_response(e.response.status_code, str(e), "llm_error", "upstream_error")
     except Exception:
-        logger.exception("LLM forward failed")
+        logger.exception("LLM forward failed (request_id=%s)", context.request_id)
         await _pipeline.emit_telemetry(context)
-        raise HTTPException(status_code=502, detail="Failed to reach LLM provider")
+        return _error_response(502, "Failed to reach LLM provider", "llm_unreachable", "upstream_error")
 
 
 # ──────────────────────────────────────────────
-# AION management endpoints
+# Health & Observability
 # ──────────────────────────────────────────────
 
 
 @app.get("/health")
 async def health():
     if not _pipeline:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "unhealthy", "reason": "pipeline_not_initialized"},
-        )
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "reason": "pipeline_not_initialized"})
 
     health_data = _pipeline.get_health()
     health_data["version"] = __version__
     health_data["active_modules"] = _pipeline.active_modules
+    health_data["requests_in_flight"] = get_in_flight()
 
     mode = health_data.get("mode", "unknown")
-    if mode == "normal":
-        return JSONResponse(status_code=200, content=health_data)
-    elif mode == "degraded":
-        return JSONResponse(status_code=207, content=health_data)
-    elif mode == "safe":
-        return JSONResponse(status_code=207, content=health_data)
-    else:
-        return JSONResponse(status_code=503, content=health_data)
+    status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503
+    return JSONResponse(status_code=status, content=health_data)
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus-compatible metrics (Track B)."""
+    counters = get_counters()
+    lines = []
+    lines.append(f'# HELP aion_requests_total Total requests processed')
+    lines.append(f'# TYPE aion_requests_total counter')
+    lines.append(f'aion_requests_total {counters["requests_total"]}')
+
+    for decision in ("bypass", "block", "passthrough", "fallback"):
+        key = f"{decision}_total"
+        lines.append(f'aion_decisions_total{{decision="{decision}"}} {counters.get(key, 0)}')
+
+    lines.append(f'aion_errors_total {counters.get("errors_total", 0)}')
+    lines.append(f'aion_tokens_saved_total {counters.get("tokens_saved_total", 0)}')
+    lines.append(f'aion_cost_saved_total {counters.get("cost_saved_total", 0)}')
+    lines.append(f'aion_buffer_size {counters.get("buffer_size", 0)}')
+    lines.append(f'aion_requests_in_flight {get_in_flight()}')
+
+    if "latency_p50_ms" in counters:
+        lines.append(f'aion_pipeline_latency_ms{{quantile="0.5"}} {counters["latency_p50_ms"]}')
+        lines.append(f'aion_pipeline_latency_ms{{quantile="0.95"}} {counters["latency_p95_ms"]}')
+        lines.append(f'aion_pipeline_latency_ms{{quantile="0.99"}} {counters["latency_p99_ms"]}')
+
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain")
+
+
+# ──────────────────────────────────────────────
+# Control Plane (Track D)
+# ──────────────────────────────────────────────
 
 
 @app.put("/v1/killswitch")
@@ -235,7 +282,10 @@ async def activate_killswitch(request: Request):
     """Activate SAFE_MODE — all modules bypassed, pure passthrough."""
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
-    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     reason = body.get("reason", "manual")
     _pipeline.activate_safe_mode(reason)
     return {"status": "safe_mode_active", "reason": reason}
@@ -243,11 +293,39 @@ async def activate_killswitch(request: Request):
 
 @app.delete("/v1/killswitch")
 async def deactivate_killswitch():
-    """Deactivate SAFE_MODE — restore normal operation."""
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
     _pipeline.deactivate_safe_mode()
     return {"status": "normal_mode_restored"}
+
+
+@app.put("/v1/modules/{module_name}/toggle")
+async def toggle_module(module_name: str, request: Request):
+    """Toggle a module on/off at runtime (Track D)."""
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+
+    status = _pipeline._module_status.get(module_name)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Module '{module_name}' not found")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enabled = body.get("enabled", not status.healthy)  # toggle if not specified
+    status.healthy = enabled
+    if not enabled:
+        status.consecutive_failures = status.failure_threshold  # force degraded
+    else:
+        status.consecutive_failures = 0
+
+    return {"module": module_name, "enabled": enabled}
+
+
+# ──────────────────────────────────────────────
+# Stats & Events
+# ──────────────────────────────────────────────
 
 
 @app.get("/v1/stats")
@@ -266,52 +344,57 @@ async def events(request: Request, limit: int = 100):
 
 @app.get("/v1/models")
 async def list_models():
-    """List available models (no credentials exposed)."""
     settings = get_settings()
-    models = [
-        {
-            "id": settings.default_model,
-            "provider": settings.default_provider,
-            "type": "default",
-        }
-    ]
-    return {"models": models}
+    return {"models": [{"id": settings.default_model, "provider": settings.default_provider, "type": "default"}]}
+
+
+@app.get("/v1/audit")
+async def audit_log(limit: int = 100):
+    """Get audit trail (Track E)."""
+    return get_audit_log(limit)
+
+
+# ──────────────────────────────────────────────
+# Module management
+# ──────────────────────────────────────────────
 
 
 @app.post("/v1/estixe/intents/reload")
 async def reload_intents():
-    """Hot-reload ESTIXE intents."""
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
-
     for module in _pipeline._pre_modules:
         if module.name == "estixe":
             await module._classifier.reload()
-            return {
-                "status": "reloaded",
-                "intents": module._classifier.intent_count,
-                "examples": module._classifier.example_count,
-            }
+            return {"status": "reloaded", "intents": module._classifier.intent_count, "examples": module._classifier.example_count}
+    raise HTTPException(status_code=404, detail="ESTIXE not active")
 
+
+@app.post("/v1/estixe/policies/reload")
+async def reload_policies():
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    for module in _pipeline._pre_modules:
+        if module.name == "estixe":
+            await module._policy.reload()
+            return {"status": "reloaded", "rules": module._policy.rule_count}
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 
 @app.get("/v1/behavior")
 async def get_behavior(request: Request):
-    """Get current behavior dial settings."""
     from aion.metis.behavior import BehaviorDial
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     dial = BehaviorDial()
     config = await dial.get(tenant)
     if config is None:
-        return {"tenant": tenant, "behavior": None, "message": "No behavior configured"}
+        return {"tenant": tenant, "behavior": None}
     return {"tenant": tenant, "behavior": config.model_dump()}
 
 
 @app.put("/v1/behavior")
 async def set_behavior(request: Request):
-    """Set behavior dial — takes effect immediately, no deploy needed."""
     from aion.metis.behavior import BehaviorConfig, BehaviorDial
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
@@ -324,7 +407,6 @@ async def set_behavior(request: Request):
 
 @app.delete("/v1/behavior")
 async def delete_behavior(request: Request):
-    """Remove behavior dial — revert to default LLM behavior."""
     from aion.metis.behavior import BehaviorDial
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
@@ -333,21 +415,32 @@ async def delete_behavior(request: Request):
     return {"tenant": tenant, "status": "removed"}
 
 
-@app.post("/v1/estixe/policies/reload")
-async def reload_policies():
-    """Hot-reload ESTIXE policies."""
-    if not _pipeline:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
-
-    for module in _pipeline._pre_modules:
-        if module.name == "estixe":
-            await module._policy.reload()
-            return {"status": "reloaded", "rules": module._policy.rule_count}
-
-    raise HTTPException(status_code=404, detail="ESTIXE not active")
-
-
 # ──────────────────────────────────────────────
-# Import guard for httpx
+# Data Management (Track E — LGPD)
 # ──────────────────────────────────────────────
-import httpx  # noqa: E402
+
+
+@app.delete("/v1/data/{tenant}")
+async def delete_tenant_data(tenant: str):
+    """Delete all data for a tenant (LGPD compliance)."""
+    from aion.metis.behavior import BehaviorDial
+
+    # Clear behavior
+    dial = BehaviorDial()
+    await dial.delete(tenant)
+
+    # Clear telemetry events for this tenant
+    from aion.shared.telemetry import _event_buffer
+    original_len = len(_event_buffer)
+    # Filter in-place
+    for _ in range(original_len):
+        if _event_buffer:
+            event = _event_buffer.popleft()
+            if event.get("tenant") != tenant:
+                _event_buffer.append(event)
+
+    return {"tenant": tenant, "status": "deleted"}
+
+
+# Import for Response type
+from starlette.responses import Response  # noqa: E402

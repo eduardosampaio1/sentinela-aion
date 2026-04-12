@@ -1,15 +1,11 @@
 """Behavior Dial — parametric control of AI behavior in real-time.
 
-Dimensions:
-- objectivity: 0 (consultive) to 100 (minimal)
-- density: 0 (detailed) to 100 (telegraphic)
-- explanation: 0 (didactic) to 100 (no explanation)
-- cost_target: "free" | "low" | "medium" | "high"
-- formality: 0 (formal) to 100 (casual)
+Storage: Redis (if configured) with in-memory fallback.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -19,8 +15,10 @@ from aion.shared.schemas import ChatCompletionRequest, ChatMessage
 
 logger = logging.getLogger("aion.metis.behavior")
 
-# In-memory behavior storage per tenant (Redis in production)
+# In-memory fallback (used when Redis unavailable)
 _behavior_store: dict[str, "BehaviorConfig"] = {}
+_redis_client = None
+_redis_available = False
 
 
 class BehaviorConfig(BaseModel):
@@ -32,21 +30,78 @@ class BehaviorConfig(BaseModel):
     formality: int = Field(default=50, ge=0, le=100)
 
 
+async def _get_redis():
+    """Get or create Redis client (lazy init)."""
+    global _redis_client, _redis_available
+    if _redis_client is not None:
+        return _redis_client if _redis_available else None
+
+    from aion.config import get_settings
+    settings = get_settings()
+    if not settings.redis_url:
+        _redis_available = False
+        return None
+
+    try:
+        import redis.asyncio as aioredis
+        _redis_client = aioredis.from_url(
+            settings.redis_url, decode_responses=True, socket_timeout=2.0
+        )
+        await _redis_client.ping()
+        _redis_available = True
+        logger.info("Behavior store: Redis connected")
+        return _redis_client
+    except Exception:
+        _redis_available = False
+        logger.warning("Behavior store: Redis unavailable, using in-memory fallback")
+        return None
+
+
 class BehaviorDial:
-    """Manages behavior settings per tenant and translates them to system instructions."""
+    """Manages behavior settings per tenant. Redis with local fallback."""
+
+    _REDIS_PREFIX = "aion:behavior:"
+    _REDIS_TTL = 86400 * 7  # 7 days
 
     async def get(self, tenant: str = "default") -> Optional[BehaviorConfig]:
-        """Get behavior config for tenant."""
+        r = await _get_redis()
+        if r:
+            try:
+                data = await r.get(f"{self._REDIS_PREFIX}{tenant}")
+                if data:
+                    return BehaviorConfig(**json.loads(data))
+                return None
+            except Exception:
+                logger.warning("Redis read failed, falling back to local")
+
         return _behavior_store.get(tenant)
 
     async def set(self, config: BehaviorConfig, tenant: str = "default") -> None:
-        """Set behavior config for tenant. Takes effect immediately."""
+        # Always write to local (fallback)
         _behavior_store[tenant] = config
-        logger.info("Behavior updated for tenant '%s': %s", tenant, config.model_dump())
+
+        r = await _get_redis()
+        if r:
+            try:
+                await r.setex(
+                    f"{self._REDIS_PREFIX}{tenant}",
+                    self._REDIS_TTL,
+                    json.dumps(config.model_dump()),
+                )
+            except Exception:
+                logger.warning("Redis write failed, stored locally only")
+
+        logger.info("Behavior updated for tenant '%s' (%d fields)", tenant, len(config.model_dump()))
 
     async def delete(self, tenant: str = "default") -> None:
-        """Remove behavior config for tenant."""
         _behavior_store.pop(tenant, None)
+
+        r = await _get_redis()
+        if r:
+            try:
+                await r.delete(f"{self._REDIS_PREFIX}{tenant}")
+            except Exception:
+                pass
 
     def apply_to_request(
         self, request: ChatCompletionRequest, config: BehaviorConfig
@@ -58,7 +113,6 @@ class BehaviorDial:
 
         modified = request.model_copy(deep=True)
 
-        # Find or create system message
         system_found = False
         for msg in modified.messages:
             if msg.role == "system":
@@ -75,43 +129,33 @@ class BehaviorDial:
 
     @staticmethod
     def _build_instructions(config: BehaviorConfig) -> str:
-        """Translate behavior config into natural language instructions."""
         parts = []
 
-        # Objectivity
         if config.objectivity >= 80:
             parts.append(
                 "Be extremely concise and direct. No filler words, no pleasantries, "
                 "no unnecessary context. Answer in the minimum number of words possible."
             )
         elif config.objectivity >= 60:
-            parts.append(
-                "Be direct and objective. Avoid unnecessary elaboration."
-            )
+            parts.append("Be direct and objective. Avoid unnecessary elaboration.")
         elif config.objectivity <= 20:
-            parts.append(
-                "Be thorough and consultative. Explain your reasoning and provide context."
-            )
+            parts.append("Be thorough and consultative. Explain your reasoning and provide context.")
 
-        # Density
         if config.density >= 80:
             parts.append("Use telegraphic style. Bullet points preferred over paragraphs.")
         elif config.density >= 60:
             parts.append("Keep responses compact. Prefer short paragraphs.")
 
-        # Explanation
         if config.explanation >= 80:
             parts.append("Do not explain your reasoning. Just give the answer.")
         elif config.explanation <= 20:
             parts.append("Explain your reasoning step by step.")
 
-        # Formality
         if config.formality >= 80:
             parts.append("Use casual, informal language.")
         elif config.formality <= 20:
             parts.append("Use formal, professional language.")
 
-        # Cost target
         if config.cost_target == "low":
             parts.append("Keep your response under 100 words.")
         elif config.cost_target == "free":

@@ -45,6 +45,9 @@ class AionSettings(BaseSettings):
     # --- ARGOS integration (optional) ---
     argos_telemetry_url: Optional[str] = Field(default=None, alias="ARGOS_TELEMETRY_URL")
 
+    # --- Auth ---
+    admin_key: str = ""  # Comma-separated keys for rotation: "key1,key2"
+
     # --- Multi-tenancy ---
     tenant_header: str = "X-Aion-Tenant"
     default_tenant: str = "default"

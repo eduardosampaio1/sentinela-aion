@@ -43,14 +43,9 @@ class PromptCompressor:
         return compressed
 
     def count_tokens(self, request: ChatCompletionRequest) -> int:
-        """Estimate total tokens in a request (rough but fast)."""
-        total = 0
-        for msg in request.messages:
-            if msg.content:
-                # ~4 chars per token for English, ~3 for Portuguese
-                total += len(msg.content) // 3
-            total += 4  # overhead per message (role, etc)
-        return max(1, total)
+        """Count tokens using shared utility (tiktoken if available)."""
+        from aion.shared.tokens import count_tokens_request
+        return count_tokens_request(request)
 
     @staticmethod
     def _clean_whitespace(message: ChatMessage) -> ChatMessage:

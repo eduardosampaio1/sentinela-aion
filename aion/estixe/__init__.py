@@ -7,8 +7,10 @@ import logging
 from aion.config import get_estixe_settings
 from aion.estixe.bypass import BypassEngine
 from aion.estixe.classifier import SemanticClassifier
+from aion.estixe.guardrails import Guardrails
 from aion.estixe.policy import PolicyEngine
 from aion.shared.schemas import ChatCompletionRequest, PipelineContext
+from aion.shared.tokens import extract_user_message
 
 logger = logging.getLogger("aion.estixe")
 
@@ -23,6 +25,7 @@ class EstixeModule:
         self._classifier = SemanticClassifier(settings)
         self._bypass = BypassEngine(self._classifier)
         self._policy = PolicyEngine()
+        self._guardrails = Guardrails()
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -38,10 +41,21 @@ class EstixeModule:
         if not self._initialized:
             await self.initialize()
 
-        # Extract user message (last user message in the conversation)
-        user_message = self._extract_user_message(request)
+        # Extract user message using shared utility
+        user_message = extract_user_message(request)
         if not user_message:
             return context
+
+        # 0. PII guard on INPUT (not just output) — Track A1
+        input_check = self._guardrails.check_output(user_message)
+        if not input_check.safe:
+            logger.warning("PII detected in user input: %d violations", len(input_check.violations))
+            # Sanitize input before proceeding
+            for msg in context.modified_request.messages:
+                if msg.role == "user" and msg.content == user_message:
+                    msg.content = input_check.filtered_content
+                    break
+            user_message = input_check.filtered_content
 
         # 1. Policy check (block dangerous content)
         policy_result = await self._policy.check(user_message, context)
@@ -65,12 +79,6 @@ class EstixeModule:
 
         return context
 
-    @staticmethod
-    def _extract_user_message(request: ChatCompletionRequest) -> str | None:
-        for msg in reversed(request.messages):
-            if msg.role == "user" and msg.content:
-                return msg.content
-        return None
 
 
 _instance = None

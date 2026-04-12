@@ -6,8 +6,9 @@ from aion.nomos.registry import ModelConfig
 
 
 def estimate_prompt_tokens(text: str) -> int:
-    """Rough token estimate (~4 chars per token for English, ~3 for Portuguese)."""
-    return max(1, len(text) // 3)
+    """Count tokens using shared utility (tiktoken if available)."""
+    from aion.shared.tokens import count_tokens_text
+    return count_tokens_text(text)
 
 
 def estimate_request_cost(

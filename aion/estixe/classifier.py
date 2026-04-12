@@ -6,7 +6,9 @@ configurable deterministic intents by comparing embeddings with cosine similarit
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -15,6 +17,8 @@ import numpy as np
 import yaml
 
 from aion.config import EstixeSettings
+
+_LRU_MAX_SIZE = 5000
 
 logger = logging.getLogger("aion.estixe.classifier")
 
@@ -46,7 +50,7 @@ class SemanticClassifier:
         self._settings = settings
         self._model = None
         self._intents: list[IntentDefinition] = []
-        self._embedding_cache: dict[str, np.ndarray] = {}
+        self._embedding_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 
     async def load(self) -> None:
         """Load the embedding model and intent definitions."""
@@ -109,16 +113,21 @@ class SemanticClassifier:
         if not self._model or not self._intents:
             return None
 
-        # Get or cache embedding for input text
+        # Get or cache embedding for input text (LRU + hashed keys for privacy)
         text_lower = text.strip().lower()
-        if text_lower in self._embedding_cache:
-            input_embedding = self._embedding_cache[text_lower]
+        cache_key = hashlib.sha256(text_lower.encode()).hexdigest()
+        if cache_key in self._embedding_cache:
+            self._embedding_cache.move_to_end(cache_key)
+            input_embedding = self._embedding_cache[cache_key]
         else:
             input_embedding = self._model.encode(
                 [text_lower], convert_to_numpy=True, normalize_embeddings=True
             )[0]
             if self._settings.cache_embeddings:
-                self._embedding_cache[text_lower] = input_embedding
+                self._embedding_cache[cache_key] = input_embedding
+                # LRU eviction
+                while len(self._embedding_cache) > _LRU_MAX_SIZE:
+                    self._embedding_cache.popitem(last=False)
 
         best_match: Optional[IntentMatch] = None
         best_confidence = 0.0

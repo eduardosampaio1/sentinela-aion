@@ -264,13 +264,23 @@ class Pipeline:
 
         total_latency = sum(context.module_latencies.values())
 
+        # Calculate cost_saved if NOMOS routed to a different model
+        cost_saved = 0.0
+        estimated_cost = context.metadata.get("estimated_cost", 0.0)
+        if context.selected_model and estimated_cost > 0:
+            # cost_saved is the difference vs the default model
+            cost_saved = max(0.0, context.metadata.get("default_cost", 0.0) - estimated_cost)
+
+        tokens_saved = max(0, context.tokens_before - context.tokens_after)
+
         event = TelemetryEvent(
             event_type=decision_str,
             module=module_that_decided,
             request_id=context.request_id,
             decision=decision_str,
             model_used=context.selected_model or "",
-            tokens_saved=max(0, context.tokens_before - context.tokens_after),
+            tokens_saved=tokens_saved,
+            cost_saved=cost_saved,
             latency_ms=round(total_latency, 2),
             tenant=context.tenant,
             metadata={
@@ -278,6 +288,8 @@ class Pipeline:
                 "safe_mode": context.metadata.get("safe_mode", False),
                 "skipped_modules": context.metadata.get("skipped_modules", []),
                 "failed_modules": context.metadata.get("failed_modules", []),
+                "complexity_score": context.metadata.get("complexity_score", 0),
+                "route_reason": context.metadata.get("route_reason", ""),
             },
         )
         await emit(event)
