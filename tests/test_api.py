@@ -42,11 +42,17 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_health(client):
+    # Ensure pipeline is initialized
+    import aion.main as main_mod
+    from aion.pipeline import build_pipeline
+    if main_mod._pipeline is None:
+        main_mod._pipeline = build_pipeline()
+
     resp = await client.get("/health")
-    assert resp.status_code == 200
+    assert resp.status_code in (200, 207)  # 200=normal, 207=degraded/safe
     data = resp.json()
-    assert data["status"] == "ok"
     assert "version" in data
+    assert "mode" in data
 
 
 @pytest.mark.asyncio

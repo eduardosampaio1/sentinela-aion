@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14B8A6"/>
+      <stop offset="100%" stop-color="#0F766E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- AION cycle — the eternal ring -->
+  <!-- Gap at top-right = the moment before the next cycle begins -->
+  <circle cx="256" cy="256" r="220" stroke="url(#ringGrad)" stroke-width="28" fill="none"
+          stroke-dasharray="1320 62" stroke-dashoffset="-31" stroke-linecap="round"/>
+
+  <!-- Inner flow — 3 arcs representing the pipeline: decide → control → optimize -->
+  <!-- Arc 1: Decide (top-left) -->
+  <path d="M160 132 A148 148 0 0 1 352 132"
+        stroke="#2DD4BF" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Arc 2: Control (bottom-right) -->
+  <path d="M352 380 A148 148 0 0 1 160 380"
+        stroke="#2DD4BF" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Decision node — the core (where AION intercepts) -->
+  <circle cx="256" cy="256" r="36" fill="#0F766E"/>
+  <circle cx="256" cy="256" r="36" stroke="#14B8A6" stroke-width="3" fill="none"/>
+
+  <!-- Inner pulse — "alive", processing -->
+  <circle cx="256" cy="256" r="14" fill="#14B8A6"/>
+
+  <!-- 3 flow nodes on the ring — entry points of the cycle -->
+  <!-- Top: input arrives -->
+  <circle cx="256" cy="36" r="10" fill="#14B8A6"/>
+  <!-- Bottom-left: decision made -->
+  <circle cx="66" cy="366" r="10" fill="#14B8A6" opacity="0.7"/>
+  <!-- Bottom-right: output optimized -->
+  <circle cx="446" cy="366" r="10" fill="#14B8A6" opacity="0.7"/>
+
+  <!-- Connecting lines — from ring nodes to center (the intercept) -->
+  <line x1="256" y1="56" x2="256" y2="220" stroke="#2DD4BF" stroke-width="2" opacity="0.3"/>
+  <line x1="82" y1="356" x2="228" y2="274" stroke="#2DD4BF" stroke-width="2" opacity="0.2"/>
+  <line x1="430" y1="356" x2="284" y2="274" stroke="#2DD4BF" stroke-width="2" opacity="0.2"/>
+</svg>

@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Colors — Dark Command Center */
+  --color-primary: #14B8A6;
+  --color-secondary: #2DD4BF;
+  --color-cta: #0EA5E9;
+  --color-bg: #0B1120;
+  --color-surface: #141B2D;
+  --color-surface-alt: #1A2236;
+  --color-text: #E2E8F0;
+  --color-text-muted: #64748B;
+  --color-border: #1E293B;
+  --color-success: #22C55E;
+  --color-warning: #EAB308;
+  --color-error: #EF4444;
+
+  /* Fonts */
+  --font-heading: var(--font-fira-code);
+  --font-body: var(--font-fira-sans);
+  --font-mono: var(--font-fira-code);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.5);
+  --shadow-xl: 0 20px 25px rgba(0,0,0,0.6);
+}
+
+:root {
+  --sidebar-width: 240px;
+  --sidebar-collapsed: 64px;
+  --topbar-height: 56px;
+}
+
+body {
+  font-family: var(--font-body), system-ui, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

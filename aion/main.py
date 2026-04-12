@@ -122,19 +122,24 @@ async def chat_completions(request: Request):
         await _pipeline.emit_telemetry(context)
 
         if chat_request.stream:
+            stream_headers = {
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Aion-Decision": "bypass",
+                "X-Request-ID": context.request_id,
+                **_pipeline.get_degraded_headers(),
+            }
             return StreamingResponse(
                 build_bypass_stream(context.bypass_response),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Aion-Decision": "bypass",
-                },
+                headers=stream_headers,
             )
 
+        resp_headers = {"X-Aion-Decision": "bypass", "X-Request-ID": context.request_id}
+        resp_headers.update(_pipeline.get_degraded_headers())
         return JSONResponse(
             content=context.bypass_response.model_dump(),
-            headers={"X-Aion-Decision": "bypass"},
+            headers=resp_headers,
         )
 
     # --- Forward to LLM ---
@@ -150,14 +155,17 @@ async def chat_completions(request: Request):
                     yield chunk
                 await _pipeline.emit_telemetry(context)
 
+            pass_stream_headers = {
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Aion-Decision": "passthrough",
+                "X-Request-ID": context.request_id,
+                **_pipeline.get_degraded_headers(),
+            }
             return StreamingResponse(
                 stream_with_telemetry(),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Aion-Decision": "passthrough",
-                },
+                headers=pass_stream_headers,
             )
         else:
             # Batch mode
@@ -175,9 +183,14 @@ async def chat_completions(request: Request):
 
             await _pipeline.emit_telemetry(context)
 
+            pass_headers = {
+                "X-Aion-Decision": "passthrough",
+                "X-Request-ID": context.request_id,
+                **_pipeline.get_degraded_headers(),
+            }
             return JSONResponse(
                 content=response.model_dump(),
-                headers={"X-Aion-Decision": "passthrough"},
+                headers=pass_headers,
             )
 
     except httpx.HTTPStatusError as e:
@@ -196,11 +209,45 @@ async def chat_completions(request: Request):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "version": __version__,
-        "modules": _pipeline.active_modules if _pipeline else [],
-    }
+    if not _pipeline:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "reason": "pipeline_not_initialized"},
+        )
+
+    health_data = _pipeline.get_health()
+    health_data["version"] = __version__
+    health_data["active_modules"] = _pipeline.active_modules
+
+    mode = health_data.get("mode", "unknown")
+    if mode == "normal":
+        return JSONResponse(status_code=200, content=health_data)
+    elif mode == "degraded":
+        return JSONResponse(status_code=207, content=health_data)
+    elif mode == "safe":
+        return JSONResponse(status_code=207, content=health_data)
+    else:
+        return JSONResponse(status_code=503, content=health_data)
+
+
+@app.put("/v1/killswitch")
+async def activate_killswitch(request: Request):
+    """Activate SAFE_MODE — all modules bypassed, pure passthrough."""
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    reason = body.get("reason", "manual")
+    _pipeline.activate_safe_mode(reason)
+    return {"status": "safe_mode_active", "reason": reason}
+
+
+@app.delete("/v1/killswitch")
+async def deactivate_killswitch():
+    """Deactivate SAFE_MODE — restore normal operation."""
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    _pipeline.deactivate_safe_mode()
+    return {"status": "normal_mode_restored"}
 
 
 @app.get("/v1/stats")

@@ -27,6 +27,7 @@ class AionSettings(BaseSettings):
     port: int = 8080
     fail_mode: FailMode = FailMode.OPEN
     log_level: str = "info"
+    safe_mode: bool = False  # Kill switch: bypass all modules, pure passthrough
 
     # --- Module toggles ---
     estixe_enabled: bool = True
