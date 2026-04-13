@@ -27,3 +27,12 @@ policies:
     action: transform
     pattern: "\\s{3,}"
     replacement: " "
+
+# PII policies — per-tenant overrides for PII handling.
+# Actions: allow | mask | block | audit
+# Default action applies to any PII type not listed in rules.
+pii_defaults:
+  default_action: mask
+  rules: {}
+  # Example per-tenant overrides (set via PUT /v1/overrides):
+  # {"pii_policy": {"default_action": "mask", "rules": {"cpf": "allow", "email": "block"}}}

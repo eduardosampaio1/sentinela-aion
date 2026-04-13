@@ -79,6 +79,22 @@ class EstixeSettings(BaseSettings):
     cache_embeddings: bool = True
 
 
+class ScoringWeights(BaseSettings):
+    """Weights for NOMOS multi-factor model scoring. Lower total = better model."""
+    model_config = SettingsConfigDict(
+        env_prefix="NOMOS_WEIGHT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    cost: float = 10000.0
+    fit: float = 0.5
+    latency: float = 1.0
+    risk_penalty: float = 50.0       # penalty when PII detected + low risk_tier model
+    capability_miss: float = 20.0    # penalty per missing required capability
+
+
 class NomosSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NOMOS_",
@@ -90,6 +106,7 @@ class NomosSettings(BaseSettings):
     models_config_path: Path = _PROJECT_DIR / "config" / "models.yaml"
     fallback_enabled: bool = True
     cost_optimization: bool = True
+    scoring_weights: ScoringWeights = Field(default_factory=ScoringWeights)
 
 
 class MetisSettings(BaseSettings):

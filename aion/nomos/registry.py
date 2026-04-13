@@ -29,6 +29,7 @@ class ModelConfig:
     capabilities: list[str] = field(default_factory=list)
     complexity_range: tuple[float, float] = (0, 100)
     enabled: bool = True
+    risk_tier: str = "medium"  # low | medium | high — data sensitivity handling
 
     @property
     def has_api_key(self) -> bool:
@@ -75,6 +76,7 @@ class ModelRegistry:
                 capabilities=model_data.get("capabilities", []),
                 complexity_range=tuple(complexity_range),
                 enabled=model_data.get("enabled", True),
+                risk_tier=model_data.get("risk_tier", "medium"),
             )
             self._models.append(model)
 

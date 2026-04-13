@@ -19,10 +19,10 @@ class NomosModule:
     name = "nomos"
 
     def __init__(self) -> None:
-        settings = get_nomos_settings()
-        self._registry = ModelRegistry(settings)
+        self._settings = get_nomos_settings()
+        self._registry = ModelRegistry(self._settings)
         self._classifier = ComplexityClassifier()
-        self._router = Router(self._registry, self._classifier)
+        self._router = Router(self._registry, self._classifier, self._settings)
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -45,6 +45,11 @@ class NomosModule:
         context.metadata["complexity_score"] = route.complexity_score
         context.metadata["route_reason"] = route.reason
         context.metadata["estimated_cost"] = route.estimated_cost
+        context.metadata["candidates_evaluated"] = route.candidates_evaluated
+        if route.score_breakdown:
+            context.metadata["score_breakdown"] = route.score_breakdown.to_dict()
+        if route.pii_influenced:
+            context.metadata["pii_influenced_routing"] = True
 
         logger.info(
             "NOMOS route: model=%s provider=%s complexity=%.1f reason=%s",

@@ -12,6 +12,7 @@ models:
     latency_p50_ms: 300
     capabilities: [fast, cheap, general]
     complexity_range: [0, 40]  # handles simple prompts
+    risk_tier: low  # not ideal for sensitive data
 
   - name: gpt-4o
     provider: openai
@@ -22,6 +23,7 @@ models:
     latency_p50_ms: 800
     capabilities: [balanced, reasoning, code]
     complexity_range: [30, 70]  # handles medium prompts
+    risk_tier: medium
 
   - name: claude-sonnet-4-6
     provider: anthropic
@@ -32,6 +34,7 @@ models:
     latency_p50_ms: 1000
     capabilities: [premium, reasoning, code, analysis]
     complexity_range: [50, 100]  # handles complex prompts
+    risk_tier: high  # safe for sensitive data
 
   - name: gemini-2.0-flash
     provider: google
@@ -42,3 +45,4 @@ models:
     latency_p50_ms: 250
     capabilities: [fast, cheap, long_context]
     complexity_range: [0, 50]
+    risk_tier: low

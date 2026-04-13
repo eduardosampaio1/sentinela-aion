@@ -17,6 +17,24 @@ from pydantic import BaseModel, Field
 # ESTIXE Contract — what ESTIXE produces
 # ══════════════════════════════════════════════
 
+class PiiAction(str, Enum):
+    """What to do when a specific PII type is detected."""
+    ALLOW = "allow"     # detect but take no action
+    MASK = "mask"       # replace with [TYPE_REDACTED]
+    BLOCK = "block"     # reject entire request
+    AUDIT = "audit"     # allow through but log as violation
+
+
+class PiiPolicyConfig(BaseModel):
+    """Per-tenant PII handling policy."""
+    default_action: PiiAction = PiiAction.MASK
+    rules: dict[str, PiiAction] = Field(default_factory=dict)  # {"cpf": "allow", "email": "block"}
+
+    def action_for(self, pii_type: str) -> PiiAction:
+        """Resolve action for a PII type, falling back to default."""
+        return self.rules.get(pii_type, self.default_action)
+
+
 class EstixeAction(str, Enum):
     CONTINUE = "continue"
     BYPASS = "bypass"
@@ -51,6 +69,9 @@ class NomosResult(BaseModel):
     estimated_cost: float = 0.0
     fallback_used: bool = False
     fallback_from: Optional[str] = None
+    score_breakdown: Optional[dict[str, float]] = None
+    candidates_evaluated: int = 0
+    pii_influenced: bool = False
 
 
 # ══════════════════════════════════════════════

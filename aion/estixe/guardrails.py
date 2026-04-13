@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 
 from aion.config import get_estixe_settings
+from aion.shared.contracts import PiiAction, PiiPolicyConfig
 
 logger = logging.getLogger("aion.estixe.guardrails")
 
@@ -64,10 +65,15 @@ class GuardrailResult:
     safe: bool = True
     violations: list[str] = None
     filtered_content: str = ""
+    blocked: bool = False
+    block_reason: str = ""
+    audited: list[str] = None  # PII types detected in audit mode
 
     def __post_init__(self):
         if self.violations is None:
             self.violations = []
+        if self.audited is None:
+            self.audited = []
 
 
 class Guardrails:
@@ -79,22 +85,49 @@ class Guardrails:
         ]
         self._settings = get_estixe_settings()
 
-    def check_output(self, content: str) -> GuardrailResult:
-        """Check content for PII (works for both input and output)."""
+    def check_output(
+        self, content: str, pii_policy: PiiPolicyConfig | None = None,
+    ) -> GuardrailResult:
+        """Check content for PII with per-type policy actions.
+
+        Actions per PII type (resolved via *pii_policy*):
+          ALLOW — detect but don't modify content
+          MASK  — replace with [TYPE_REDACTED] (default / backward-compat)
+          BLOCK — reject the entire request
+          AUDIT — detect, don't modify, but record in audited list
+        """
         result = GuardrailResult(filtered_content=content)
+        policy = pii_policy or PiiPolicyConfig()  # default: mask everything
 
         for pattern, pii_type in self._pii_patterns:
-            if pattern.search(content):
-                result.violations.append(f"pii:{pii_type}")
-                result.safe = False
+            if not pattern.search(content):
+                continue
+
+            action = policy.action_for(pii_type)
+            result.violations.append(f"pii:{pii_type}")
+            result.safe = False
+
+            if action == PiiAction.MASK:
                 result.filtered_content = pattern.sub(
-                    f"[{pii_type.upper()}_REDACTED]", result.filtered_content
+                    f"[{pii_type.upper()}_REDACTED]", result.filtered_content,
                 )
+            elif action == PiiAction.BLOCK:
+                result.blocked = True
+                result.block_reason = f"PII type '{pii_type}' is blocked by policy"
+                logger.warning(
+                    '{"event":"pii_blocked","pii_type":"%s"}', pii_type,
+                )
+                return result  # early exit on block
+            elif action == PiiAction.AUDIT:
+                result.audited.append(pii_type)
+                # don't modify content — just log
+            # PiiAction.ALLOW — detected but no action taken
 
         if not result.safe:
             logger.warning(
-                '{"event":"pii_detected","violation_count":%d}',
+                '{"event":"pii_detected","violation_count":%d,"audited":%d}',
                 len(result.violations),
+                len(result.audited),
             )
 
         return result
