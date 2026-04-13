@@ -1,12 +1,22 @@
 import type { Stats, AionEvent, BehaviorDial, ModelInfo } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL || "http://localhost:8080";
+
+let _activeTenant = "default";
+
+export function setActiveTenant(tenant: string) {
+  _activeTenant = tenant;
+}
+
+export function getActiveTenant(): string {
+  return _activeTenant;
+}
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      "X-Aion-Tenant": "default",
+      "X-Aion-Tenant": _activeTenant,
       ...options?.headers,
     },
     ...options,
@@ -60,4 +70,31 @@ export async function reloadIntents(): Promise<void> {
 
 export async function reloadPolicies(): Promise<void> {
   await fetchApi("/v1/estixe/policies/reload", { method: "POST" });
+}
+
+// Economics
+export async function getEconomics(): Promise<Record<string, unknown>> {
+  return fetchApi("/v1/economics");
+}
+
+// Killswitch
+export async function getKillswitch(): Promise<Record<string, unknown>> {
+  return fetchApi("/v1/killswitch");
+}
+
+// Audit
+export async function getAudit(limit = 50): Promise<Record<string, unknown>[]> {
+  return fetchApi(`/v1/audit?limit=${limit}`);
+}
+
+// Overrides
+export async function getOverrides(): Promise<Record<string, unknown>> {
+  return fetchApi("/v1/overrides");
+}
+
+export async function setOverrides(overrides: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return fetchApi("/v1/overrides", {
+    method: "PUT",
+    body: JSON.stringify(overrides),
+  });
 }

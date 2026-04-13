@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
+import { useAionData } from "@/lib/use-aion-data";
 import { useRealtimeStats } from "@/lib/use-realtime";
 import { mockEvents } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
@@ -26,11 +27,23 @@ const fmtPct = (n: number) => `${Math.round(n)}%`;
 const fmtInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
 export function StatusPage() {
-  const [status] = useState<ServiceStatus>("online");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const { stats, modules, distribution: dist, operational: opState } = useRealtimeStats(3000, autoRefresh);
 
-  const recentEvents = mockEvents.slice(0, 5);
+  // Try real API first, fallback to mock jitter
+  const liveData = useAionData(3000, autoRefresh);
+  const mockData = useRealtimeStats(3000, autoRefresh && !liveData.connected);
+
+  // Use live data if connected, otherwise mock
+  const source = liveData.connected ? liveData : mockData;
+  const stats = source.stats;
+  const modules = source.modules;
+  const dist = source.distribution;
+  const opState = source.operational;
+  const status: ServiceStatus = liveData.connected ? "online" : "online";
+
+  const recentEvents = liveData.connected && liveData.events.length > 0
+    ? liveData.events.slice(0, 5)
+    : mockEvents.slice(0, 5);
 
   const totalEconomy = modules.nomos.cost_optimized + modules.estixe.cost_avoided + modules.metis.cost_saved;
 
@@ -340,12 +353,19 @@ export function StatusPage() {
             <span className="text-xs text-[var(--color-text-muted)]"> ({((stats.errors / stats.total_requests) * 100).toFixed(1)}%)</span>
           </div>
         </div>
-        {mockEvents.some((e) => e.decision === "fallback") && (
-          <div className="flex items-center gap-1.5 text-xs text-amber-600">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            {mockEvents.filter((e) => e.decision === "fallback").length} fallback(s) recente(s)
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {liveData.connected ? (
+            <div className="flex items-center gap-1.5 text-xs text-[var(--color-success)]">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              API conectada
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-amber-500">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Dados simulados
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

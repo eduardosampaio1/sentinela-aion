@@ -63,6 +63,16 @@ class AionSettings(BaseSettings):
     circuit_breaker_threshold: int = 5
     circuit_breaker_recovery_seconds: int = 30
 
+    # --- Security (POC/enterprise) ---
+    cors_origins: str = ""  # Comma-separated origins, e.g. "http://localhost:3000,https://console.aion.io"
+    require_chat_auth: bool = False  # Require API key for /v1/chat/completions
+    require_tenant: bool = False  # Require explicit X-Aion-Tenant header (no fallback to "default")
+    chat_rate_limit: int = 100  # Requests/min per tenant+IP for chat endpoint
+    admin_rate_limit: int = 10  # Requests/min per tenant+IP for admin endpoints
+
+    # --- Data retention ---
+    telemetry_retention_hours: int = 168  # 7 days default
+
 
 class EstixeSettings(BaseSettings):
     model_config = SettingsConfigDict(

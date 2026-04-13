@@ -13,7 +13,9 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from aion import __version__
 from aion.config import FailMode, get_settings
@@ -120,6 +122,9 @@ async def lifespan(app: FastAPI):
                     logger.exception("Cold start: ESTIXE initialization failed")
                 break
 
+    _pipeline_ready.set()
+    logger.info("AION pipeline ready")
+
     yield
 
     # Graceful shutdown: flush telemetry, close clients
@@ -128,15 +133,53 @@ async def lifespan(app: FastAPI):
     logger.info("AION shutdown complete")
 
 
+_pipeline_ready = asyncio.Event()
+
+
+# ── Security headers middleware ──
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
 app = FastAPI(
     title="AION",
-    description="Motor Realtime do Sentinela — AI Control Plane",
+    description="Motor Realtime do Sentinela — AI Control Plane. "
+                "Proxy gateway OpenAI-compatible com controle de PII, routing inteligente, e otimização de prompt.",
     version=__version__,
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "LLM Proxy", "description": "OpenAI-compatible chat completions"},
+        {"name": "Control Plane", "description": "Runtime configuration: killswitch, overrides, behavior dial, module toggle"},
+        {"name": "Observability", "description": "Health, stats, events, metrics, economics, explainability"},
+        {"name": "Data Management", "description": "LGPD compliance: data deletion, audit trail"},
+    ],
 )
 
-# Register security middleware (Track A1)
+# Register middleware stack (order matters: last added = first executed)
 app.add_middleware(AionSecurityMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS
+_settings_cors = get_settings()
+if _settings_cors.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in _settings_cors.cors_origins.split(",")],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Aion-Decision", "X-Request-ID", "X-Aion-Route-Reason", "X-Aion-Mode"],
+    )
 
 
 # ──────────────────────────────────────────────
@@ -144,7 +187,7 @@ app.add_middleware(AionSecurityMiddleware)
 # ──────────────────────────────────────────────
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", tags=["LLM Proxy"])
 async def chat_completions(request: Request):
     """OpenAI-compatible chat completions endpoint."""
     settings = get_settings()
@@ -260,22 +303,31 @@ async def chat_completions(request: Request):
 # ──────────────────────────────────────────────
 
 
-@app.get("/health")
+@app.get("/health", tags=["Observability"])
 async def health():
     if not _pipeline:
-        return JSONResponse(status_code=503, content={"status": "unhealthy", "reason": "pipeline_not_initialized"})
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "reason": "pipeline_not_initialized", "ready": False})
 
     health_data = _pipeline.get_health()
     health_data["version"] = __version__
     health_data["active_modules"] = _pipeline.active_modules
     health_data["requests_in_flight"] = get_in_flight()
+    health_data["ready"] = _pipeline_ready.is_set()
 
     mode = health_data.get("mode", "unknown")
     status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503
     return JSONResponse(status_code=status, content=health_data)
 
 
-@app.get("/metrics")
+@app.get("/ready", tags=["Observability"])
+async def readiness():
+    """Kubernetes readiness probe. Returns 200 only when pipeline is fully initialized."""
+    if _pipeline_ready.is_set():
+        return {"ready": True}
+    return JSONResponse(status_code=503, content={"ready": False})
+
+
+@app.get("/metrics", tags=["Observability"])
 async def metrics():
     """Prometheus-compatible metrics (Track B)."""
     counters = get_counters()
@@ -307,7 +359,7 @@ async def metrics():
 # ──────────────────────────────────────────────
 
 
-@app.put("/v1/killswitch")
+@app.put("/v1/killswitch", tags=["Control Plane"])
 async def activate_killswitch(request: Request):
     """Activate SAFE_MODE — all modules bypassed, pure passthrough."""
     if not _pipeline:
@@ -321,7 +373,7 @@ async def activate_killswitch(request: Request):
     return {"status": "safe_mode_active", "reason": reason}
 
 
-@app.delete("/v1/killswitch")
+@app.delete("/v1/killswitch", tags=["Control Plane"])
 async def deactivate_killswitch():
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
@@ -329,7 +381,7 @@ async def deactivate_killswitch():
     return {"status": "normal_mode_restored"}
 
 
-@app.get("/v1/overrides")
+@app.get("/v1/overrides", tags=["Control Plane"])
 async def get_overrides_endpoint(request: Request):
     """Get current runtime overrides for tenant."""
     settings = get_settings()
@@ -337,7 +389,7 @@ async def get_overrides_endpoint(request: Request):
     return await get_overrides(tenant)
 
 
-@app.put("/v1/overrides")
+@app.put("/v1/overrides", tags=["Control Plane"])
 async def set_overrides_endpoint(request: Request):
     """Set runtime overrides. Priority: request header > tenant > global override."""
     settings = get_settings()
@@ -351,7 +403,7 @@ async def set_overrides_endpoint(request: Request):
     return {"status": "active", "overrides": await get_overrides(tenant)}
 
 
-@app.delete("/v1/overrides")
+@app.delete("/v1/overrides", tags=["Control Plane"])
 async def clear_overrides_endpoint(request: Request):
     """Clear all runtime overrides for tenant."""
     settings = get_settings()
@@ -360,7 +412,7 @@ async def clear_overrides_endpoint(request: Request):
     return {"status": "cleared"}
 
 
-@app.put("/v1/modules/{module_name}/toggle")
+@app.put("/v1/modules/{module_name}/toggle", tags=["Control Plane"])
 async def toggle_module(module_name: str, request: Request):
     """Toggle a module on/off at runtime (Track D)."""
     if not _pipeline:
@@ -389,27 +441,27 @@ async def toggle_module(module_name: str, request: Request):
 # ──────────────────────────────────────────────
 
 
-@app.get("/v1/stats")
+@app.get("/v1/stats", tags=["Observability"])
 async def stats(request: Request):
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     return get_stats(tenant)
 
 
-@app.get("/v1/events")
+@app.get("/v1/events", tags=["Observability"])
 async def events(request: Request, limit: int = 100):
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     return get_recent_events(limit, tenant)
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", tags=["Observability"])
 async def list_models():
     settings = get_settings()
     return {"models": [{"id": settings.default_model, "provider": settings.default_provider, "type": "default"}]}
 
 
-@app.get("/v1/audit")
+@app.get("/v1/audit", tags=["Data Management"])
 async def audit_log_endpoint(request: Request, limit: int = 100):
     """Get audit trail for tenant."""
     settings = get_settings()
@@ -422,7 +474,7 @@ async def audit_log_endpoint(request: Request, limit: int = 100):
 # ──────────────────────────────────────────────
 
 
-@app.post("/v1/estixe/intents/reload")
+@app.post("/v1/estixe/intents/reload", tags=["Control Plane"])
 async def reload_intents():
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
@@ -433,7 +485,7 @@ async def reload_intents():
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 
-@app.post("/v1/estixe/policies/reload")
+@app.post("/v1/estixe/policies/reload", tags=["Control Plane"])
 async def reload_policies():
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
@@ -444,7 +496,7 @@ async def reload_policies():
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 
-@app.get("/v1/behavior")
+@app.get("/v1/behavior", tags=["Control Plane"])
 async def get_behavior(request: Request):
     from aion.metis.behavior import BehaviorDial
     settings = get_settings()
@@ -456,7 +508,7 @@ async def get_behavior(request: Request):
     return {"tenant": tenant, "behavior": config.model_dump()}
 
 
-@app.put("/v1/behavior")
+@app.put("/v1/behavior", tags=["Control Plane"])
 async def set_behavior(request: Request):
     from aion.metis.behavior import BehaviorConfig, BehaviorDial
     settings = get_settings()
@@ -468,7 +520,7 @@ async def set_behavior(request: Request):
     return {"tenant": tenant, "behavior": config.model_dump(), "status": "active"}
 
 
-@app.delete("/v1/behavior")
+@app.delete("/v1/behavior", tags=["Control Plane"])
 async def delete_behavior(request: Request):
     from aion.metis.behavior import BehaviorDial
     settings = get_settings()
@@ -483,7 +535,7 @@ async def delete_behavior(request: Request):
 # ──────────────────────────────────────────────
 
 
-@app.delete("/v1/data/{tenant}")
+@app.delete("/v1/data/{tenant}", tags=["Data Management"])
 async def delete_tenant_data(tenant: str):
     """Delete all data for a tenant (LGPD compliance)."""
     from aion.metis.behavior import BehaviorDial
@@ -510,7 +562,7 @@ async def delete_tenant_data(tenant: str):
 # ──────────────────────────────────────────────
 
 
-@app.get("/v1/economics")
+@app.get("/v1/economics", tags=["Observability"])
 async def runtime_economics(request: Request):
     """Runtime economics — visible cost savings and efficiency metrics.
 
@@ -550,7 +602,7 @@ async def runtime_economics(request: Request):
     }
 
 
-@app.get("/v1/explain/{request_id}")
+@app.get("/v1/explain/{request_id}", tags=["Observability"])
 async def explain_decision(request_id: str, request: Request):
     """Explainability — full trace of what AION decided for a specific request.
 
@@ -581,7 +633,7 @@ async def explain_decision(request_id: str, request: Request):
     return {"request_id": request_id, "found": False, "message": "Request not found in recent events"}
 
 
-@app.get("/v1/metrics/tenant/{tenant_id}")
+@app.get("/v1/metrics/tenant/{tenant_id}", tags=["Observability"])
 async def tenant_metrics(tenant_id: str):
     """Per-tenant metrics — decisions, savings, latency for a specific tenant."""
     stats_data = get_stats(tenant_id)

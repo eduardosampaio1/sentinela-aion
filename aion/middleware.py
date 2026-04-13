@@ -65,9 +65,7 @@ def _parse_key_roles(admin_key_str: str) -> dict[str, str]:
             result[part] = Role.ADMIN  # backward compat
     return result
 
-# ── Limits ──
-_CHAT_RATE_LIMIT = 100
-_ADMIN_RATE_LIMIT = 10
+# ── Limits (defaults, overridable via AionSettings) ──
 _MAX_IN_FLIGHT = 500
 
 # ── In-flight counter ──
@@ -305,7 +303,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         path = request.url.path
 
-        if path in ("/health", "/docs", "/openapi.json", "/metrics", "/redoc"):
+        if path in ("/health", "/ready", "/docs", "/openapi.json", "/metrics", "/redoc"):
             return await call_next(request)
 
         # In-flight limit
@@ -317,7 +315,15 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # Tenant validation
-        tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+        raw_tenant = request.headers.get(settings.tenant_header)
+        if raw_tenant is None:
+            if settings.require_tenant:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": {"message": f"Missing required header: {settings.tenant_header}", "type": "invalid_request", "code": "tenant_required"}},
+                )
+            raw_tenant = settings.default_tenant
+        tenant = raw_tenant
         if not _TENANT_PATTERN.match(tenant):
             return JSONResponse(
                 status_code=400,
@@ -353,7 +359,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
 
             # Rate limit admin
             rate_key = _build_rate_limit_key(request, tenant, "admin")
-            if not await _check_rate_limit(rate_key, _ADMIN_RATE_LIMIT):
+            if not await _check_rate_limit(rate_key, settings.admin_rate_limit):
                 return JSONResponse(
                     status_code=429,
                     content={"error": {"message": "Admin rate limit exceeded", "type": "rate_limit", "code": "rate_limit_exceeded"}},
@@ -362,10 +368,26 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
 
             await audit(f"{request.method} {path}", request, tenant, details=f"role={key_roles.get(provided_key, 'unknown') if admin_key_str else 'no_auth'}")
 
-        # Rate limit chat
+        # Auth + rate limit for chat endpoint
         if path == "/v1/chat/completions":
+            # Optional auth for chat (enterprise mode)
+            if settings.require_chat_auth:
+                admin_key_str = getattr(settings, "admin_key", "") or ""
+                if admin_key_str:
+                    auth_header = request.headers.get("Authorization", "")
+                    provided_key = auth_header.removeprefix("Bearer ").strip()
+                    key_roles = _parse_key_roles(admin_key_str)
+                    if provided_key not in key_roles:
+                        return JSONResponse(
+                            status_code=401,
+                            content={"error": {"message": "Unauthorized: API key required for chat", "type": "auth_error", "code": "unauthorized"}},
+                        )
+
+            # Per-tenant rate limit (override > global default)
+            tenant_overrides = await get_overrides(tenant)
+            chat_limit = int(tenant_overrides.get("rate_limit", settings.chat_rate_limit))
             rate_key = _build_rate_limit_key(request, tenant, "chat")
-            if not await _check_rate_limit(rate_key, _CHAT_RATE_LIMIT):
+            if not await _check_rate_limit(rate_key, chat_limit):
                 return JSONResponse(
                     status_code=429,
                     content={"error": {"message": "Rate limit exceeded", "type": "rate_limit", "code": "rate_limit_exceeded"}},
