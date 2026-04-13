@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from aion.config import get_settings
+from aion.shared.contracts import Role, check_permission
 
 logger = logging.getLogger("aion.middleware")
 
@@ -27,6 +28,42 @@ _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 # ── Admin paths ──
 _ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit"}
 _ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/")
+
+# ── RBAC: map (method, path_prefix) → required permission ──
+_PATH_PERMISSIONS: list[tuple[str, str, str]] = [
+    # (method, path_startswith, permission)
+    ("PUT", "/v1/killswitch", "killswitch:write"),
+    ("DELETE", "/v1/killswitch", "killswitch:write"),
+    ("GET", "/v1/killswitch", "killswitch:read"),
+    ("PUT", "/v1/overrides", "overrides:write"),
+    ("DELETE", "/v1/overrides", "overrides:write"),
+    ("GET", "/v1/overrides", "overrides:read"),
+    ("PUT", "/v1/behavior", "behavior:write"),
+    ("DELETE", "/v1/behavior", "behavior:write"),
+    ("GET", "/v1/behavior", "behavior:read"),
+    ("PUT", "/v1/modules/", "modules:write"),
+    ("GET", "/v1/modules/", "modules:read"),
+    ("POST", "/v1/estixe/", "estixe:reload"),
+    ("DELETE", "/v1/data/", "data:delete"),
+    ("GET", "/v1/audit", "audit:read"),
+]
+
+# ── API key → role mapping (loaded from config) ──
+# Format in env: AION_ADMIN_KEY=key1:admin,key2:operator,key3:viewer
+def _parse_key_roles(admin_key_str: str) -> dict[str, str]:
+    """Parse 'key1:admin,key2:operator' into {key1: admin, key2: operator}.
+    Keys without role default to 'admin' for backward compat."""
+    result = {}
+    for part in admin_key_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            key, role = part.rsplit(":", 1)
+            result[key.strip()] = role.strip()
+        else:
+            result[part] = Role.ADMIN  # backward compat
+    return result
 
 # ── Limits ──
 _CHAT_RATE_LIMIT = 100
@@ -236,6 +273,17 @@ def _is_admin_path(path: str) -> bool:
     return False
 
 
+def _resolve_permission(method: str, path: str) -> Optional[str]:
+    """Resolve required permission for a method+path combination."""
+    for pmethod, ppath, perm in _PATH_PERMISSIONS:
+        if method == pmethod and path.startswith(ppath):
+            return perm
+    # Default: read for GET, write for mutations
+    if method == "GET":
+        return "audit:read"  # safe default
+    return None  # no specific permission mapped
+
+
 def _build_rate_limit_key(request: Request, tenant: str, scope: str) -> str:
     ip = request.client.host if request.client else "unknown"
     return f"{scope}:{tenant}:{ip}"
@@ -276,17 +324,31 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                 content={"error": {"message": "Invalid tenant format", "type": "invalid_request", "code": "invalid_tenant"}},
             )
 
-        # Auth for admin endpoints
+        # Auth + RBAC for admin endpoints
         if _is_admin_path(path):
-            admin_key = getattr(settings, "admin_key", "") or ""
-            if admin_key:
+            admin_key_str = getattr(settings, "admin_key", "") or ""
+            if admin_key_str:
                 auth_header = request.headers.get("Authorization", "")
                 provided_key = auth_header.removeprefix("Bearer ").strip()
-                valid_keys = {k.strip() for k in admin_key.split(",") if k.strip()}
-                if provided_key not in valid_keys:
+
+                key_roles = _parse_key_roles(admin_key_str)
+                if provided_key not in key_roles:
                     return JSONResponse(
                         status_code=401,
                         content={"error": {"message": "Unauthorized", "type": "auth_error", "code": "unauthorized"}},
+                    )
+
+                # RBAC: check if this key's role has permission for this endpoint
+                role = key_roles[provided_key]
+                required_perm = _resolve_permission(request.method, path)
+                if required_perm and not check_permission(role, required_perm):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {
+                            "message": f"Forbidden: role '{role}' lacks '{required_perm}'",
+                            "type": "auth_error",
+                            "code": "forbidden",
+                        }},
                     )
 
             # Rate limit admin
@@ -298,7 +360,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                     headers={"Retry-After": "60"},
                 )
 
-            await audit(f"{request.method} {path}", request, tenant)
+            await audit(f"{request.method} {path}", request, tenant, details=f"role={key_roles.get(provided_key, 'unknown') if admin_key_str else 'no_auth'}")
 
         # Rate limit chat
         if path == "/v1/chat/completions":

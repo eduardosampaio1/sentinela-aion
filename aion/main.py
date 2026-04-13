@@ -505,5 +505,91 @@ async def delete_tenant_data(tenant: str):
     return {"tenant": tenant, "status": "deleted"}
 
 
+# ──────────────────────────────────────────────
+# Runtime Economics & Explainability
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/economics")
+async def runtime_economics(request: Request):
+    """Runtime economics — visible cost savings and efficiency metrics.
+
+    Shows exactly how much the AION saved in tokens, cost, and LLM calls.
+    """
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    counters = get_counters()
+    stats_data = get_stats(tenant)
+
+    total_requests = counters.get("requests_total", 0)
+    bypasses = counters.get("bypass_total", 0)
+    tokens_saved = counters.get("tokens_saved_total", 0)
+    cost_saved = counters.get("cost_saved_total", 0.0)
+
+    return {
+        "tenant": tenant,
+        "economics": {
+            "total_requests": total_requests,
+            "llm_calls_avoided": bypasses,
+            "llm_call_avoidance_rate": round(bypasses / total_requests, 4) if total_requests else 0,
+            "tokens_saved": tokens_saved,
+            "cost_saved_usd": cost_saved,
+            "avg_tokens_saved_per_request": round(tokens_saved / total_requests, 1) if total_requests else 0,
+        },
+        "decisions": {
+            "bypasses": bypasses,
+            "blocks": counters.get("block_total", 0),
+            "passthroughs": counters.get("passthrough_total", 0),
+            "fallbacks": counters.get("fallback_total", 0),
+        },
+        "latency": {
+            "p50_ms": counters.get("latency_p50_ms", 0),
+            "p95_ms": counters.get("latency_p95_ms", 0),
+            "p99_ms": counters.get("latency_p99_ms", 0),
+        },
+    }
+
+
+@app.get("/v1/explain/{request_id}")
+async def explain_decision(request_id: str, request: Request):
+    """Explainability — full trace of what AION decided for a specific request.
+
+    Returns the complete DecisionRecord: which modules ran, what they decided,
+    why, what policies matched, what cost was estimated, what was saved.
+    """
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    # Find the event in telemetry
+    events = get_recent_events(limit=1000, tenant=tenant)
+    for event in events:
+        if event.get("request_id") == request_id:
+            return {
+                "request_id": request_id,
+                "tenant": tenant,
+                "found": True,
+                "decision": event.get("decision"),
+                "model_used": event.get("model_used"),
+                "module": event.get("module"),
+                "tokens_saved": event.get("tokens_saved", 0),
+                "cost_saved": event.get("cost_saved", 0.0),
+                "latency_ms": event.get("latency_ms", 0.0),
+                "metadata": event.get("metadata", {}),
+                "timestamp": event.get("timestamp"),
+            }
+
+    return {"request_id": request_id, "found": False, "message": "Request not found in recent events"}
+
+
+@app.get("/v1/metrics/tenant/{tenant_id}")
+async def tenant_metrics(tenant_id: str):
+    """Per-tenant metrics — decisions, savings, latency for a specific tenant."""
+    stats_data = get_stats(tenant_id)
+    return {
+        "tenant": tenant_id,
+        "metrics": stats_data,
+    }
+
+
 # Import for Response type
 from starlette.responses import Response  # noqa: E402

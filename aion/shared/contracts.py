@@ -1,0 +1,210 @@
+"""Formal contracts between AION modules.
+
+Every module MUST produce typed results that conform to these contracts.
+This prevents "convention-based" integration and makes the pipeline
+formally verifiable.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+
+# ══════════════════════════════════════════════
+# ESTIXE Contract — what ESTIXE produces
+# ══════════════════════════════════════════════
+
+class EstixeAction(str, Enum):
+    CONTINUE = "continue"
+    BYPASS = "bypass"
+    BLOCK = "block"
+
+
+class EstixeResult(BaseModel):
+    """Formal output of the ESTIXE module."""
+    action: EstixeAction = EstixeAction.CONTINUE
+    intent_detected: Optional[str] = None
+    intent_confidence: float = 0.0
+    bypass_response_text: Optional[str] = None
+    policy_matched: list[str] = Field(default_factory=list)
+    policy_action: Optional[str] = None  # block | transform | flag
+    pii_violations: list[str] = Field(default_factory=list)
+    pii_sanitized: bool = False
+    block_reason: Optional[str] = None
+
+
+# ══════════════════════════════════════════════
+# NOMOS Contract — what NOMOS produces
+# ══════════════════════════════════════════════
+
+class NomosResult(BaseModel):
+    """Formal output of the NOMOS module."""
+    selected_model: str
+    selected_provider: str
+    base_url: Optional[str] = None
+    complexity_score: float = 0.0
+    complexity_factors: list[str] = Field(default_factory=list)
+    route_reason: str = ""
+    estimated_cost: float = 0.0
+    fallback_used: bool = False
+    fallback_from: Optional[str] = None
+
+
+# ══════════════════════════════════════════════
+# METIS Contract — what METIS produces
+# ══════════════════════════════════════════════
+
+class MetisResult(BaseModel):
+    """Formal output of the METIS module."""
+    tokens_before: int = 0
+    tokens_after: int = 0
+    tokens_saved: int = 0
+    compression_applied: bool = False
+    behavior_dial_active: bool = False
+    behavior_settings: Optional[dict[str, Any]] = None
+    post_optimization_applied: bool = False
+    filler_removed: bool = False
+
+
+# ══════════════════════════════════════════════
+# Pipeline Decision Record — full trace of what happened
+# ══════════════════════════════════════════════
+
+class DecisionRecord(BaseModel):
+    """Complete trace of a pipeline decision. Used for explainability."""
+    schema_version: str = "1.0"
+    request_id: str
+    tenant: str
+    timestamp: float
+
+    # Final outcome
+    decision: str  # continue | bypass | block
+    model_used: Optional[str] = None
+
+    # Module results (each module populates its contract)
+    estixe: Optional[EstixeResult] = None
+    nomos: Optional[NomosResult] = None
+    metis: Optional[MetisResult] = None
+
+    # Operational state
+    safe_mode: bool = False
+    degraded_modules: list[str] = Field(default_factory=list)
+    skipped_modules: list[str] = Field(default_factory=list)
+    failed_modules: list[str] = Field(default_factory=list)
+
+    # Latencies
+    module_latencies_ms: dict[str, float] = Field(default_factory=dict)
+    total_pipeline_ms: float = 0.0
+    llm_latency_ms: float = 0.0
+
+    # Economics
+    tokens_saved: int = 0
+    cost_saved: float = 0.0
+    cost_estimated: float = 0.0
+
+    # Policy trace
+    policies_evaluated: list[str] = Field(default_factory=list)
+    policy_that_decided: Optional[str] = None
+
+
+# ══════════════════════════════════════════════
+# RBAC — Role-Based Access Control
+# ══════════════════════════════════════════════
+
+class Role(str, Enum):
+    ADMIN = "admin"       # full access: killswitch, config, data deletion
+    OPERATOR = "operator"  # operational: overrides, behavior, module toggle
+    VIEWER = "viewer"     # read-only: stats, events, audit, health, models
+
+
+# What each role can do
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    Role.ADMIN: {
+        "killswitch:write",
+        "killswitch:read",
+        "overrides:write",
+        "overrides:read",
+        "behavior:write",
+        "behavior:read",
+        "modules:write",
+        "modules:read",
+        "estixe:reload",
+        "policies:reload",
+        "data:delete",
+        "audit:read",
+        "stats:read",
+        "events:read",
+        "models:read",
+    },
+    Role.OPERATOR: {
+        "overrides:write",
+        "overrides:read",
+        "behavior:write",
+        "behavior:read",
+        "modules:write",
+        "modules:read",
+        "estixe:reload",
+        "policies:reload",
+        "audit:read",
+        "stats:read",
+        "events:read",
+        "models:read",
+    },
+    Role.VIEWER: {
+        "overrides:read",
+        "behavior:read",
+        "modules:read",
+        "audit:read",
+        "stats:read",
+        "events:read",
+        "models:read",
+    },
+}
+
+
+def check_permission(role: str, permission: str) -> bool:
+    """Check if a role has a specific permission."""
+    perms = ROLE_PERMISSIONS.get(role, set())
+    return permission in perms
+
+
+# ══════════════════════════════════════════════
+# Policy Precedence
+# ══════════════════════════════════════════════
+
+class PolicySource(str, Enum):
+    """Where a policy/config came from. Higher = higher priority."""
+    DEFAULT = "default"           # hardcoded defaults
+    CONFIG_FILE = "config_file"   # YAML files
+    TENANT = "tenant"             # tenant-specific config
+    OVERRIDE = "override"         # runtime override via API
+    REQUEST = "request"           # per-request header override
+
+    @property
+    def priority(self) -> int:
+        return {
+            PolicySource.DEFAULT: 0,
+            PolicySource.CONFIG_FILE: 1,
+            PolicySource.TENANT: 2,
+            PolicySource.OVERRIDE: 3,
+            PolicySource.REQUEST: 4,
+        }[self]
+
+
+def resolve_precedence(sources: dict[PolicySource, Any]) -> tuple[Any, PolicySource]:
+    """Resolve config value by precedence. Highest priority wins.
+
+    Returns (value, source_that_won).
+    """
+    winner = PolicySource.DEFAULT
+    value = None
+
+    for source, val in sorted(sources.items(), key=lambda x: x[0].priority):
+        if val is not None:
+            value = val
+            winner = source
+
+    return value, winner
