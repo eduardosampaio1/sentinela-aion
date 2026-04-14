@@ -37,7 +37,15 @@ class NomosModule:
         if not self._initialized:
             await self.initialize()
 
-        route = self._router.route(request, context)
+        # Fetch learned performances from NEMOS (optional, graceful fallback)
+        performances = None
+        try:
+            from aion.nemos import get_nemos
+            performances = await get_nemos().get_model_performances(context.tenant)
+        except Exception:
+            pass  # NEMOS unavailable — route with defaults
+
+        route = self._router.route(request, context, performances=performances)
 
         context.selected_model = route.model_name
         context.selected_provider = route.provider
@@ -50,13 +58,18 @@ class NomosModule:
             context.metadata["score_breakdown"] = route.score_breakdown.to_dict()
         if route.pii_influenced:
             context.metadata["pii_influenced_routing"] = True
+        if route.confidence:
+            context.metadata["decision_confidence"] = route.confidence.to_dict()
+        if route.exploration:
+            context.metadata["exploration"] = True
 
         logger.info(
-            "NOMOS route: model=%s provider=%s complexity=%.1f reason=%s",
+            "NOMOS route: model=%s provider=%s complexity=%.1f reason=%s confidence=%.2f",
             route.model_name,
             route.provider,
             route.complexity_score,
             route.reason,
+            route.confidence.score if route.confidence else 0.5,
         )
 
         return context

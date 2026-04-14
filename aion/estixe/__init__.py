@@ -85,12 +85,67 @@ class EstixeModule:
                     break
 
         # 3. Bypass check (can we respond without LLM?)
+        # Apply dynamic threshold from NEMOS if available
+        original_threshold = self._classifier._settings.bypass_threshold
+        effective_threshold = await self._resolve_dynamic_threshold(context, original_threshold)
+        if effective_threshold != original_threshold:
+            self._classifier._settings.bypass_threshold = effective_threshold
+
         bypass_result = await self._bypass.check(user_message, context)
+
+        # Restore original threshold
+        if effective_threshold != original_threshold:
+            self._classifier._settings.bypass_threshold = original_threshold
+
         if bypass_result.should_bypass:
             context.set_bypass(bypass_result.response)
+            context.metadata["detected_intent"] = bypass_result.intent
+            context.metadata["intent_confidence"] = bypass_result.confidence
             return context
 
         return context
+
+    @staticmethod
+    async def _resolve_dynamic_threshold(context: PipelineContext, default: float) -> float:
+        """Adjust bypass threshold based on IntentMemory from NEMOS.
+
+        - High bypass success → relax threshold (±0.05, min 0.70)
+        - Low bypass success → tighten threshold (±0.05, max 0.95)
+        - No NEMOS data → return default unchanged
+        """
+        try:
+            from aion.nemos import get_nemos
+            intent_mem = await get_nemos().get_intent_memory(context.tenant)
+        except Exception:
+            return default
+
+        if not intent_mem:
+            return default
+
+        # Check overall bypass effectiveness across all intents
+        total_seen = sum(m.total_seen for m in intent_mem.values())
+        if total_seen < 20:
+            return default  # not enough data
+
+        total_bypass = sum(m.bypassed_count for m in intent_mem.values())
+        if total_bypass == 0:
+            return default
+
+        # Weighted average bypass success rate across intents
+        weighted_success = sum(
+            m.bypass_success_rate.value * m.bypassed_count
+            for m in intent_mem.values() if m.bypassed_count > 0
+        )
+        avg_success = weighted_success / total_bypass
+
+        if avg_success > 0.95:
+            # Bypass working well → relax slightly
+            return max(0.70, default - 0.05)
+        elif avg_success < 0.85:
+            # Bypass failing → tighten
+            return min(0.95, default + 0.05)
+
+        return default
 
     @staticmethod
     def _resolve_pii_policy(context: PipelineContext) -> PiiPolicyConfig | None:

@@ -69,9 +69,9 @@ def weights():
 # ── ScoreBreakdown ──
 
 def test_score_breakdown_to_dict():
-    s = ScoreBreakdown(cost=1.0, fit=2.0, latency=3.0, risk=4.0, capability=5.0, total=15.0)
+    s = ScoreBreakdown(cost=1.0, fit=2.0, latency=3.0, risk=4.0, capability=5.0, learned=0.0, total=15.0)
     d = s.to_dict()
-    assert d == {"cost": 1.0, "fit": 2.0, "latency": 3.0, "risk": 4.0, "capability": 5.0, "total": 15.0}
+    assert d == {"cost": 1.0, "fit": 2.0, "latency": 3.0, "risk": 4.0, "capability": 5.0, "learned": 0.0, "total": 15.0}
 
 
 # ── Multi-factor scoring ──

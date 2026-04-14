@@ -29,16 +29,43 @@ class MetisPreModule:
         # Count tokens before
         context.tokens_before = self._compressor.count_tokens(request)
 
+        # Check NEMOS for optimization memory (optional, graceful fallback)
+        compression_ok = True
+        try:
+            from aion.nemos import get_nemos
+            opt_mem = await get_nemos().get_optimization_memory(context.tenant)
+            if opt_mem and opt_mem.total >= 20:
+                # If compression is causing more followups than not compressing, back off
+                compressed_followup = opt_mem.followup_rate_compressed.value
+                uncompressed_followup = opt_mem.followup_rate_uncompressed.value
+                if compressed_followup > uncompressed_followup + 0.15:
+                    compression_ok = False
+                    logger.info(
+                        "METIS: compression backed off for tenant '%s' "
+                        "(compressed followup %.0f%% vs uncompressed %.0f%%)",
+                        context.tenant,
+                        compressed_followup * 100,
+                        uncompressed_followup * 100,
+                    )
+        except Exception:
+            pass  # NEMOS unavailable — compress as normal
+
         # Apply behavior dial instructions to system prompt
         behavior = await self._behavior.get(context.tenant)
         if behavior:
             request = self._behavior.apply_to_request(request, behavior)
             context.modified_request = request
 
-        # Compress prompt
-        compressed = self._compressor.compress(request)
-        context.modified_request = compressed
-        context.tokens_after = self._compressor.count_tokens(compressed)
+        # Compress prompt (skip if NEMOS says compression is hurting)
+        if compression_ok:
+            compressed = self._compressor.compress(request)
+            context.modified_request = compressed
+            context.tokens_after = self._compressor.count_tokens(compressed)
+        else:
+            context.modified_request = request
+            context.tokens_after = context.tokens_before
+
+        context.metadata["compression_applied"] = compression_ok
 
         saved = context.tokens_before - context.tokens_after
         if saved > 0:

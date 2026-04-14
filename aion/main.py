@@ -57,6 +57,112 @@ _pipeline: Pipeline | None = None
 # Streaming timeout (seconds)
 _STREAM_TIMEOUT = 300
 
+# Snapshot task handle
+_snapshot_task: asyncio.Task | None = None
+
+
+async def _record_all_outcomes(context: PipelineContext, response, settings) -> None:
+    """Async fire-and-forget: record outcome to NEMOS for all modules.
+
+    Runs via asyncio.create_task — adds 0ms to response path.
+    """
+    try:
+        from aion.nemos import get_nemos
+        from aion.nemos.models import OutcomeRecord
+
+        nemos = get_nemos()
+        now = time.time()
+
+        # Extract actual tokens from response
+        prompt_tokens = 0
+        completion_tokens = 0
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = response.usage.prompt_tokens or 0
+            completion_tokens = response.usage.completion_tokens or 0
+
+        # Calculate actual cost
+        actual_cost = 0.0
+        default_cost = 0.0
+        model_name = context.selected_model or settings.default_model
+        try:
+            from aion.nomos.cost import estimate_request_cost
+            from aion.nomos.registry import ModelRegistry
+            from aion.config import get_nomos_settings
+            registry = ModelRegistry(get_nomos_settings())
+            await registry.load()
+            model_config = registry.get_by_name(model_name)
+            if model_config:
+                actual_cost = estimate_request_cost(model_config, prompt_tokens, completion_tokens)
+            default_config = registry.get_by_name(settings.default_model)
+            if default_config:
+                default_cost = estimate_request_cost(default_config, prompt_tokens, completion_tokens)
+        except Exception:
+            pass
+
+        complexity = context.metadata.get("complexity_score", 0.0)
+        intent = context.metadata.get("detected_intent", "unknown")
+        tier = "simple" if complexity < 30 else "medium" if complexity < 60 else "complex"
+        llm_latency = context.module_latencies.get("llm", 0.0)
+        decision = context.decision.value if context.decision != Decision.CONTINUE else "continue"
+
+        # 1. NOMOS: Decision Memory
+        record = OutcomeRecord(
+            request_id=context.request_id,
+            tenant=context.tenant,
+            timestamp=now,
+            model=model_name,
+            provider=context.selected_provider or settings.default_provider,
+            complexity_score=complexity,
+            detected_intent=intent,
+            estimated_cost=context.metadata.get("estimated_cost", 0.0),
+            actual_cost=actual_cost,
+            actual_latency_ms=llm_latency,
+            actual_prompt_tokens=prompt_tokens,
+            actual_completion_tokens=completion_tokens,
+            success=True,
+            route_reason=context.metadata.get("route_reason", ""),
+            decision=decision,
+        )
+        await nemos.record_outcome(record)
+
+        # 2. Economics
+        await nemos.record_economics(
+            tenant=context.tenant,
+            model=model_name,
+            intent=intent,
+            decision=decision,
+            actual_cost=actual_cost,
+            default_cost=default_cost,
+            tokens=prompt_tokens + completion_tokens,
+            latency_ms=llm_latency,
+        )
+
+        # 3. Baseline
+        await nemos.update_baseline(
+            tenant=context.tenant,
+            latency_ms=llm_latency,
+            cost=actual_cost,
+            tokens=prompt_tokens + completion_tokens,
+            model=model_name,
+            intent=intent,
+            complexity_tier=tier,
+            decision=decision,
+        )
+
+    except Exception:
+        logger.debug("NEMOS outcome recording failed (non-critical)", exc_info=True)
+
+
+async def _snapshot_baselines_loop():
+    """Background task: snapshot baselines hourly for trend computation."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            from aion.nemos import get_nemos
+            await get_nemos().snapshot_baselines_if_needed()
+        except Exception:
+            logger.debug("NEMOS snapshot failed (non-critical)", exc_info=True)
+
 # Override state (Track D)
 _overrides: dict = {}
 
@@ -125,7 +231,15 @@ async def lifespan(app: FastAPI):
     _pipeline_ready.set()
     logger.info("AION pipeline ready")
 
+    # Start NEMOS background snapshot task
+    global _snapshot_task
+    _snapshot_task = asyncio.create_task(_snapshot_baselines_loop())
+
     yield
+
+    # Cancel snapshot task on shutdown
+    if _snapshot_task:
+        _snapshot_task.cancel()
 
     # Graceful shutdown: flush telemetry, close clients
     await shutdown_telemetry()
@@ -285,8 +399,15 @@ async def chat_completions(request: Request):
 
             await _pipeline.emit_telemetry(context)
 
+            # Record outcome to NEMOS (async, 0ms on response path)
+            asyncio.create_task(_record_all_outcomes(context, response, settings))
+
             pass_headers = _build_response_headers(context)
             pass_headers["X-Aion-Decision"] = "passthrough"
+            # Add decision confidence header
+            dc = context.metadata.get("decision_confidence")
+            if dc:
+                pass_headers["X-Aion-Decision-Confidence"] = str(dc.get("score", 0.5))
             return JSONResponse(content=response.model_dump(), headers=pass_headers)
 
     except httpx.HTTPStatusError as e:
@@ -554,7 +675,15 @@ async def delete_tenant_data(tenant: str):
             if event.get("tenant") != tenant:
                 _event_buffer.append(event)
 
-    return {"tenant": tenant, "status": "deleted"}
+    # Clear NEMOS data (decision memory, economics, baseline)
+    nemos_deleted = 0
+    try:
+        from aion.nemos import get_nemos
+        nemos_deleted = await get_nemos().delete_tenant_data(tenant)
+    except Exception:
+        logger.debug("NEMOS delete failed for tenant %s", tenant)
+
+    return {"tenant": tenant, "status": "deleted", "nemos_keys_deleted": nemos_deleted}
 
 
 # ──────────────────────────────────────────────
@@ -640,6 +769,43 @@ async def tenant_metrics(tenant_id: str):
     return {
         "tenant": tenant_id,
         "metrics": stats_data,
+    }
+
+
+# ──────────────────────────────────────────────
+# NEMOS — Intelligence & Benchmark endpoints
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/benchmark/{tenant_id}", tags=["Observability"])
+async def tenant_benchmark(tenant_id: str):
+    """Per-tenant operational baseline with trends and module maturity."""
+    from aion.nemos import get_nemos
+    nemos = get_nemos()
+    baseline = await nemos.get_baseline(tenant_id)
+    if not baseline:
+        return {"tenant": tenant_id, "baseline": None, "message": "No data yet"}
+
+    trends = await nemos.get_baseline_trends(tenant_id)
+    maturity = await nemos.get_module_maturity(tenant_id)
+
+    return {
+        "tenant": tenant_id,
+        "baseline": baseline.to_dict(),
+        "trends": trends,
+        "module_maturity": maturity,
+    }
+
+
+@app.get("/v1/recommendations/{tenant_id}", tags=["Observability"])
+async def tenant_recommendations(tenant_id: str):
+    """AI-generated recommendations for optimizing a tenant's AI operations."""
+    from aion.nemos import get_nemos
+    recs = await get_nemos().get_recommendations(tenant_id)
+    return {
+        "tenant": tenant_id,
+        "recommendations": [r.to_dict() for r in recs],
+        "count": len(recs),
     }
 
 

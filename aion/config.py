@@ -103,6 +103,7 @@ class ScoringWeights(BaseSettings):
     latency: float = 1.0
     risk_penalty: float = 50.0       # penalty when PII detected + low risk_tier model
     capability_miss: float = 20.0    # penalty per missing required capability
+    learned: float = 1.0            # weight for NEMOS-learned performance factor
 
 
 class NomosSettings(BaseSettings):
