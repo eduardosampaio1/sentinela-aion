@@ -57,8 +57,9 @@ _pipeline: Pipeline | None = None
 # Streaming timeout (seconds)
 _STREAM_TIMEOUT = 300
 
-# Snapshot task handle
+# Background task handles
 _snapshot_task: asyncio.Task | None = None
+_approval_task: asyncio.Task | None = None
 
 
 async def _record_all_outcomes(context: PipelineContext, response, settings) -> None:
@@ -163,6 +164,45 @@ async def _snapshot_baselines_loop():
         except Exception:
             logger.debug("NEMOS snapshot failed (non-critical)", exc_info=True)
 
+
+async def _approval_sweep_loop():
+    """Background task: resolve expired approvals every 60s via their on_timeout policy."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await _sweep_expired_approvals()
+        except Exception:
+            logger.debug("Approval sweep failed (non-critical)", exc_info=True)
+
+
+async def _sweep_expired_approvals() -> int:
+    """Check all pending approvals; resolve expired ones per on_timeout. Returns count resolved."""
+    import time as _time
+    from aion.nemos import get_nemos
+    nemos = get_nemos()
+    keys = await nemos._store.keys_by_prefix("aion:approval:")
+    now = _time.time()
+    resolved = 0
+    for key in keys:
+        record = await nemos._store.get_json(key)
+        if not record or record.get("status") != "pending":
+            continue
+        if record.get("expires_at", 0) > now:
+            continue
+        # Expired — apply on_timeout
+        on_timeout = record.get("on_timeout", "block")
+        if on_timeout == "block":
+            record["status"] = "expired"
+        else:
+            record["status"] = "timeout_fallback"
+        record["resolved_by"] = "system:timeout"
+        record["resolved_at"] = now
+        await nemos._store.set_json(key, record, ttl_seconds=7 * 86400)
+        resolved += 1
+        logger.info("Approval %s resolved via timeout (on_timeout=%s)",
+                    record.get("approval_request_id"), on_timeout)
+    return resolved
+
 # Override state (Track D)
 _overrides: dict = {}
 
@@ -232,14 +272,17 @@ async def lifespan(app: FastAPI):
     logger.info("AION pipeline ready")
 
     # Start NEMOS background snapshot task
-    global _snapshot_task
+    global _snapshot_task, _approval_task
     _snapshot_task = asyncio.create_task(_snapshot_baselines_loop())
+    _approval_task = asyncio.create_task(_approval_sweep_loop())
 
     yield
 
-    # Cancel snapshot task on shutdown
+    # Cancel background tasks on shutdown
     if _snapshot_task:
         _snapshot_task.cancel()
+    if _approval_task:
+        _approval_task.cancel()
 
     # Graceful shutdown: flush telemetry, close clients
     await shutdown_telemetry()
@@ -301,9 +344,62 @@ if _settings_cors.cors_origins:
 # ──────────────────────────────────────────────
 
 
+async def _resolve_operating_mode(tenant: str) -> str:
+    """Ask NEMOS for the operating_mode; fall back to stateless if unavailable."""
+    try:
+        from aion.nemos import get_nemos
+        return await get_nemos().get_operating_mode(tenant)
+    except Exception:
+        return "stateless"
+
+
+def _active_module_names() -> list[str]:
+    """Module names that actually ran (for capability reporting)."""
+    if _pipeline is None:
+        return []
+    return [m.name for m in _pipeline._pre_modules]
+
+
+def _add_contract_headers(headers: dict, contract, mode: str, *, idempotent_hit: bool = False) -> None:
+    """Attach contract-derived headers common to all integration modes."""
+    headers["X-Aion-Mode"] = mode
+    headers["X-Aion-Contract-Version"] = contract.contract_version
+    headers["X-Aion-Side-Effects-Possible"] = (
+        "true" if contract.side_effect_level.value != "none" else "false"
+    )
+    dc = contract.decision_confidence
+    headers["X-Aion-Decision-Confidence"] = f"{dc.score:.2f}"
+    headers["X-Aion-Decision-Level"] = dc.level.value
+    if idempotent_hit:
+        headers["X-Aion-Idempotent-Hit"] = "true"
+
+
+async def _idempotency_lookup(tenant: str, request: Request):
+    """Return (idempotency_key, cached) — cached is None on miss."""
+    key = request.headers.get("X-Idempotency-Key") or request.headers.get("x-idempotency-key")
+    if not key:
+        return None, None
+    from aion.contract import get_idempotency_cache
+    cached = await get_idempotency_cache().get(tenant, key)
+    return key, cached
+
+
+async def _idempotency_store(
+    tenant: str, key: str | None, contract, response_dict: dict | None, executed: bool,
+) -> None:
+    if not key:
+        return
+    from aion.contract import get_idempotency_cache
+    await get_idempotency_cache().set(tenant, key, contract, response_dict, executed)
+
+
 @app.post("/v1/chat/completions", tags=["LLM Proxy"])
 async def chat_completions(request: Request):
-    """OpenAI-compatible chat completions endpoint."""
+    """OpenAI-compatible chat completions endpoint (Transparent mode)."""
+    from aion.adapter import get_adapter
+    from aion.contract import Action, build_contract
+    from aion.contract.errors import ErrorType
+
     settings = get_settings()
 
     # Parse request body
@@ -319,8 +415,21 @@ async def chat_completions(request: Request):
     # Resolve tenant
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
 
+    # --- Idempotency check ---
+    idemp_key, cached = await _idempotency_lookup(tenant, request)
+    if cached and cached.response:
+        # Replay — return cached response + headers indicating idempotent hit
+        headers = {"X-Request-ID": cached.contract.request_id}
+        _add_contract_headers(headers, cached.contract, mode="transparent", idempotent_hit=True)
+        return JSONResponse(content=cached.response, headers=headers)
+
     # Build pipeline context
     context = PipelineContext(tenant=tenant)
+    context.original_request = chat_request
+    if not context.modified_request:
+        context.modified_request = chat_request
+    if idemp_key:
+        context.metadata["idempotency_key"] = idemp_key
 
     # Ensure pipeline is initialized
     global _pipeline
@@ -328,6 +437,7 @@ async def chat_completions(request: Request):
         _pipeline = build_pipeline()
 
     # --- Run pre-LLM pipeline ---
+    t_pipeline = time.perf_counter()
     try:
         context = await _pipeline.run_pre(chat_request, context)
     except Exception:
@@ -335,32 +445,63 @@ async def chat_completions(request: Request):
         if settings.fail_mode == FailMode.CLOSED:
             return _error_response(503, "AION pipeline error (fail-closed)", "pipeline_error")
         context.decision = Decision.CONTINUE
+    decision_latency_ms = (time.perf_counter() - t_pipeline) * 1000
 
-    # --- Handle BLOCK ---
-    if context.decision == Decision.BLOCK:
-        reason = context.metadata.get("block_reason", "Request blocked by policy")
+    # --- Build DecisionContract (single canonical source) ---
+    operating_mode = await _resolve_operating_mode(tenant)
+    contract = build_contract(
+        context,
+        active_modules=_active_module_names(),
+        operating_mode=operating_mode,
+        decision_latency_ms=decision_latency_ms,
+        environment=getattr(settings, "environment", "prod"),
+    )
+
+    # --- Handle BLOCK (preserve legacy error format) ---
+    if contract.action == Action.BLOCK:
         await _pipeline.emit_telemetry(context)
-        return _error_response(403, reason, "blocked_by_policy", "policy_error")
+        reason = (
+            contract.error.detail if contract.error and contract.error.detail
+            else context.metadata.get("block_reason", "Request blocked by policy")
+        )
+        headers = _build_response_headers(context)
+        _add_contract_headers(headers, contract, mode="transparent")
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"message": reason, "type": "policy_error", "code": "blocked_by_policy"}},
+            headers=headers,
+        )
 
-    # --- Handle BYPASS ---
-    if context.decision == Decision.BYPASS and context.bypass_response:
+    # --- BYPASS — execute via adapter ---
+    if contract.action == Action.BYPASS:
         await _pipeline.emit_telemetry(context)
 
-        resp_headers = _build_response_headers(context)
-        resp_headers["X-Aion-Decision"] = "bypass"
+        adapter = get_adapter()
+        t_exec = time.perf_counter()
+        result = await adapter.execute(contract, stream=chat_request.stream)
+        execution_latency_ms = (time.perf_counter() - t_exec) * 1000
 
-        if chat_request.stream:
-            resp_headers["Cache-Control"] = "no-cache"
-            resp_headers["Connection"] = "keep-alive"
+        headers = _build_response_headers(context)
+        headers["X-Aion-Decision"] = "bypass"
+        _add_contract_headers(headers, contract, mode="transparent")
+
+        if not result.success:
+            return _error_response(result.status_code, "Bypass execution failed", "bypass_error")
+
+        if chat_request.stream and result.stream_iterator is not None:
+            headers["Cache-Control"] = "no-cache"
+            headers["Connection"] = "keep-alive"
             return StreamingResponse(
-                build_bypass_stream(context.bypass_response),
+                result.stream_iterator,
                 media_type="text/event-stream",
-                headers=resp_headers,
+                headers=headers,
             )
 
-        return JSONResponse(content=context.bypass_response.model_dump(), headers=resp_headers)
+        response_dict = result.response.model_dump()
+        await _idempotency_store(tenant, idemp_key, contract, response_dict, executed=True)
+        return JSONResponse(content=response_dict, headers=headers)
 
-    # --- Forward to LLM ---
+    # --- CALL_LLM path (streaming preserves existing behavior) ---
     effective_request = context.modified_request or chat_request
 
     try:
@@ -381,6 +522,7 @@ async def chat_completions(request: Request):
             stream_headers["X-Aion-Decision"] = "passthrough"
             stream_headers["Cache-Control"] = "no-cache"
             stream_headers["Connection"] = "keep-alive"
+            _add_contract_headers(stream_headers, contract, mode="transparent")
             return StreamingResponse(
                 stream_with_timeout(),
                 media_type="text/event-stream",
@@ -404,11 +546,10 @@ async def chat_completions(request: Request):
 
             pass_headers = _build_response_headers(context)
             pass_headers["X-Aion-Decision"] = "passthrough"
-            # Add decision confidence header
-            dc = context.metadata.get("decision_confidence")
-            if dc:
-                pass_headers["X-Aion-Decision-Confidence"] = str(dc.get("score", 0.5))
-            return JSONResponse(content=response.model_dump(), headers=pass_headers)
+            _add_contract_headers(pass_headers, contract, mode="transparent")
+            response_dict = response.model_dump()
+            await _idempotency_store(tenant, idemp_key, contract, response_dict, executed=True)
+            return JSONResponse(content=response_dict, headers=pass_headers)
 
     except httpx.HTTPStatusError as e:
         await _pipeline.emit_telemetry(context)
@@ -417,6 +558,274 @@ async def chat_completions(request: Request):
         logger.exception("LLM forward failed (request_id=%s)", context.request_id)
         await _pipeline.emit_telemetry(context)
         return _error_response(502, "Failed to reach LLM provider", "llm_unreachable", "upstream_error")
+
+
+# ──────────────────────────────────────────────
+# Integration Modes — Assisted + Decision
+# ──────────────────────────────────────────────
+
+
+async def _run_pipeline_and_build_contract(
+    chat_request: ChatCompletionRequest,
+    tenant: str,
+    *,
+    settings,
+) -> tuple[PipelineContext, "DecisionContract", float]:  # noqa: F821
+    """Shared helper: run pre-LLM pipeline and build the contract.
+
+    Used by Assisted (/v1/chat/assisted) and Decision (/v1/decisions) modes.
+    Transparent (/v1/chat/completions) uses its own flow for backward compat.
+    """
+    from aion.contract import build_contract
+
+    context = PipelineContext(tenant=tenant)
+    context.original_request = chat_request
+    if not context.modified_request:
+        context.modified_request = chat_request
+
+    global _pipeline
+    if _pipeline is None:
+        _pipeline = build_pipeline()
+
+    t_pipeline = time.perf_counter()
+    try:
+        context = await _pipeline.run_pre(chat_request, context)
+    except Exception:
+        logger.exception("Pipeline pre-LLM failed (request_id=%s)", context.request_id)
+        if settings.fail_mode == FailMode.CLOSED:
+            raise
+        context.decision = Decision.CONTINUE
+    decision_latency_ms = (time.perf_counter() - t_pipeline) * 1000
+
+    operating_mode = await _resolve_operating_mode(tenant)
+    contract = build_contract(
+        context,
+        active_modules=_active_module_names(),
+        operating_mode=operating_mode,
+        decision_latency_ms=decision_latency_ms,
+        environment=getattr(settings, "environment", "prod"),
+    )
+    return context, contract, decision_latency_ms
+
+
+@app.post("/v1/chat/assisted", tags=["LLM Proxy"])
+async def chat_assisted(request: Request):
+    """Assisted mode — AION executa, retorna response + DecisionContract.
+
+    Response: {"response": ChatCompletionResponse, "contract": DecisionContract}
+    """
+    from aion.adapter import get_adapter
+    from aion.contract import Action
+
+    settings = get_settings()
+    body = await request.json()
+
+    if len(body.get("messages", [])) > 100:
+        return _error_response(400, "Too many messages (max 100)", "too_many_messages", "invalid_request")
+
+    try:
+        chat_request = ChatCompletionRequest(**body)
+    except Exception as exc:
+        return _error_response(400, f"Invalid request: {exc}", "invalid_request")
+
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    # Idempotency
+    idemp_key, cached = await _idempotency_lookup(tenant, request)
+    if cached:
+        headers = {"X-Request-ID": cached.contract.request_id}
+        _add_contract_headers(headers, cached.contract, mode="assisted", idempotent_hit=True)
+        return JSONResponse(
+            content={"response": cached.response, "contract": cached.contract.model_dump()},
+            headers=headers,
+        )
+
+    try:
+        context, contract, decision_latency_ms = await _run_pipeline_and_build_contract(
+            chat_request, tenant, settings=settings,
+        )
+    except Exception:
+        return _error_response(503, "AION pipeline error (fail-closed)", "pipeline_error")
+
+    if idemp_key:
+        context.metadata["idempotency_key"] = idemp_key
+        contract.idempotency_key = idemp_key
+
+    await _pipeline.emit_telemetry(context)
+
+    # Handle BLOCK — return contract with error inside, HTTP 403
+    if contract.action == Action.BLOCK:
+        headers = _build_response_headers(context)
+        _add_contract_headers(headers, contract, mode="assisted")
+        return JSONResponse(
+            status_code=403,
+            content={"response": None, "contract": contract.model_dump()},
+            headers=headers,
+        )
+
+    # Execute via adapter (streaming not supported in Assisted v1)
+    adapter = get_adapter()
+    t_exec = time.perf_counter()
+    result = await adapter.execute(contract, stream=False)
+    execution_latency_ms = (time.perf_counter() - t_exec) * 1000
+
+    # Update metrics in the contract so client sees full picture
+    contract.meta.metrics.execution_latency_ms = round(execution_latency_ms, 2)
+    contract.meta.metrics.total_latency_ms = round(decision_latency_ms + execution_latency_ms, 2)
+    if result.response and result.response.usage:
+        contract.meta.metrics.tokens_used = result.response.usage.total_tokens or 0
+
+    headers = _build_response_headers(context)
+    _add_contract_headers(headers, contract, mode="assisted")
+
+    if not result.success:
+        return JSONResponse(
+            status_code=result.status_code,
+            content={
+                "response": None,
+                "contract": contract.model_dump(),
+                "error": result.error.model_dump() if result.error else None,
+            },
+            headers=headers,
+        )
+
+    # Record outcome to NEMOS (same as Transparent)
+    if contract.action == Action.CALL_LLM:
+        asyncio.create_task(_record_all_outcomes(context, result.response, settings))
+
+    response_dict = result.response.model_dump() if result.response else None
+    body_out = {
+        "response": response_dict,
+        "contract": contract.model_dump(),
+    }
+    if result.raw_service_response is not None:
+        body_out["raw_service_response"] = result.raw_service_response
+
+    await _idempotency_store(tenant, idemp_key, contract, response_dict, executed=True)
+    return JSONResponse(content=body_out, headers=headers)
+
+
+@app.post("/v1/decisions", tags=["LLM Proxy"])
+async def decisions(request: Request):
+    """Decision mode — AION decide, nao executa. Retorna DecisionContract cru.
+
+    O ExecutionAdapter NUNCA e invocado neste endpoint. Cliente executa por conta.
+    """
+    settings = get_settings()
+    body = await request.json()
+
+    if len(body.get("messages", [])) > 100:
+        return _error_response(400, "Too many messages (max 100)", "too_many_messages", "invalid_request")
+
+    try:
+        chat_request = ChatCompletionRequest(**body)
+    except Exception as exc:
+        return _error_response(400, f"Invalid request: {exc}", "invalid_request")
+
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    # Idempotency
+    idemp_key, cached = await _idempotency_lookup(tenant, request)
+    if cached:
+        headers = {"X-Request-ID": cached.contract.request_id}
+        _add_contract_headers(headers, cached.contract, mode="decision", idempotent_hit=True)
+        return JSONResponse(content=cached.contract.model_dump(), headers=headers)
+
+    try:
+        context, contract, _ = await _run_pipeline_and_build_contract(
+            chat_request, tenant, settings=settings,
+        )
+    except Exception:
+        return _error_response(503, "AION pipeline error (fail-closed)", "pipeline_error")
+
+    if idemp_key:
+        contract.idempotency_key = idemp_key
+
+    await _pipeline.emit_telemetry(context)
+
+    headers = _build_response_headers(context)
+    _add_contract_headers(headers, contract, mode="decision")
+
+    # Decision mode: execution_latency is always 0 (adapter not invoked)
+    contract.meta.metrics.execution_latency_ms = 0.0
+    contract.meta.metrics.total_latency_ms = contract.meta.metrics.decision_latency_ms
+
+    # Cache contract only (no response since no execution)
+    await _idempotency_store(tenant, idemp_key, contract, response_dict=None, executed=False)
+    return JSONResponse(content=contract.model_dump(), headers=headers)
+
+
+# ──────────────────────────────────────────────
+# Human Approval lifecycle
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/approvals/{approval_id}", tags=["Control Plane"])
+async def get_approval(approval_id: str):
+    """Polling endpoint — returns the current status of a human-approval request."""
+    from aion.adapter.approval_executor import _approval_key
+    from aion.nemos import get_nemos
+    record = await get_nemos()._store.get_json(_approval_key(approval_id))
+    if not record:
+        return _error_response(404, f"Approval '{approval_id}' not found", "not_found", "invalid_request")
+    return record
+
+
+@app.post("/v1/approvals/{approval_id}/resolve", tags=["Control Plane"])
+async def resolve_approval(approval_id: str, request: Request):
+    """Resolve a pending approval (approved or denied).
+
+    Body: ``{"status": "approved|denied", "approver": "string"}``
+    """
+    import time as _time
+    from aion.adapter.approval_executor import _approval_key
+    from aion.nemos import get_nemos
+
+    body = await request.json()
+    new_status = body.get("status")
+    if new_status not in ("approved", "denied"):
+        return _error_response(400, "status must be 'approved' or 'denied'", "invalid_status", "invalid_request")
+    approver = body.get("approver", "unknown")
+
+    nemos = get_nemos()
+    key = _approval_key(approval_id)
+    record = await nemos._store.get_json(key)
+    if not record:
+        return _error_response(404, f"Approval '{approval_id}' not found", "not_found", "invalid_request")
+    if record.get("status") != "pending":
+        return _error_response(
+            409, f"Approval already resolved (status={record['status']})",
+            "already_resolved", "invalid_request",
+        )
+
+    record["status"] = new_status
+    record["resolved_by"] = approver
+    record["resolved_at"] = _time.time()
+    await nemos._store.set_json(key, record, ttl_seconds=7 * 86400)
+    return {"approval_request_id": approval_id, "status": new_status, "resolved_by": approver}
+
+
+@app.get("/v1/approvals", tags=["Control Plane"])
+async def list_approvals(
+    tenant: str | None = None, status: str | None = "pending", limit: int = 50,
+):
+    """List approvals filtered by tenant and status."""
+    from aion.nemos import get_nemos
+    nemos = get_nemos()
+    keys = await nemos._store.keys_by_prefix("aion:approval:")
+    items = []
+    for key in keys:
+        rec = await nemos._store.get_json(key)
+        if not rec:
+            continue
+        if tenant and rec.get("tenant") != tenant:
+            continue
+        if status and rec.get("status") != status:
+            continue
+        items.append(rec)
+        if len(items) >= limit:
+            break
+    return {"approvals": items, "count": len(items)}
 
 
 # ──────────────────────────────────────────────

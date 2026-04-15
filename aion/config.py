@@ -73,6 +73,12 @@ class AionSettings(BaseSettings):
     # --- Data retention ---
     telemetry_retention_hours: int = 168  # 7 days default
 
+    # --- Environment (contract meta) ---
+    environment: str = "prod"  # prod | staging | dev — validated by contract
+
+    # --- Service registry (CALL_SERVICE) ---
+    service_registry_path: Path = _PROJECT_DIR / "config" / "services.yaml"
+
 
 class EstixeSettings(BaseSettings):
     model_config = SettingsConfigDict(

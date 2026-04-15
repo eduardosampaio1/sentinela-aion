@@ -8,6 +8,7 @@ from aion.config import get_nomos_settings
 from aion.nomos.classifier import ComplexityClassifier
 from aion.nomos.registry import ModelRegistry
 from aion.nomos.router import Router
+from aion.shared.contracts import NomosResult
 from aion.shared.schemas import ChatCompletionRequest, PipelineContext
 
 logger = logging.getLogger("aion.nomos")
@@ -62,6 +63,19 @@ class NomosModule:
             context.metadata["decision_confidence"] = route.confidence.to_dict()
         if route.exploration:
             context.metadata["exploration"] = True
+
+        # Populate formal NomosResult alongside metadata (Phase A)
+        context.nomos_result = NomosResult(
+            selected_model=route.model_name,
+            selected_provider=route.provider,
+            base_url=route.base_url,
+            complexity_score=route.complexity_score,
+            route_reason=route.reason,
+            estimated_cost=route.estimated_cost,
+            score_breakdown=route.score_breakdown.to_dict() if route.score_breakdown else None,
+            candidates_evaluated=route.candidates_evaluated,
+            pii_influenced=route.pii_influenced,
+        )
 
         logger.info(
             "NOMOS route: model=%s provider=%s complexity=%.1f reason=%s confidence=%.2f",

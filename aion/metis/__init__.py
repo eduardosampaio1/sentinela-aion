@@ -8,6 +8,7 @@ from aion.config import get_metis_settings
 from aion.metis.compressor import PromptCompressor
 from aion.metis.behavior import BehaviorDial
 from aion.metis.optimizer import ResponseOptimizer
+from aion.shared.contracts import MetisResult
 from aion.shared.schemas import ChatCompletionRequest, ChatCompletionResponse, PipelineContext
 
 logger = logging.getLogger("aion.metis")
@@ -68,6 +69,17 @@ class MetisPreModule:
         context.metadata["compression_applied"] = compression_ok
 
         saved = context.tokens_before - context.tokens_after
+
+        # Formal result (Phase A)
+        context.metis_result = MetisResult(
+            tokens_before=context.tokens_before,
+            tokens_after=context.tokens_after,
+            tokens_saved=max(0, saved),
+            compression_applied=compression_ok,
+            behavior_dial_active=behavior is not None,
+            behavior_settings=behavior.model_dump() if behavior else None,
+        )
+
         if saved > 0:
             logger.info(
                 "METIS compressed: %d → %d tokens (saved %d)",
@@ -99,6 +111,9 @@ class MetisPostModule:
         if behavior:
             optimized = self._optimizer.optimize(response, behavior)
             context.metadata["llm_response"] = optimized
+            # Update formal result (Phase A)
+            if context.metis_result is not None:
+                context.metis_result.post_optimization_applied = True
 
         return context
 

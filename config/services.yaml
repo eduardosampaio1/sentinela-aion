@@ -1,0 +1,32 @@
+# AION service registry — consumed by CALL_SERVICE action.
+#
+# Services listed here can be invoked instead of (or alongside) LLM calls when
+# ESTIXE/NOMOS/policy routes a request via the `call_service_name` metadata key.
+#
+# Fields:
+#   name              : unique identifier used in final_output.payload.service_name
+#   endpoint          : full URL of the service
+#   method            : HTTP method (default: POST)
+#   auth_env          : env var holding a Bearer token (optional)
+#   timeout_seconds   : request timeout (default: 5)
+#   response_adapter  : name registered in aion/adapter/service_adapters.py (optional)
+#   capabilities      : informational list of what the service does
+
+version: "1.0"
+
+services:
+  # Example — echo service for testing. Replace with real services per tenant.
+  - name: echo
+    endpoint: https://httpbin.org/anything
+    method: POST
+    timeout_seconds: 5
+    capabilities: [echo, debug]
+
+  # Template example — commented out. Copy and fill in to enable.
+  # - name: crm_lookup
+  #   endpoint: https://crm.internal/api/v1/query
+  #   method: POST
+  #   auth_env: CRM_API_KEY
+  #   timeout_seconds: 5
+  #   response_adapter: crm_lookup_to_openai
+  #   capabilities: [crm, lookup]

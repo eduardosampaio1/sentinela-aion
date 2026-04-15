@@ -9,8 +9,8 @@ from aion.estixe.bypass import BypassEngine
 from aion.estixe.classifier import SemanticClassifier
 from aion.estixe.guardrails import Guardrails
 from aion.estixe.policy import PolicyEngine
-from aion.shared.contracts import PiiPolicyConfig
-from aion.shared.schemas import ChatCompletionRequest, PipelineContext
+from aion.shared.contracts import EstixeAction, EstixeResult, PiiPolicyConfig
+from aion.shared.schemas import ChatCompletionRequest, Decision, PipelineContext
 from aion.shared.tokens import extract_user_message
 
 logger = logging.getLogger("aion.estixe")
@@ -42,24 +42,32 @@ class EstixeModule:
         if not self._initialized:
             await self.initialize()
 
+        # Initialize the formal result — populated progressively
+        result = EstixeResult(action=EstixeAction.CONTINUE)
+
         # Extract user message using shared utility
         user_message = extract_user_message(request)
         if not user_message:
+            context.estixe_result = result
             return context
 
         # 0. PII guard on INPUT (not just output) — Track A1
-        # Resolve per-tenant PII policy from context metadata
         pii_policy = self._resolve_pii_policy(context)
         input_check = self._guardrails.check_output(user_message, pii_policy=pii_policy)
 
         if input_check.blocked:
             context.set_block(input_check.block_reason)
             context.metadata["pii_violations"] = input_check.violations
+            result.action = EstixeAction.BLOCK
+            result.pii_violations = input_check.violations
+            result.block_reason = input_check.block_reason
+            context.estixe_result = result
             return context
 
         if not input_check.safe:
             logger.warning("PII detected in user input: %d violations", len(input_check.violations))
             context.metadata["pii_violations"] = input_check.violations
+            result.pii_violations = input_check.violations
             if input_check.audited:
                 context.metadata["pii_audited"] = input_check.audited
             # Sanitize input before proceeding (only if content was modified)
@@ -69,23 +77,29 @@ class EstixeModule:
                         msg.content = input_check.filtered_content
                         break
                 user_message = input_check.filtered_content
+                result.pii_sanitized = True
 
         # 1. Policy check (block dangerous content)
         policy_result = await self._policy.check(user_message, context)
+        if policy_result.matched_rules:
+            result.policy_matched = list(policy_result.matched_rules)
         if policy_result.blocked:
             context.set_block(policy_result.reason)
+            result.action = EstixeAction.BLOCK
+            result.policy_action = "block"
+            result.block_reason = policy_result.reason
+            context.estixe_result = result
             return context
 
         # 2. Transform input if policy says so
         if policy_result.transformed_input:
-            # Apply sanitization to the request
+            result.policy_action = "transform"
             for msg in context.modified_request.messages:
                 if msg.role == "user" and msg.content == user_message:
                     msg.content = policy_result.transformed_input
                     break
 
         # 3. Bypass check (can we respond without LLM?)
-        # Apply dynamic threshold from NEMOS if available
         original_threshold = self._classifier._settings.bypass_threshold
         effective_threshold = await self._resolve_dynamic_threshold(context, original_threshold)
         if effective_threshold != original_threshold:
@@ -93,7 +107,6 @@ class EstixeModule:
 
         bypass_result = await self._bypass.check(user_message, context)
 
-        # Restore original threshold
         if effective_threshold != original_threshold:
             self._classifier._settings.bypass_threshold = original_threshold
 
@@ -101,8 +114,19 @@ class EstixeModule:
             context.set_bypass(bypass_result.response)
             context.metadata["detected_intent"] = bypass_result.intent
             context.metadata["intent_confidence"] = bypass_result.confidence
+            result.action = EstixeAction.BYPASS
+            result.intent_detected = bypass_result.intent
+            result.intent_confidence = bypass_result.confidence
+            if bypass_result.response and bypass_result.response.choices:
+                result.bypass_response_text = bypass_result.response.choices[0].message.content
+            context.estixe_result = result
             return context
 
+        # CONTINUE path — still capture any detected intent
+        if bypass_result.intent:
+            result.intent_detected = bypass_result.intent
+            result.intent_confidence = bypass_result.confidence
+        context.estixe_result = result
         return context
 
     @staticmethod

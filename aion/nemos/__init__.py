@@ -324,6 +324,24 @@ class Nemos:
 
         return result
 
+    async def get_operating_mode(self, tenant: str) -> str:
+        """Derive operating_mode for a tenant from baseline + maturity.
+
+        Returns one of: stateless | learning | adaptive | stabilized.
+        - stateless  : no data or Redis absent
+        - learning   : <100 requests total
+        - adaptive   : stable baseline, learned data active
+        - stabilized : stable baseline, no drift in last 24h
+        """
+        baseline = await self.get_baseline(tenant)
+        if not baseline or baseline.total_requests == 0:
+            return "stateless"
+        if baseline.total_requests < 100:
+            return "learning"
+        if getattr(baseline, "drift_detected", False):
+            return "adaptive"
+        return "stabilized"
+
     # ══════════════════════════════════════════════
     # LGPD
     # ══════════════════════════════════════════════
