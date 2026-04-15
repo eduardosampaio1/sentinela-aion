@@ -19,15 +19,42 @@ The 5 pillars:
 4. **Quality** — semantic similarity + optional LLM-as-judge
 5. **Decision intelligence** — model distribution, confidence
 
+### Two scenarios
+
+AION ships with **two** dataset scenarios. Run one, the other, or both.
+
+| Scenario | Dataset | Distribution | Purpose |
+|---|---|---|---|
+| `conservative` (default) | `bench_suite.yaml` | ~37% simple, ~36% medium, ~20% complex, ~7% edge | Prove AION does not hurt generic traffic |
+| `aggressive` | `bench_suite_aggressive.yaml` | ~76% bypass-expected, ~7% METIS-heavy, ~14% routing mix | Prove AION's economic upside on realistic support/chat traffic |
+| `both` | — | — | Runs both and writes a comparative report |
+
 ### Quick start (mock, fast, free)
 
 ```bash
-# Full 133-prompt suite with deterministic mock
+# Conservative scenario (default) — full 133-prompt suite
 python -m benchmarks.bench_suite --output bench_report.md
 
-# Small sample for smoke test
+# Aggressive scenario — shows real economic upside
+python -m benchmarks.bench_suite --scenario aggressive --output aggressive.md
+
+# Both — produces conservative + aggressive + comparative reports
+python -m benchmarks.bench_suite --scenario both --output bench_both.md
+
+# Small sample for smoke test (stratified by tier)
 python -m benchmarks.bench_suite --sample 30 --output smoke.md
 ```
+
+Observed result (mock run, all prompts):
+
+```
+[conservative]  LLM -22.6%  |  Cost -12.3%  |  Tokens  -6.5%  |  Quality  0.75 → 0.74
+[  aggressive]  LLM -61.9%  |  Cost -41.3%  |  Tokens -22.4%  |  Quality  0.69 → 0.67
+```
+
+The 39-point jump in LLM-call reduction between the two scenarios shows AION's
+value scales with how much of the traffic is bypass-able — a hallmark of real
+chat/support workloads.
 
 ### Live (real LLM — costs $)
 

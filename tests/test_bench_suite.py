@@ -17,6 +17,11 @@ def dataset_path() -> Path:
     return Path(__file__).resolve().parents[1] / "benchmarks" / "datasets" / "bench_suite.yaml"
 
 
+@pytest.fixture
+def aggressive_dataset_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "benchmarks" / "datasets" / "bench_suite_aggressive.yaml"
+
+
 # ── Dataset shape ──
 
 class TestDataset:
@@ -266,3 +271,120 @@ class TestEndToEnd:
         assert "Chamadas LLM" in md
         assert "Bypass rate" in md
         assert "Qualidade" in md
+
+
+# ── Aggressive scenario dataset ──
+
+class TestAggressiveDataset:
+    def test_file_exists(self, aggressive_dataset_path: Path):
+        assert aggressive_dataset_path.exists()
+
+    def test_has_version_and_prompts(self, aggressive_dataset_path: Path):
+        data = yaml.safe_load(aggressive_dataset_path.read_text(encoding="utf-8"))
+        assert data.get("version") == "1.0"
+        assert len(data["prompts"]) >= 50
+
+    def test_bypass_heavy_distribution(self, aggressive_dataset_path: Path):
+        """Aggressive dataset should have majority bypass-expected prompts."""
+        data = yaml.safe_load(aggressive_dataset_path.read_text(encoding="utf-8"))
+        bypass_expected = sum(
+            1 for p in data["prompts"] if p.get("expected_decision") == "BYPASS"
+        )
+        ratio = bypass_expected / len(data["prompts"])
+        # Target 60%+, actual is around 76%
+        assert ratio >= 0.55, f"aggressive dataset should be bypass-heavy, got {ratio:.2%}"
+
+    def test_has_compression_prompts(self, aggressive_dataset_path: Path):
+        """Aggressive dataset should have at least some METIS-targetable prompts."""
+        data = yaml.safe_load(aggressive_dataset_path.read_text(encoding="utf-8"))
+        compression = [p for p in data["prompts"] if p.get("category") == "compression"]
+        assert len(compression) >= 4
+        # Compression prompts should be long (>400 chars)
+        for p in compression:
+            assert len(p["prompt"]) >= 400, f"compression prompt too short: {p['id']}"
+
+    def test_ids_are_unique(self, aggressive_dataset_path: Path):
+        data = yaml.safe_load(aggressive_dataset_path.read_text(encoding="utf-8"))
+        ids = [p["id"] for p in data["prompts"]]
+        assert len(ids) == len(set(ids))
+
+
+# ── Comparative report ──
+
+class TestComparativeReport:
+    def _mock_scenario(self, name: str, bypass_rate: float, cost_reduction: float) -> dict:
+        return {
+            "scenario": name,
+            "dataset": f"benchmarks/datasets/bench_suite_{name}.yaml",
+            "n_prompts": 100,
+            "baseline": {
+                "cost": {"llm_calls": 100, "total_cost_usd": 0.05, "total_tokens": 1000},
+                "quality": {"semantic": {"mean": 0.75}},
+                "bypass": {"bypass_rate": 0.0, "by_tier": {}},
+                "latency": {
+                    "total": {"p50": 10, "p95": 20, "p99": 30, "mean": 12, "min": 5, "max": 40, "samples": 100},
+                    "decision": {"p50": 0, "p95": 0, "p99": 0, "mean": 0, "min": 0, "max": 0, "samples": 0},
+                    "execution": {"p50": 10, "p95": 20, "p99": 30, "mean": 12, "min": 5, "max": 40, "samples": 100},
+                    "samples": 100,
+                },
+                "decision": {"total": 100, "actions": {"CALL_LLM": 100}, "model_distribution": {}, "confidence": {"mean": 0, "median": 0, "samples": 0}, "model_by_tier": {}},
+            },
+            "with_aion": {
+                "cost": {
+                    "llm_calls": int(100 * (1 - bypass_rate)),
+                    "total_cost_usd": 0.05 * (1 - cost_reduction),
+                    "total_tokens": int(1000 * (1 - cost_reduction / 2)),
+                },
+                "quality": {"semantic": {"mean": 0.74}},
+                "bypass": {"bypass_rate": bypass_rate, "by_tier": {}},
+                "latency": {
+                    "total": {"p50": 15, "p95": 25, "p99": 35, "mean": 17, "min": 5, "max": 45, "samples": 100},
+                    "decision": {"p50": 5, "p95": 8, "p99": 10, "mean": 6, "min": 1, "max": 12, "samples": 100},
+                    "execution": {"p50": 10, "p95": 20, "p99": 30, "mean": 12, "min": 5, "max": 40, "samples": 100},
+                    "samples": 100,
+                },
+                "decision": {
+                    "total": 100,
+                    "actions": {"CALL_LLM": int(100 * (1 - bypass_rate)), "BYPASS": int(100 * bypass_rate)},
+                    "model_distribution": {"gpt-4o-mini": 50},
+                    "confidence": {"mean": 0.7, "median": 0.7, "samples": 100},
+                    "model_by_tier": {},
+                },
+            },
+            "savings": {
+                "llm_calls_pct_reduction": bypass_rate * 100,
+                "tokens_pct_reduction": cost_reduction * 50,
+                "cost_pct_reduction": cost_reduction * 100,
+                "llm_calls_delta": int(100 * bypass_rate),
+                "tokens_delta": int(1000 * cost_reduction / 2),
+                "cost_delta_usd": 0.05 * cost_reduction,
+            },
+        }
+
+    def test_render_comparative_produces_expected_sections(self):
+        from benchmarks.report import render_comparative
+        scenarios = [
+            self._mock_scenario("conservative", 0.2, 0.10),
+            self._mock_scenario("aggressive", 0.6, 0.40),
+        ]
+        md = render_comparative(scenarios, config={
+            "mode": "mock", "live": False, "llm_judge_sample_rate": 0, "model": "gpt-4o-mini",
+        })
+        assert "Comparative" in md
+        assert "Conservative" in md
+        assert "Aggressive" in md
+        assert "20.0%" in md  # conservative bypass/LLM reduction
+        assert "60.0%" in md  # aggressive
+
+    def test_render_comparative_highlights_delta(self):
+        from benchmarks.report import render_comparative
+        scenarios = [
+            self._mock_scenario("conservative", 0.25, 0.12),
+            self._mock_scenario("aggressive", 0.60, 0.40),
+        ]
+        md = render_comparative(scenarios, config={
+            "mode": "mock", "live": False, "llm_judge_sample_rate": 0, "model": "gpt-4o-mini",
+        })
+        assert "Delta entre cenarios" in md
+        # +35 p.p. delta expected
+        assert "35.0" in md or "+35.0" in md

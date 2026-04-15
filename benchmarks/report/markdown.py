@@ -18,6 +18,145 @@ def _fmt_num(n) -> str:
     return str(n)
 
 
+def render_comparative(scenarios: list[dict], config: dict) -> str:
+    """Comparative report across multiple scenarios (e.g. conservative vs aggressive).
+
+    Each element of ``scenarios`` is the dict returned by
+    ``bench_suite.run_single_scenario`` — contains baseline, with_aion, savings.
+    """
+    lines: list[str] = []
+    lines.append("# AION Benchmark — Comparative (conservative vs aggressive)")
+    lines.append("")
+    lines.append(
+        f"**Config**: mode=`{config['mode']}`, live={config['live']}, "
+        f"llm_judge={config['llm_judge_sample_rate']}, model={config['model']}"
+    )
+    lines.append("")
+    lines.append(
+        "> **Por que dois cenarios?**  O cenario *conservative* tem distribuicao realista "
+        "ampla (mix simples/medio/complexo) e mede o caso 'sem piorar'. O cenario "
+        "*aggressive* tem distribuicao tipica de atendimento (muitas saudacoes, acks, "
+        "inputs grandes) onde o AION brilha economicamente. Juntos mostram:"
+    )
+    lines.append("")
+    lines.append(
+        "1. **Cenario conservador**: AION nao prejudica nada, mesmo em traffic generico")
+    lines.append(
+        "2. **Cenario agressivo**: AION converte trafego real em economia expressiva")
+    lines.append("")
+
+    # Side-by-side comparison table
+    lines.append("## Comparativo lado a lado")
+    lines.append("")
+    header = "| Métrica |"
+    sep = "|---|"
+    for s in scenarios:
+        header += f" {s['scenario'].title()} |"
+        sep += "---|"
+    lines.append(header)
+    lines.append(sep)
+
+    def _cell(value: float, fmt: str = "{:.1f}%") -> str:
+        return fmt.format(value)
+
+    # LLM call reduction
+    row = "| **LLM calls reduzidas** |"
+    for s in scenarios:
+        row += f" {_cell(s['savings']['llm_calls_pct_reduction'])} |"
+    lines.append(row)
+
+    # Cost reduction
+    row = "| **Custo reduzido** |"
+    for s in scenarios:
+        row += f" {_cell(s['savings']['cost_pct_reduction'])} |"
+    lines.append(row)
+
+    # Tokens reduction
+    row = "| Tokens reduzidos |"
+    for s in scenarios:
+        row += f" {_cell(s['savings']['tokens_pct_reduction'])} |"
+    lines.append(row)
+
+    # Bypass rate
+    row = "| Bypass rate (AION) |"
+    for s in scenarios:
+        row += f" {s['with_aion']['bypass']['bypass_rate'] * 100:.1f}% |"
+    lines.append(row)
+
+    # Quality delta
+    row = "| Qualidade (delta) |"
+    for s in scenarios:
+        b_q = s["baseline"]["quality"]["semantic"].get("mean", 0)
+        a_q = s["with_aion"]["quality"]["semantic"].get("mean", 0)
+        delta = ((a_q - b_q) / b_q * 100) if b_q else 0
+        row += f" {_pct(delta)} ({b_q:.2f} → {a_q:.2f}) |"
+    lines.append(row)
+
+    # Decision latency added
+    row = "| Decision latency p95 |"
+    for s in scenarios:
+        p95 = s["with_aion"]["latency"]["decision"].get("p95", 0)
+        row += f" {p95:.2f} ms |"
+    lines.append(row)
+
+    # Prompt counts
+    row = "| Prompts no dataset |"
+    for s in scenarios:
+        row += f" {s['n_prompts']} |"
+    lines.append(row)
+
+    lines.append("")
+
+    # Headline interpretation
+    agg = next((s for s in scenarios if s["scenario"] == "aggressive"), None)
+    cons = next((s for s in scenarios if s["scenario"] == "conservative"), None)
+    if agg and cons:
+        lines.append("## Leitura do resultado")
+        lines.append("")
+        lines.append(
+            f"- **Conservative**: {cons['savings']['llm_calls_pct_reduction']:.1f}% "
+            f"menos chamadas LLM, {cons['savings']['cost_pct_reduction']:.1f}% menos custo "
+            f"— prova que AION nao degrada operacao generica."
+        )
+        lines.append(
+            f"- **Aggressive**: {agg['savings']['llm_calls_pct_reduction']:.1f}% "
+            f"menos chamadas LLM, {agg['savings']['cost_pct_reduction']:.1f}% menos custo "
+            f"— ganho real em traffic tipico de atendimento/chat."
+        )
+        lines.append("")
+        delta_llm = agg["savings"]["llm_calls_pct_reduction"] - cons["savings"]["llm_calls_pct_reduction"]
+        lines.append(
+            f"> **Delta entre cenarios**: o salto de +{delta_llm:.1f}p.p. em LLM calls "
+            "reduzidas entre conservative e aggressive mostra que o valor do AION escala "
+            "com quanto de traffic e *bypass-able* — caracteristica tipica de chat/support."
+        )
+        lines.append("")
+
+    # Per-scenario summary links
+    lines.append("## Detalhamento por cenario")
+    lines.append("")
+    for s in scenarios:
+        lines.append(f"### {s['scenario'].title()}")
+        lines.append("")
+        lines.append(f"- Prompts: {s['n_prompts']}")
+        lines.append(f"- Dataset: `{s['dataset']}`")
+        lines.append(
+            f"- Baseline: {s['baseline']['cost']['llm_calls']} LLM calls, "
+            f"${s['baseline']['cost']['total_cost_usd']:.4f} total"
+        )
+        lines.append(
+            f"- With AION: {s['with_aion']['cost']['llm_calls']} LLM calls, "
+            f"${s['with_aion']['cost']['total_cost_usd']:.4f} total"
+        )
+        # Decision mix
+        actions = s["with_aion"]["decision"]["actions"]
+        action_str = ", ".join(f"{k}={v}" for k, v in sorted(actions.items(), key=lambda x: -x[1]))
+        lines.append(f"- Decisoes AION: {action_str}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def render_markdown(
     *,
     baseline: dict,
