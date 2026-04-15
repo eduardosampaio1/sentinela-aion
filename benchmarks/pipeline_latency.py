@@ -201,6 +201,149 @@ def format_table(results: list[BenchResult]) -> str:
     return "\n".join(lines)
 
 
+async def bench_metis_post(n: int) -> BenchResult:
+    """METIS post-LLM module in isolation (runs after the LLM call in real flow)."""
+    from aion.metis import get_post_module
+    from aion.shared.schemas import (
+        ChatCompletionChoice,
+        ChatCompletionRequest,
+        ChatCompletionResponse,
+        ChatMessage,
+        PipelineContext,
+    )
+
+    module = get_post_module()
+    request = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        messages=[ChatMessage(role="user", content="Explain recursion briefly.")],
+    )
+    canned_response = ChatCompletionResponse(
+        model="gpt-4o-mini",
+        choices=[ChatCompletionChoice(
+            index=0,
+            message=ChatMessage(role="assistant", content="Recursion is a function that calls itself with a smaller input until a base case is reached."),
+        )],
+    )
+
+    latencies: list[float] = []
+    for _ in range(n):
+        ctx = PipelineContext(tenant="bench")
+        ctx.metadata["llm_response"] = canned_response
+        t0 = time.perf_counter_ns()
+        await module.process(request, ctx)
+        latencies.append((time.perf_counter_ns() - t0) / 1e6)
+    return compute_stats("module:metis_post", latencies, 1)
+
+
+async def bench_build_contract(n: int) -> BenchResult:
+    """Contract builder — consumes a fully-populated PipelineContext."""
+    from aion.contract import build_contract
+    from aion.shared.schemas import ChatCompletionRequest, ChatMessage, Decision, PipelineContext
+
+    request = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        messages=[ChatMessage(role="user", content="hello")],
+    )
+
+    latencies: list[float] = []
+    for _ in range(n):
+        ctx = PipelineContext(tenant="bench")
+        ctx.original_request = request
+        ctx.modified_request = request
+        ctx.selected_model = "gpt-4o-mini"
+        ctx.selected_provider = "openai"
+        ctx.decision = Decision.CONTINUE
+        ctx.metadata = {
+            "complexity_score": 25.0,
+            "route_reason": "simple_prompt",
+            "estimated_cost": 0.0001,
+            "decision_confidence": {"score": 0.72, "factors": ["heuristic", "model_performance"], "maturity": "warm"},
+        }
+        t0 = time.perf_counter_ns()
+        _ = build_contract(
+            ctx,
+            active_modules=["estixe", "nomos", "metis"],
+            operating_mode="learning",
+            decision_latency_ms=0.3,
+            environment="prod",
+        )
+        latencies.append((time.perf_counter_ns() - t0) / 1e6)
+    return compute_stats("build_contract", latencies, 1)
+
+
+async def bench_adapter_dispatch(n: int) -> BenchResult:
+    """ExecutionAdapter dispatch overhead for a BYPASS action (no LLM call)."""
+    from aion.adapter import get_adapter
+    from aion.contract import Action, ContractMeta, DecisionContract, FinalOutput
+    from aion.shared.schemas import (
+        ChatCompletionChoice,
+        ChatCompletionResponse,
+        ChatMessage,
+    )
+
+    response = ChatCompletionResponse(
+        model="aion-bypass",
+        choices=[ChatCompletionChoice(
+            index=0,
+            message=ChatMessage(role="assistant", content="Ola!"),
+        )],
+    )
+    contract = DecisionContract(
+        request_id="bench_1",
+        action=Action.BYPASS,
+        final_output=FinalOutput(
+            target_type="direct",
+            payload={"response": response.model_dump()},
+        ),
+        meta=ContractMeta(tenant="bench", timestamp=time.time()),
+    )
+
+    adapter = get_adapter()
+    # Warm up
+    await adapter.execute(contract)
+
+    latencies: list[float] = []
+    for _ in range(n):
+        t0 = time.perf_counter_ns()
+        _ = await adapter.execute(contract, stream=False)
+        latencies.append((time.perf_counter_ns() - t0) / 1e6)
+    return compute_stats("adapter_dispatch(BYPASS)", latencies, 1)
+
+
+async def bench_end_to_end_endpoints(n: int) -> list[BenchResult]:
+    """End-to-end latency per integration mode via the real FastAPI app.
+
+    Uses a TestClient and bypass-triggering payload so no network/LLM is hit.
+    Measures the full request-response cycle including middleware, contract
+    build, adapter dispatch, and response serialization.
+    """
+    from fastapi.testclient import TestClient
+    from aion.main import app
+
+    client = TestClient(app)
+    body = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "oi"}],
+    }
+
+    results: list[BenchResult] = []
+    for path, label in [
+        ("/v1/chat/completions", "endpoint:transparent"),
+        ("/v1/chat/assisted", "endpoint:assisted"),
+        ("/v1/decisions", "endpoint:decision"),
+    ]:
+        # Warm up
+        client.post(path, json=body)
+
+        latencies: list[float] = []
+        for _ in range(n):
+            t0 = time.perf_counter_ns()
+            _ = client.post(path, json=body)
+            latencies.append((time.perf_counter_ns() - t0) / 1e6)
+        results.append(compute_stats(label, latencies, 1))
+    return results
+
+
 async def run_all(iterations: int, concurrency_levels: list[int]) -> list[BenchResult]:
     """Run all benchmark scenarios."""
     results: list[BenchResult] = []
@@ -217,14 +360,49 @@ async def run_all(iterations: int, concurrency_levels: list[int]) -> list[BenchR
         except Exception as e:
             print(f"  {mod}: SKIPPED ({e})")
 
-    # 2. Full pipeline at various concurrency levels
+    # 2. METIS post-LLM (runs after the LLM call in the real flow)
+    try:
+        r = await bench_metis_post(iterations)
+        results.append(r)
+        print(f"  metis_post: p50={r.p50_ms:.2f}ms  p95={r.p95_ms:.2f}ms  p99={r.p99_ms:.2f}ms")
+    except Exception as e:
+        print(f"  metis_post: SKIPPED ({e})")
+
+    # 3. Contract layer (new: build_contract + adapter dispatch)
+    print("\nBenchmarking contract layer...")
+    try:
+        r = await bench_build_contract(iterations)
+        results.append(r)
+        print(f"  build_contract: p50={r.p50_ms:.2f}ms  p95={r.p95_ms:.2f}ms  p99={r.p99_ms:.2f}ms")
+    except Exception as e:
+        print(f"  build_contract: SKIPPED ({e})")
+    try:
+        r = await bench_adapter_dispatch(iterations)
+        results.append(r)
+        print(f"  adapter_dispatch: p50={r.p50_ms:.2f}ms  p95={r.p95_ms:.2f}ms  p99={r.p99_ms:.2f}ms")
+    except Exception as e:
+        print(f"  adapter_dispatch: SKIPPED ({e})")
+
+    # 4. Full pipeline at various concurrency levels
     print("\nBenchmarking full pipeline (pre-LLM)...")
     for c in concurrency_levels:
         r = await bench_pipeline_pre(iterations, c)
         results.append(r)
         print(f"  concurrency={c}: p50={r.p50_ms:.2f}ms  p95={r.p95_ms:.2f}ms  p99={r.p99_ms:.2f}ms")
 
-    # 3. Cold vs warm
+    # 5. End-to-end per integration mode (real HTTP stack, minus LLM)
+    print("\nBenchmarking end-to-end endpoints (bypass-triggering payload)...")
+    try:
+        # smaller iteration count for HTTP roundtrip (heavier)
+        endpoint_iters = max(50, iterations // 4)
+        ep_results = await bench_end_to_end_endpoints(endpoint_iters)
+        results.extend(ep_results)
+        for r in ep_results:
+            print(f"  {r.name}: p50={r.p50_ms:.2f}ms  p95={r.p95_ms:.2f}ms  p99={r.p99_ms:.2f}ms")
+    except Exception as e:
+        print(f"  endpoints: SKIPPED ({e})")
+
+    # 6. Cold vs warm
     print("\nBenchmarking cold start vs warm...")
     cold, warm = await bench_cold_vs_warm(iterations)
     results.extend([cold, warm])
