@@ -4,6 +4,9 @@ Covers international + Brazilian PII patterns:
 - Email, phone, credit card, SSN (international)
 - CPF, CNPJ, RG, chave PIX, CEP (Brazilian)
 - Generic secrets (API keys, tokens, passwords in text)
+
+v1.5: Hybrid NER — regex fast-path + semantic context check to reduce
+false positives. "formato de CPF e 123.456.789-00" is NOT real PII.
 """
 
 from __future__ import annotations
@@ -11,6 +14,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+import yaml
 
 from aion.config import get_estixe_settings
 from aion.shared.contracts import PiiAction, PiiPolicyConfig
@@ -77,13 +84,88 @@ class GuardrailResult:
 
 
 class Guardrails:
-    """PII and sensitive content guardrails for input AND output."""
+    """PII and sensitive content guardrails for input AND output.
+
+    v1.5: Hybrid NER — regex detects candidates, context check filters false positives.
+    If context check is unavailable, falls back to pure regex (v1 behavior).
+    """
 
     def __init__(self) -> None:
         self._pii_patterns = [
             (re.compile(p, re.IGNORECASE), name) for p, name in _PII_PATTERNS
         ]
         self._settings = get_estixe_settings()
+        self._exclusion_embeddings: Optional[list] = None  # lazy loaded
+        self._exclusion_texts: list[str] = []
+        self._context_check_ready = False
+
+    async def load_exclusions(self, config_dir: Optional[Path] = None) -> None:
+        """Load PII exclusion contexts and pre-compute embeddings."""
+        if config_dir is None:
+            from aion.config import get_settings
+            config_dir = get_settings().config_dir
+
+        path = config_dir / "pii_exclusions.yaml"
+        if not path.exists():
+            logger.debug("No PII exclusions file found: %s", path)
+            return
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        self._exclusion_texts = data.get("exclusion_contexts", [])
+        if not self._exclusion_texts:
+            return
+
+        try:
+            from aion.shared.embeddings import get_embedding_model
+            model = get_embedding_model()
+            if not model.loaded:
+                await model.load()
+            self._exclusion_embeddings = model.encode(
+                self._exclusion_texts, normalize=True
+            )
+            self._context_check_ready = True
+            logger.info("PII context check loaded: %d exclusion patterns", len(self._exclusion_texts))
+        except Exception:
+            logger.warning("Could not load PII exclusion embeddings — using regex only", exc_info=True)
+
+    def _is_false_positive(self, content: str, match_start: int, match_end: int) -> bool:
+        """Check if a regex PII match is a false positive based on surrounding context.
+
+        Extracts a window around the match, embeds it, and checks similarity
+        against exclusion anchors. High similarity = false positive.
+        """
+        if not self._context_check_ready or self._exclusion_embeddings is None:
+            return False  # fail-safe: assume real PII
+
+        # Extract context window: 60 chars before + 60 chars after
+        ctx_start = max(0, match_start - 60)
+        ctx_end = min(len(content), match_end + 60)
+        context_window = content[ctx_start:ctx_end].strip()
+
+        if not context_window:
+            return False
+
+        try:
+            from aion.shared.embeddings import get_embedding_model
+            model = get_embedding_model()
+            ctx_embedding = model.encode_single(context_window, normalize=True)
+
+            # Check similarity with exclusion patterns
+            similarities = self._exclusion_embeddings @ ctx_embedding
+            max_sim = float(max(similarities))
+
+            if max_sim > 0.65:
+                logger.debug(
+                    '{"event":"pii_false_positive","context":"%s","max_sim":%.3f}',
+                    context_window[:50], max_sim,
+                )
+                return True
+        except Exception:
+            pass  # fail-safe: treat as real PII
+
+        return False
 
     def check_output(
         self, content: str, pii_policy: PiiPolicyConfig | None = None,
@@ -100,8 +182,15 @@ class Guardrails:
         policy = pii_policy or PiiPolicyConfig()  # default: mask everything
 
         for pattern, pii_type in self._pii_patterns:
-            if not pattern.search(content):
+            match = pattern.search(content)
+            if not match:
                 continue
+
+            # v1.5: Context check — skip if this is a false positive
+            if self._context_check_ready and self._is_false_positive(
+                content, match.start(), match.end()
+            ):
+                continue  # false positive — not real PII
 
             action = policy.action_for(pii_type)
             result.violations.append(f"pii:{pii_type}")

@@ -88,6 +88,8 @@ class MetisResult(BaseModel):
     behavior_settings: Optional[dict[str, Any]] = None
     post_optimization_applied: bool = False
     filler_removed: bool = False
+    rewrite_applied: bool = False
+    rewrite_rule: Optional[str] = None
 
 
 # ══════════════════════════════════════════════

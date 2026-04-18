@@ -1,0 +1,53 @@
+# Complexity archetypes for semantic classification.
+# Embeddings are pre-computed at startup.
+# Final score = 0.7 * semantic + 0.3 * heuristic (configurable).
+
+tiers:
+  simple:
+    score_range: [0, 25]
+    examples:
+      - "oi"
+      - "obrigado"
+      - "sim"
+      - "nao"
+      - "ok"
+      - "hello"
+      - "thanks"
+      - "qual a capital do Brasil"
+      - "what time is it"
+      - "quanto e 2 + 2"
+      - "bom dia"
+      - "who is the president"
+
+  moderate:
+    score_range: [25, 50]
+    examples:
+      - "me explica o que e REST API"
+      - "escreve um email de agradecimento"
+      - "resume esse texto pra mim"
+      - "explain what machine learning is"
+      - "write a short thank you note"
+      - "translate this paragraph to English"
+      - "what are the benefits of cloud computing"
+      - "suggest a name for my project"
+
+  complex:
+    score_range: [50, 75]
+    examples:
+      - "implementa uma funcao de binary search em Python com testes"
+      - "analisa os pros e contras de microservices vs monolito"
+      - "escreve um contrato de prestacao de servicos"
+      - "write a REST API with authentication in Node.js"
+      - "compare React and Vue for a large enterprise application"
+      - "create a database schema for an e-commerce platform"
+      - "explain the trade-offs between SQL and NoSQL databases"
+
+  expert:
+    score_range: [75, 100]
+    examples:
+      - "implementa um distributed lock com Redis usando Redlock com retry e fencing token"
+      - "faz uma analise comparativa de 5 arquiteturas de ML serving com trade-offs de latencia, custo e escalabilidade"
+      - "design a multi-region disaster recovery strategy for a financial services platform"
+      - "write a custom garbage collector for a real-time system with sub-millisecond pause requirements"
+      - "implement a CRDT-based collaborative editor with conflict resolution"
+      - "analyze the security implications of moving from monolith to microservices with mTLS and service mesh"

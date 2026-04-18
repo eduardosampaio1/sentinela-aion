@@ -106,26 +106,73 @@ class BehaviorDial:
     def apply_to_request(
         self, request: ChatCompletionRequest, config: BehaviorConfig
     ) -> ChatCompletionRequest:
-        """Inject behavior instructions into the system prompt."""
-        instructions = self._build_instructions(config)
-        if not instructions:
-            return request
+        """Inject behavior instructions into the system prompt AND adjust model parameters.
 
+        Two-layer control:
+        1. Prompt instructions (soft — model may ignore)
+        2. Parameter mapping (hard — guaranteed effect)
+        """
         modified = request.model_copy(deep=True)
 
-        system_found = False
-        for msg in modified.messages:
-            if msg.role == "system":
-                msg.content = (msg.content or "") + "\n\n" + instructions
-                system_found = True
-                break
+        # Layer 1: Prompt instructions
+        instructions = self._build_instructions(config)
+        if instructions:
+            system_found = False
+            for msg in modified.messages:
+                if msg.role == "system":
+                    msg.content = (msg.content or "") + "\n\n" + instructions
+                    system_found = True
+                    break
 
-        if not system_found:
-            modified.messages.insert(
-                0, ChatMessage(role="system", content=instructions)
-            )
+            if not system_found:
+                modified.messages.insert(
+                    0, ChatMessage(role="system", content=instructions)
+                )
+
+        # Layer 2: Parameter mapping (hard guarantees)
+        modified = self._apply_parameters(modified, config)
 
         return modified
+
+    @staticmethod
+    def _apply_parameters(
+        request: ChatCompletionRequest, config: BehaviorConfig
+    ) -> ChatCompletionRequest:
+        """Map behavior settings to real model parameters.
+
+        Only REDUCES parameters (more constrained) — never overrides user-provided
+        values with LESS constrained ones. If user explicitly set temperature=0.1,
+        we don't raise it to 0.7.
+        """
+        # Objectivity → temperature cap
+        if config.objectivity >= 80:
+            cap = 0.3
+            if request.temperature is None or request.temperature > cap:
+                request.temperature = cap
+            if request.top_p is None or request.top_p > 0.8:
+                request.top_p = 0.8
+        elif config.objectivity >= 60:
+            cap = 0.6
+            if request.temperature is None or request.temperature > cap:
+                request.temperature = cap
+
+        # Density → max_tokens cap
+        if config.density >= 80:
+            cap = 500
+            if request.max_tokens is None or request.max_tokens > cap:
+                request.max_tokens = cap
+
+        # Cost target → aggressive caps
+        if config.cost_target == "free":
+            if request.max_tokens is None or request.max_tokens > 100:
+                request.max_tokens = 100
+            request.temperature = 0.0  # deterministic = cacheable
+        elif config.cost_target == "low":
+            cap = 300
+            if request.max_tokens is None or request.max_tokens > cap:
+                request.max_tokens = cap
+
+        return request
 
     @staticmethod
     def _build_instructions(config: BehaviorConfig) -> str:

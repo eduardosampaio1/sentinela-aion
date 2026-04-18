@@ -1,0 +1,40 @@
+# Prompt rewrite rules — AION only ADDS to prompts, never changes user intent.
+# Each rule appends a suffix when conditions match.
+#
+# Rules:
+#   match_intent: ESTIXE-detected intent name (or empty for pattern-based)
+#   match_pattern: regex pattern to match (case-insensitive)
+#   suffix: text appended to the last user message
+#   condition: "short" (< 50 words) | "medium" (< 100 words) | "any"
+#   level: "light" | "moderate" — minimum rewrite level required
+
+rules:
+  - match_pattern: "resum|summarize|sintetiz"
+    suffix: "Formato: bullet points, maximo 5 itens, foque nos pontos de acao."
+    condition: "short"
+    level: "light"
+
+  - match_pattern: "traduz|translate|traduza"
+    suffix: "Mantenha o tom e registro do original."
+    condition: "any"
+    level: "light"
+
+  - match_pattern: "implementa|implement|code|programa"
+    suffix: "Inclua tratamento de erros basico e type hints quando aplicavel."
+    condition: "short"
+    level: "moderate"
+
+  - match_pattern: "explic|explain|define"
+    suffix: "Explique de forma progressiva: conceito simples primeiro, depois detalhes."
+    condition: "short"
+    level: "light"
+
+  - match_pattern: "compar|compare|versus|vs"
+    suffix: "Use uma tabela comparativa com criterios claros."
+    condition: "short"
+    level: "moderate"
+
+  - match_pattern: "list|liste"
+    suffix: "Numere os itens e inclua uma breve descricao de cada."
+    condition: "short"
+    level: "light"

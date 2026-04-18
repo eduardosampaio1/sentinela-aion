@@ -137,17 +137,22 @@ async def test_response_templates(classifier):
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_embedding_cache(classifier):
-    """Second call should use cached embedding."""
+    """Second call should use cached embedding from shared model."""
+    from aion.shared.embeddings import get_embedding_model
+    model = get_embedding_model()
+    model.clear_cache()
     classifier.classify("oi")  # first call — computes embedding
+    assert len(model._cache) > 0
     classifier.classify("oi")  # second call — should use cache
-    assert "oi" in classifier._embedding_cache
 
 
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_reload(classifier):
-    """Reload should clear cache and re-load intents."""
+    """Reload should clear shared cache and re-load intents."""
+    from aion.shared.embeddings import get_embedding_model
+    model = get_embedding_model()
     classifier.classify("oi")
-    assert len(classifier._embedding_cache) > 0
+    assert len(model._cache) > 0
     await classifier.reload()
-    assert len(classifier._embedding_cache) == 0
+    assert len(model._cache) == 0

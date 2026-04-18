@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=1.26.0",
     "tiktoken>=0.7.0",
     "redis>=5.0.0",
+    "faiss-cpu>=1.7.4",
 ]
 
 [project.optional-dependencies]

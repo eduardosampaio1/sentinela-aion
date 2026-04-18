@@ -8,6 +8,7 @@ from aion.config import get_metis_settings
 from aion.metis.compressor import PromptCompressor
 from aion.metis.behavior import BehaviorDial
 from aion.metis.optimizer import ResponseOptimizer
+from aion.metis.rewriter import PromptRewriter
 from aion.shared.contracts import MetisResult
 from aion.shared.schemas import ChatCompletionRequest, ChatCompletionResponse, PipelineContext
 
@@ -20,13 +21,23 @@ class MetisPreModule:
     name = "metis"
 
     def __init__(self) -> None:
-        settings = get_metis_settings()
-        self._compressor = PromptCompressor(settings)
+        self._settings = get_metis_settings()
+        self._compressor = PromptCompressor(self._settings)
         self._behavior = BehaviorDial()
+        self._rewriter = PromptRewriter()
+        self._rewriter_loaded = False
 
     async def process(
         self, request: ChatCompletionRequest, context: PipelineContext
     ) -> PipelineContext:
+        # Lazy-load rewriter rules
+        if not self._rewriter_loaded:
+            try:
+                await self._rewriter.load()
+            except Exception:
+                logger.debug("Rewriter load failed — skipping", exc_info=True)
+            self._rewriter_loaded = True
+
         # Count tokens before
         context.tokens_before = self._compressor.count_tokens(request)
 
@@ -51,11 +62,26 @@ class MetisPreModule:
         except Exception:
             pass  # NEMOS unavailable — compress as normal
 
-        # Apply behavior dial instructions to system prompt
+        # Apply behavior dial instructions + parameter mapping
         behavior = await self._behavior.get(context.tenant)
         if behavior:
             request = self._behavior.apply_to_request(request, behavior)
             context.modified_request = request
+
+        # Apply prompt rewriting (only appends — never changes user text)
+        rewrite_result = None
+        if self._settings.rewrite_level != "off":
+            detected_intent = context.metadata.get("detected_intent", "")
+            request, rewrite_result = self._rewriter.rewrite(
+                request,
+                rewrite_level=self._settings.rewrite_level,
+                detected_intent=detected_intent,
+            )
+            if rewrite_result.applied:
+                context.modified_request = request
+                context.metadata["rewrite_applied"] = True
+                context.metadata["rewrite_rule"] = rewrite_result.rule_name
+                context.metadata["rewrite_suffix"] = rewrite_result.suffix
 
         # Compress prompt (skip if NEMOS says compression is hurting)
         if compression_ok:
@@ -78,6 +104,8 @@ class MetisPreModule:
             compression_applied=compression_ok,
             behavior_dial_active=behavior is not None,
             behavior_settings=behavior.model_dump() if behavior else None,
+            rewrite_applied=rewrite_result.applied if rewrite_result else False,
+            rewrite_rule=rewrite_result.rule_name if rewrite_result and rewrite_result.applied else None,
         )
 
         if saved > 0:

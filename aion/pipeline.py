@@ -188,6 +188,28 @@ class Pipeline:
             context.metadata["safe_mode"] = True
             return context
 
+        # ── Semantic Cache: early exit (before any module) ──
+        try:
+            from aion.cache import get_cache
+            cache = get_cache()
+            if cache.enabled:
+                import time as _time
+                t0 = _time.perf_counter()
+                cached_response = cache.lookup(request, context)
+                elapsed_ms = (_time.perf_counter() - t0) * 1000
+                context.module_latencies["cache"] = round(elapsed_ms, 2)
+
+                if cached_response is not None:
+                    context.set_bypass(cached_response)
+                    context.metadata["cache_hit"] = True
+                    context.metadata["cache_response_id"] = cached_response.id
+                    return context
+                else:
+                    context.metadata["cache_hit"] = False
+        except Exception:
+            logger.warning("Cache lookup failed — continuing pipeline", exc_info=True)
+            context.metadata["cache_hit"] = False
+
         settings = get_settings()
 
         for module in self._pre_modules:

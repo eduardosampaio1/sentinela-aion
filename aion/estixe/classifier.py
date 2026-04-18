@@ -2,13 +2,14 @@
 
 Detects ALL greetings (formal, informal, regional, multilingual) and any
 configurable deterministic intents by comparing embeddings with cosine similarity.
+
+Uses the shared EmbeddingModel singleton (aion.shared.embeddings) for all
+encoding operations — model is loaded once and reused across modules.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -17,8 +18,7 @@ import numpy as np
 import yaml
 
 from aion.config import EstixeSettings
-
-_LRU_MAX_SIZE = 5000
+from aion.shared.embeddings import get_embedding_model
 
 logger = logging.getLogger("aion.estixe.classifier")
 
@@ -48,20 +48,14 @@ class SemanticClassifier:
 
     def __init__(self, settings: EstixeSettings) -> None:
         self._settings = settings
-        self._model = None
         self._intents: list[IntentDefinition] = []
-        self._embedding_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 
     async def load(self) -> None:
-        """Load the embedding model and intent definitions."""
-        # Load embedding model
-        try:
-            from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self._settings.embedding_model)
-            logger.info("Loaded embedding model: %s", self._settings.embedding_model)
-        except Exception:
-            logger.error("Failed to load embedding model", exc_info=True)
-            raise
+        """Load the shared embedding model and intent definitions."""
+        model = get_embedding_model()
+        if not model.loaded:
+            await model.load()
+            logger.info("Shared embedding model loaded: %s", model.model_name)
 
         # Load intents from YAML
         intents_path = Path(self._settings.intents_path)
@@ -72,6 +66,8 @@ class SemanticClassifier:
 
     async def _load_intents(self, path: Path) -> None:
         """Load intent definitions and pre-compute embeddings."""
+        model = get_embedding_model()
+
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
@@ -90,11 +86,9 @@ class SemanticClassifier:
                 action=action,
             )
 
-            # Pre-compute embeddings for all examples
-            if examples and self._model:
-                intent.embeddings = self._model.encode(
-                    examples, convert_to_numpy=True, normalize_embeddings=True
-                )
+            # Pre-compute embeddings for all examples using shared model
+            if examples and model.loaded:
+                intent.embeddings = model.encode(examples, normalize=True)
 
             self._intents.append(intent)
 
@@ -110,24 +104,14 @@ class SemanticClassifier:
 
         Returns the best match if confidence >= threshold, else None.
         """
-        if not self._model or not self._intents:
+        model = get_embedding_model()
+        if not model.loaded or not self._intents:
             return None
 
-        # Get or cache embedding for input text (LRU + hashed keys for privacy)
-        text_lower = text.strip().lower()
-        cache_key = hashlib.sha256(text_lower.encode()).hexdigest()
-        if cache_key in self._embedding_cache:
-            self._embedding_cache.move_to_end(cache_key)
-            input_embedding = self._embedding_cache[cache_key]
-        else:
-            input_embedding = self._model.encode(
-                [text_lower], convert_to_numpy=True, normalize_embeddings=True
-            )[0]
-            if self._settings.cache_embeddings:
-                self._embedding_cache[cache_key] = input_embedding
-                # LRU eviction
-                while len(self._embedding_cache) > _LRU_MAX_SIZE:
-                    self._embedding_cache.popitem(last=False)
+        # Encode input using shared model (with LRU cache)
+        input_embedding = model.encode_single(
+            text, normalize=True, use_cache=self._settings.cache_embeddings,
+        )
 
         best_match: Optional[IntentMatch] = None
         best_confidence = 0.0
@@ -154,7 +138,7 @@ class SemanticClassifier:
         if best_match and best_match.confidence >= self._settings.bypass_threshold:
             logger.debug(
                 "Classified '%s' as '%s' (confidence=%.3f, matched='%s')",
-                text_lower,
+                text.strip().lower(),
                 best_match.intent,
                 best_match.confidence,
                 best_match.matched_example,
@@ -165,7 +149,8 @@ class SemanticClassifier:
 
     async def reload(self) -> None:
         """Reload intents from config (hot-reload)."""
-        self._embedding_cache.clear()
+        model = get_embedding_model()
+        model.clear_cache()
         intents_path = Path(self._settings.intents_path)
         if intents_path.exists():
             await self._load_intents(intents_path)

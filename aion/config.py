@@ -126,6 +126,26 @@ class NomosSettings(BaseSettings):
     scoring_weights: ScoringWeights = Field(default_factory=ScoringWeights)
 
 
+class CacheSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="AION_CACHE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = False  # opt-in: AION_CACHE_ENABLED=true
+    similarity_threshold: float = 0.92  # high threshold — avoid false hits
+    default_ttl_seconds: int = 21600  # 6 hours
+    max_entries_per_tenant: int = 5000
+    # TTL overrides by intent type (ESTIXE-classified)
+    ttl_factual: int = 86400       # 24h — stable answers
+    ttl_creative: int = 3600       # 1h — diverse answers expected
+    ttl_code: int = 7200           # 2h — moderate variability
+    # Invalidation
+    followup_threshold: int = 2    # invalidate after N followups on same cached answer
+
+
 class MetisSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="METIS_",
@@ -137,6 +157,7 @@ class MetisSettings(BaseSettings):
     stream_mode: str = "passthrough"  # passthrough | buffer
     compression_enabled: bool = True
     max_history_turns: int = 10
+    rewrite_level: str = "off"  # off | light | moderate
 
 
 # Singletons
@@ -144,6 +165,7 @@ _settings: Optional[AionSettings] = None
 _estixe_settings: Optional[EstixeSettings] = None
 _nomos_settings: Optional[NomosSettings] = None
 _metis_settings: Optional[MetisSettings] = None
+_cache_settings: Optional[CacheSettings] = None
 
 
 def get_settings() -> AionSettings:
@@ -172,3 +194,10 @@ def get_metis_settings() -> MetisSettings:
     if _metis_settings is None:
         _metis_settings = MetisSettings()
     return _metis_settings
+
+
+def get_cache_settings() -> CacheSettings:
+    global _cache_settings
+    if _cache_settings is None:
+        _cache_settings = CacheSettings()
+    return _cache_settings

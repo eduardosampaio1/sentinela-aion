@@ -213,6 +213,9 @@ def _build_response_headers(context: PipelineContext) -> dict[str, str]:
         "X-Aion-Decision": context.decision.value if context.decision != Decision.CONTINUE else "passthrough",
         "X-Request-ID": context.request_id,
     }
+    # Cache status header
+    if "cache_hit" in context.metadata:
+        headers["X-Aion-Cache"] = "HIT" if context.metadata["cache_hit"] else "MISS"
     # Route reason from NOMOS
     route_reason = context.metadata.get("route_reason", "")
     if route_reason:
@@ -543,6 +546,17 @@ async def chat_completions(request: Request):
 
             # Record outcome to NEMOS (async, 0ms on response path)
             asyncio.create_task(_record_all_outcomes(context, response, settings))
+
+            # Store in semantic cache (async, fire-and-forget)
+            try:
+                from aion.cache import get_cache
+                _cache = get_cache()
+                if _cache.enabled:
+                    asyncio.create_task(asyncio.to_thread(
+                        _cache.store, effective_request, response, context
+                    ))
+            except Exception:
+                pass  # cache store is non-critical
 
             pass_headers = _build_response_headers(context)
             pass_headers["X-Aion-Decision"] = "passthrough"
@@ -1083,6 +1097,13 @@ async def delete_tenant_data(tenant: str):
             event = _event_buffer.popleft()
             if event.get("tenant") != tenant:
                 _event_buffer.append(event)
+
+    # Clear semantic cache
+    try:
+        from aion.cache import get_cache
+        get_cache().delete_tenant(tenant)
+    except Exception:
+        logger.debug("Cache delete failed for tenant %s", tenant)
 
     # Clear NEMOS data (decision memory, economics, baseline)
     nemos_deleted = 0

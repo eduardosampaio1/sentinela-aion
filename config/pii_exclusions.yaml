@@ -1,0 +1,25 @@
+# Context patterns that indicate detected PII is NOT real PII.
+# When a regex match is surrounded by one of these contexts,
+# it's flagged as a false positive and the PII action is skipped.
+
+exclusion_contexts:
+  - "exemplo de formato"
+  - "o padrao e"
+  - "the format is"
+  - "placeholder"
+  - "para teste"
+  - "for testing"
+  - "ficticio"
+  - "fictional"
+  - "mascara"
+  - "mask"
+  - "dummy data"
+  - "dados de teste"
+  - "sample data"
+  - "formato de CPF"
+  - "formato de CNPJ"
+  - "formato do RG"
+  - "example"
+  - "exemplo"
+  - "template"
+  - "mock"
