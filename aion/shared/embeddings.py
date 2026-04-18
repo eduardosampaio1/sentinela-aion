@@ -27,6 +27,7 @@ class EmbeddingModel:
         self._model = None
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._loaded = False
+        self._load_failed = False  # True if load was attempted but failed
         self._model_name: str = ""
 
     @property
@@ -45,8 +46,14 @@ class EmbeddingModel:
         return self._model.get_sentence_embedding_dimension()
 
     async def load(self) -> None:
-        """Load the sentence-transformers model. Idempotent."""
-        if self._loaded:
+        """Load the sentence-transformers model. Idempotent.
+
+        Does NOT raise on failure — sets _load_failed=True instead.
+        Callers check .loaded before using encode/encode_single.
+        This ensures that modules depending on embeddings degrade gracefully
+        (bypass/cache disabled) instead of crashing the entire pipeline.
+        """
+        if self._loaded or self._load_failed:
             return
         settings = get_estixe_settings()
         try:
@@ -59,9 +66,15 @@ class EmbeddingModel:
                 self._model_name,
                 self.dimension,
             )
+        except ImportError:
+            self._load_failed = True
+            logger.warning(
+                "sentence-transformers not installed — semantic features disabled "
+                "(bypass, cache, semantic classification). Install with: pip install sentence-transformers"
+            )
         except Exception:
-            logger.error("Failed to load embedding model", exc_info=True)
-            raise
+            self._load_failed = True
+            logger.error("Failed to load embedding model — semantic features disabled", exc_info=True)
 
     def encode(self, texts: list[str], *, normalize: bool = True) -> np.ndarray:
         """Encode texts into embeddings. Returns (N, dim) array."""

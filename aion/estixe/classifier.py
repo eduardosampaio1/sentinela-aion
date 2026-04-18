@@ -51,13 +51,21 @@ class SemanticClassifier:
         self._intents: list[IntentDefinition] = []
 
     async def load(self) -> None:
-        """Load the shared embedding model and intent definitions."""
+        """Load the shared embedding model and intent definitions.
+
+        If the embedding model is unavailable (missing library, download failure),
+        intents are still loaded from YAML but without embeddings — classify()
+        will return None for all inputs (no bypass, but no crash either).
+        """
         model = get_embedding_model()
         if not model.loaded:
-            await model.load()
-            logger.info("Shared embedding model loaded: %s", model.model_name)
+            await model.load()  # does NOT raise — sets model._load_failed instead
+            if model.loaded:
+                logger.info("Shared embedding model loaded: %s", model.model_name)
+            else:
+                logger.warning("Embedding model unavailable — intent classification disabled")
 
-        # Load intents from YAML
+        # Load intents from YAML (even without model — embeddings skipped)
         intents_path = Path(self._settings.intents_path)
         if intents_path.exists():
             await self._load_intents(intents_path)

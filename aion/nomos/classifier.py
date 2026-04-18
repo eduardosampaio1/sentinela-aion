@@ -90,6 +90,9 @@ class ComplexityClassifier:
             model = get_embedding_model()
             if not model.loaded:
                 await model.load()
+            if not model.loaded:
+                logger.warning("Embedding model unavailable — using heuristic only")
+                return
         except Exception:
             logger.warning("Embedding model unavailable — using heuristic only", exc_info=True)
             return

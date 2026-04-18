@@ -29,12 +29,40 @@ class EstixeModule:
         self._guardrails = Guardrails()
         self._initialized = False
 
+    @property
+    def _classifier_ready(self) -> bool:
+        """True if semantic classifier has a loaded embedding model."""
+        from aion.shared.embeddings import get_embedding_model
+        return get_embedding_model().loaded
+
     async def initialize(self) -> None:
-        if not self._initialized:
-            await self._classifier.load()
+        """Initialize ESTIXE sub-components independently.
+
+        Partial success is OK: if classifier fails (no embedding model),
+        PII guardrails and policy engine still work (regex-based).
+        Module is always marked initialized to avoid retry loops.
+        """
+        if self._initialized:
+            return
+
+        # Policy engine (regex/YAML — no ML dependency)
+        try:
             await self._policy.load()
-            self._initialized = True
-            logger.info("ESTIXE initialized")
+        except Exception:
+            logger.warning("ESTIXE: policy engine failed to load", exc_info=True)
+
+        # Semantic classifier (requires embedding model — may fail gracefully)
+        try:
+            await self._classifier.load()
+        except Exception:
+            logger.warning(
+                "ESTIXE: semantic classifier unavailable — bypass disabled, "
+                "PII and policy enforcement still active"
+            )
+
+        # Always mark initialized (PII + policy work without classifier)
+        self._initialized = True
+        logger.info("ESTIXE initialized (classifier=%s)", "active" if self._classifier_ready else "unavailable")
 
     async def process(
         self, request: ChatCompletionRequest, context: PipelineContext
