@@ -246,7 +246,11 @@ export function RoutingPage() {
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Regras de roteamento</h2>
             <p className="text-xs text-[var(--color-text-muted)]">Quando o NOMOS encontra um padrão, aplica a regra automaticamente.</p>
           </div>
-          <button className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--color-cta)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90">
+          <button
+            disabled
+            title="Configuração de regras customizadas disponível em breve"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--color-cta)]/50 px-3 py-1.5 text-xs font-semibold text-white/60 cursor-not-allowed"
+          >
             <Plus className="h-3.5 w-3.5" />
             Adicionar regra
           </button>
@@ -268,7 +272,12 @@ export function RoutingPage() {
                 <td className="px-6 py-3 text-sm text-[var(--color-text-muted)]">{rule.condition}</td>
                 <td className="px-6 py-3">
                   {rule.prompt_type !== "Padrão" && (
-                    <button className="cursor-pointer text-[var(--color-text-muted)] transition-colors hover:text-red-500" aria-label="Remover regra">
+                    <button
+                      disabled
+                      title="Remoção de regras disponível em breve"
+                      className="text-[var(--color-text-muted)]/40 cursor-not-allowed"
+                      aria-label="Remover regra (em breve)"
+                    >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   )}
@@ -288,7 +297,11 @@ export function RoutingPage() {
               Se o modelo principal falhar, o NOMOS tenta o próximo. Hoje: {mockDistribution.fallback_pct}% das chamadas usaram fallback.
             </p>
           </div>
-          <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-sky-400 hover:text-[var(--color-text)]">
+          <button
+            disabled
+            title="Edição da cadeia de fallback disponível em breve"
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)]/50 px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)]/50 cursor-not-allowed"
+          >
             <Plus className="h-3.5 w-3.5" />
             Adicionar fallback
           </button>

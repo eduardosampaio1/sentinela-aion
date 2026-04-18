@@ -12,6 +12,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useAionData } from "@/lib/use-aion-data";
 import { mockEvents } from "@/lib/mock-data";
 import type { AionEvent } from "@/lib/types";
 
@@ -62,9 +63,14 @@ export function OperationsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<AionEvent | null>(null);
 
+  const liveData = useAionData(3000, autoRefresh);
+  const events = liveData.connected && liveData.events.length > 0
+    ? liveData.events
+    : mockEvents;
+
   const filtered = filter === "all"
-    ? mockEvents
-    : mockEvents.filter((e) => {
+    ? events
+    : events.filter((e) => {
         if (filter === "error") return e.decision === "error" || e.error;
         return e.decision === filter;
       });
@@ -98,9 +104,24 @@ export function OperationsPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${autoRefresh ? "animate-spin" : ""}`} style={autoRefresh ? { animationDuration: "3s" } : undefined} />
             {autoRefresh ? "Ao vivo" : "Manual"}
           </button>
-          <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)]">
+          <button
+            onClick={() => {
+              const header = "timestamp,module,input,decision,model,response_time_ms,cost\n";
+              const rows = filtered.map((e) =>
+                `"${e.timestamp}","${e.module || ""}","${(e.input || "").replace(/"/g, '""')}","${e.decision}","${e.model_used || ""}",${e.response_time_ms},${e.cost ?? 0}`
+              ).join("\n");
+              const blob = new Blob([header + rows], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `aion-events-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+          >
             <Download className="h-3.5 w-3.5" />
-            Exportar
+            Exportar CSV
           </button>
         </div>
       </div>

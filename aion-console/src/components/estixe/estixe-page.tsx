@@ -15,6 +15,7 @@ import {
 import { Toggle } from "@/components/ui/toggle";
 import { Badge } from "@/components/ui/badge";
 import { mockIntents, mockSecurityRules, mockModuleStats } from "@/lib/mock-data";
+import { reloadIntents, reloadPolicies, setOverrides } from "@/lib/api";
 
 export function EstixePage() {
   const [bypassEnabled, setBypassEnabled] = useState(true);
@@ -23,6 +24,7 @@ export function EstixePage() {
   const [bypassConfidence, setBypassConfidence] = useState(85);
   const [blockConfidence, setBlockConfidence] = useState(70);
   const [showBypassWarning, setShowBypassWarning] = useState(false);
+  const [thresholdSaved, setThresholdSaved] = useState(false);
   const estixeStats = mockModuleStats.estixe;
 
   const handleBypassToggle = (enabled: boolean) => {
@@ -133,9 +135,12 @@ export function EstixePage() {
         <div>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Categorias de desvio</h2>
-            <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)]">
+            <button
+              onClick={async () => { try { await reloadIntents(); } catch {} }}
+              className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+            >
               <Plus className="h-3.5 w-3.5" />
-              Adicionar categoria
+              Recarregar intents
             </button>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -211,12 +216,28 @@ export function EstixePage() {
 
       {/* Thresholds */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-        <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Limites de decisão</h2>
-        <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Definem quando o ESTIXE age. Valores mais altos = menos falsos positivos, mas mais chamadas à IA.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Limites de decisão</h2>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Definem quando o ESTIXE age. Valores mais altos = menos falsos positivos, mais chamadas à IA.
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                await setOverrides({ bypass_threshold: bypassConfidence / 100 });
+                setThresholdSaved(true);
+                setTimeout(() => setThresholdSaved(false), 2000);
+              } catch {}
+            }}
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--color-cta)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:opacity-90"
+          >
+            {thresholdSaved ? "Salvo!" : "Salvar limites"}
+          </button>
+        </div>
 
-        <div className="space-y-6">
+        <div className="mt-4 space-y-6">
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm text-[var(--color-text)]">Confiança para desvio</span>

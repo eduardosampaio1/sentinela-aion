@@ -13,6 +13,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { mockBehavior, estimateDialImpact } from "@/lib/mock-data";
+import { setBehavior, resetBehavior, getBehavior } from "@/lib/api";
 import type { BehaviorDial } from "@/lib/types";
 
 const presets = [
@@ -72,6 +73,8 @@ export function PoliciesPage() {
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const impacts = useMemo(() => estimateDialImpact(dial), [dial]);
 
@@ -104,15 +107,36 @@ export function PoliciesPage() {
     setHasChanges(true);
   };
 
-  const handleSave = () => {
-    setShowConfirm(false);
-    setHasChanges(false);
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await setBehavior(dial);
+      setShowConfirm(false);
+      setHasChanges(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleReset = () => {
-    setDial({ objectivity: 50, verbosity: 50, economy: 50, explanation: 50, confidence: 50, safe_mode: 50, formality: 50 });
-    setActivePreset("balanced");
-    setHasChanges(false);
+  const handleReset = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await resetBehavior();
+      setDial({ objectivity: 50, verbosity: 50, economy: 50, explanation: 50, confidence: 50, safe_mode: 50, formality: 50 });
+      setActivePreset("balanced");
+      setHasChanges(false);
+    } catch {
+      // Reset local even if API fails
+      setDial({ objectivity: 50, verbosity: 50, economy: 50, explanation: 50, confidence: 50, safe_mode: 50, formality: 50 });
+      setActivePreset("balanced");
+      setHasChanges(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -284,12 +308,18 @@ export function PoliciesPage() {
               </div>
             </div>
 
+            {saveError && (
+              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                {saveError}
+              </div>
+            )}
+
             <div className="mt-6 flex justify-end gap-3">
-              <button onClick={() => setShowConfirm(false)} className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)]">
+              <button onClick={() => { setShowConfirm(false); setSaveError(null); }} className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)]">
                 Cancelar
               </button>
-              <button onClick={handleSave} className="cursor-pointer rounded-lg bg-[var(--color-cta)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
-                Aplicar agora
+              <button onClick={handleSave} disabled={saving} className="cursor-pointer rounded-lg bg-[var(--color-cta)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                {saving ? "Salvando..." : "Aplicar agora"}
               </button>
             </div>
           </div>
