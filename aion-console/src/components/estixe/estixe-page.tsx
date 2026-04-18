@@ -11,6 +11,9 @@ import {
   Shield,
   TrendingDown,
   DollarSign,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { Toggle } from "@/components/ui/toggle";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +28,31 @@ export function EstixePage() {
   const [blockConfidence, setBlockConfidence] = useState(70);
   const [showBypassWarning, setShowBypassWarning] = useState(false);
   const [thresholdSaved, setThresholdSaved] = useState(false);
+  const [editingIntent, setEditingIntent] = useState<string | null>(null);
+  const [editingResponse, setEditingResponse] = useState("");
   const estixeStats = mockModuleStats.estixe;
+
+  const startEditing = (intentId: string, currentResponse: string) => {
+    setEditingIntent(intentId);
+    setEditingResponse(currentResponse);
+  };
+
+  const cancelEditing = () => {
+    setEditingIntent(null);
+    setEditingResponse("");
+  };
+
+  const saveIntentResponse = async (intentId: string) => {
+    setIntents((prev) =>
+      prev.map((i) => (i.id === intentId ? { ...i, response: editingResponse } : i))
+    );
+    // Persist via overrides API (user can reload intents file later to sync with YAML)
+    try {
+      await setOverrides({ [`intent_response_${intentId}`]: editingResponse });
+    } catch {}
+    setEditingIntent(null);
+    setEditingResponse("");
+  };
 
   const handleBypassToggle = (enabled: boolean) => {
     if (!enabled) {
@@ -161,9 +188,49 @@ export function EstixePage() {
                   {intent.examples.slice(0, 4).join(", ")}
                   {intent.examples.length > 4 && ` +${intent.examples.length - 4}`}
                 </p>
-                <div className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                  <span className="font-medium">Resposta:</span> {intent.response}
-                </div>
+
+                {editingIntent === intent.id ? (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      value={editingResponse}
+                      onChange={(e) => setEditingResponse(e.target.value)}
+                      rows={2}
+                      className="w-full resize-none rounded-lg border border-[var(--color-primary)]/50 bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                      placeholder="Resposta automatica para essa categoria..."
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={cancelEditing}
+                        className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      >
+                        <X className="h-3 w-3" />
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={() => saveIntentResponse(intent.id)}
+                        disabled={!editingResponse.trim() || editingResponse === intent.response}
+                        className="flex cursor-pointer items-center gap-1 rounded bg-[var(--color-cta)] px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Check className="h-3 w-3" />
+                        Salvar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="group mt-2 flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                    <div className="flex-1">
+                      <span className="font-medium">Resposta:</span> {intent.response}
+                    </div>
+                    <button
+                      onClick={() => startEditing(intent.id, intent.response)}
+                      className="opacity-0 cursor-pointer text-[var(--color-text-muted)] transition-opacity group-hover:opacity-100 hover:text-[var(--color-primary)]"
+                      aria-label="Editar resposta"
+                      title="Editar resposta"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
