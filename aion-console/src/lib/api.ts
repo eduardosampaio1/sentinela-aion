@@ -1,4 +1,4 @@
-import type { Stats, AionEvent, BehaviorDial, ModelInfo } from "./types";
+import type { Stats, AionEvent, BehaviorDial, ModelInfo, CacheStats } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL || "http://localhost:8080";
 
@@ -85,6 +85,11 @@ export async function getKillswitch(): Promise<Record<string, unknown>> {
 // Audit
 export async function getAudit(limit = 50): Promise<Record<string, unknown>[]> {
   return fetchApi(`/v1/audit?limit=${limit}`);
+}
+
+// Cache stats
+export async function getCacheStats(): Promise<CacheStats> {
+  return fetchApi("/v1/cache/stats");
 }
 
 // Overrides

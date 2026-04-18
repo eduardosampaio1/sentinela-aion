@@ -1,4 +1,4 @@
-import type { Stats, AionEvent, BehaviorDial, ModelInfo, IntentCategory, SecurityRule } from "./types";
+import type { Stats, AionEvent, BehaviorDial, ModelInfo, IntentCategory, SecurityRule, CacheStats } from "./types";
 
 // ═══════════════════════════════════════════
 // OPERATIONAL STATE — what the user sees first
@@ -35,6 +35,7 @@ export interface ModuleStats {
     routes_to_premium: number;
     avg_decision_ms: number;
     cost_optimized: number;
+    classifier_method: string; // "hybrid" | "heuristic" | "semantic"
   };
   estixe: {
     bypasses_today: number;
@@ -42,13 +43,16 @@ export interface ModuleStats {
     threats_detected: number;
     tokens_saved: number;
     cost_avoided: number;
+    false_positives_avoided: number;
   };
   metis: {
     optimizations_today: number;
     tokens_compressed: number;
     avg_reduction_pct: number;
     cost_saved: number;
+    rewrites_applied: number;
   };
+  cache: CacheStats;
 }
 
 export const mockModuleStats: ModuleStats = {
@@ -58,6 +62,7 @@ export const mockModuleStats: ModuleStats = {
     routes_to_premium: 363,
     avg_decision_ms: 3,
     cost_optimized: 28.4,
+    classifier_method: "hybrid",
   },
   estixe: {
     bypasses_today: 1082,
@@ -65,12 +70,24 @@ export const mockModuleStats: ModuleStats = {
     threats_detected: 14,
     tokens_saved: 324500,
     cost_avoided: 12.8,
+    false_positives_avoided: 47,
   },
   metis: {
     optimizations_today: 1650,
     tokens_compressed: 89200,
     avg_reduction_pct: 22,
     cost_saved: 6.0,
+    rewrites_applied: 312,
+  },
+  cache: {
+    enabled: true,
+    hits: 842,
+    misses: 1905,
+    hit_rate: 0.3065,
+    invalidations: 23,
+    evictions: 5,
+    total_entries: 1284,
+    entries_by_tenant: { default: 1284 },
   },
 };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getHealth, getStats, getEvents, getEconomics } from "./api";
+import { getHealth, getStats, getEvents, getEconomics, getCacheStats } from "./api";
 import type { Stats, AionEvent } from "./types";
 import type { ModuleStats, DecisionDistribution, OperationalState } from "./mock-data";
 import {
@@ -43,11 +43,12 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [health, stats, events, economics] = await Promise.all([
+      const [health, stats, events, economics, cacheData] = await Promise.all([
         getHealth().catch(() => null),
         getStats().catch(() => null),
         getEvents(20).catch(() => []),
         getEconomics().catch(() => null),
+        getCacheStats().catch(() => null),
       ]);
 
       if (!mountedRef.current) return;
@@ -91,9 +92,24 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
         uptime_hours: 0,
       };
 
+      // Merge real cache stats into module stats
+      const modules = { ...mockModuleStats };
+      if (cacheData) {
+        modules.cache = {
+          enabled: (cacheData as any).enabled ?? false,
+          hits: (cacheData as any).hits ?? 0,
+          misses: (cacheData as any).misses ?? 0,
+          hit_rate: (cacheData as any).hit_rate ?? 0,
+          invalidations: (cacheData as any).invalidations ?? 0,
+          evictions: (cacheData as any).evictions ?? 0,
+          total_entries: (cacheData as any).total_entries ?? 0,
+          entries_by_tenant: (cacheData as any).entries_by_tenant ?? {},
+        };
+      }
+
       setData({
         stats: mappedStats,
-        modules: mockModuleStats, // Module-level stats not available from API yet
+        modules,
         distribution,
         operational,
         events: events as AionEvent[],

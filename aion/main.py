@@ -1158,7 +1158,58 @@ async def runtime_economics(request: Request):
             "p95_ms": counters.get("latency_p95_ms", 0),
             "p99_ms": counters.get("latency_p99_ms", 0),
         },
+        "cache": _get_cache_summary(),
     }
+
+
+def _get_cache_summary() -> dict:
+    """Get cache summary for economics endpoint."""
+    try:
+        from aion.cache import get_cache
+        cache = get_cache()
+        s = cache.stats
+        return {
+            "enabled": cache.enabled,
+            "hits": s.hits,
+            "misses": s.misses,
+            "hit_rate": round(s.hit_rate, 4),
+            "total_entries": s.total_entries,
+        }
+    except Exception:
+        return {"enabled": False, "hits": 0, "misses": 0, "hit_rate": 0, "total_entries": 0}
+
+
+@app.get("/v1/cache/stats", tags=["Observability"])
+async def cache_stats(request: Request):
+    """Semantic cache performance metrics."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    try:
+        from aion.cache import get_cache
+        cache = get_cache()
+        stats = cache.stats
+        return {
+            "enabled": cache.enabled,
+            "hits": stats.hits,
+            "misses": stats.misses,
+            "hit_rate": round(stats.hit_rate, 4),
+            "invalidations": stats.invalidations,
+            "evictions": stats.evictions,
+            "total_entries": stats.total_entries,
+            "entries_by_tenant": stats.entries_by_tenant,
+        }
+    except Exception:
+        return {
+            "enabled": False,
+            "hits": 0,
+            "misses": 0,
+            "hit_rate": 0,
+            "invalidations": 0,
+            "evictions": 0,
+            "total_entries": 0,
+            "entries_by_tenant": {},
+        }
 
 
 @app.get("/v1/explain/{request_id}", tags=["Observability"])

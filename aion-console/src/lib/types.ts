@@ -83,6 +83,17 @@ export interface PolicyRule {
   action: "block" | "warn" | "sanitize";
 }
 
+export interface CacheStats {
+  enabled: boolean;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+  invalidations: number;
+  evictions: number;
+  total_entries: number;
+  entries_by_tenant: Record<string, number>;
+}
+
 export type ApprovalStatus =
   | "draft"
   | "pending_review"

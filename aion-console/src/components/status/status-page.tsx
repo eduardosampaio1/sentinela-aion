@@ -14,6 +14,9 @@ import {
   TrendingDown,
   Brain,
   Activity,
+  Database,
+  Wand2,
+  ScanEye,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
@@ -332,6 +335,113 @@ export function StatusPage() {
           <div className="mt-3 flex items-center gap-1.5 text-xs text-violet-400">
             <TrendingDown className="h-3 w-3" />
             Economia acumulada: <strong><AnimatedNumber value={totalEconomy} format={fmtBRL} /></strong>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ v1.5 INTELLIGENCE ═══ */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* SEMANTIC CACHE */}
+        <div className="rounded-xl border border-amber-800/50 bg-gradient-to-br from-amber-950/50 to-transparent p-5">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-900/30">
+              <Database className="h-4 w-4 text-amber-400" />
+            </div>
+            <div>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-amber-200">CACHE</h3>
+              <span className="text-xs text-amber-600">Cache semântico</span>
+            </div>
+            <Badge variant={modules.cache.enabled ? "success" : "warning"} className="ml-auto text-[10px]">
+              {modules.cache.enabled ? "Ativo" : "Desligado"}
+            </Badge>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-amber-600">Hit rate</div>
+              <div className="font-[family-name:var(--font-mono)] text-lg font-bold text-amber-200">
+                <AnimatedNumber value={modules.cache.hit_rate * 100} format={fmtPct} />
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-amber-600">Entradas</div>
+              <AnimatedNumber value={modules.cache.total_entries} className="font-[family-name:var(--font-mono)] text-lg font-bold text-amber-200" />
+            </div>
+            <div>
+              <div className="text-xs text-green-600">Hits</div>
+              <AnimatedNumber value={modules.cache.hits} className="font-[family-name:var(--font-mono)] text-sm font-semibold text-green-400" />
+            </div>
+            <div>
+              <div className="text-xs text-amber-600">Misses</div>
+              <AnimatedNumber value={modules.cache.misses} className="font-[family-name:var(--font-mono)] text-sm font-semibold text-amber-200" />
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-400">
+            <TrendingDown className="h-3 w-3" />
+            <AnimatedNumber value={modules.cache.invalidations} /> invalidações · <AnimatedNumber value={modules.cache.evictions} /> evições
+          </div>
+        </div>
+
+        {/* PROMPT REWRITER */}
+        <div className="rounded-xl border border-rose-800/50 bg-gradient-to-br from-rose-950/50 to-transparent p-5">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-900/30">
+              <Wand2 className="h-4 w-4 text-rose-400" />
+            </div>
+            <div>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-rose-200">REWRITER</h3>
+              <span className="text-xs text-rose-600">Prompt enhancement</span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-rose-600">Rewrites hoje</div>
+              <AnimatedNumber value={modules.metis.rewrites_applied} className="font-[family-name:var(--font-mono)] text-lg font-bold text-rose-200" />
+            </div>
+            <div>
+              <div className="text-xs text-rose-600">Taxa de rewrite</div>
+              <div className="font-[family-name:var(--font-mono)] text-lg font-bold text-rose-200">
+                <AnimatedNumber value={modules.metis.optimizations_today > 0 ? (modules.metis.rewrites_applied / modules.metis.optimizations_today) * 100 : 0} format={fmtPct} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-xs text-rose-400">
+            Apenas adiciona especificidade — nunca muda intenção
+          </div>
+        </div>
+
+        {/* NER + CLASSIFIER */}
+        <div className="rounded-xl border border-cyan-800/50 bg-gradient-to-br from-cyan-950/50 to-transparent p-5">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-900/30">
+              <ScanEye className="h-4 w-4 text-cyan-400" />
+            </div>
+            <div>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-cyan-200">NER + CLASSIFIER</h3>
+              <span className="text-xs text-cyan-600">Inteligência híbrida</span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-cyan-600">Falsos positivos evitados</div>
+              <AnimatedNumber value={modules.estixe.false_positives_avoided} className="font-[family-name:var(--font-mono)] text-lg font-bold text-cyan-200" />
+            </div>
+            <div>
+              <div className="text-xs text-cyan-600">Classificador</div>
+              <div className="font-[family-name:var(--font-mono)] text-lg font-bold text-cyan-200">
+                {modules.nomos.classifier_method === "hybrid" ? "Híbrido" : "Heurístico"}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-xs text-cyan-400">
+            {modules.nomos.classifier_method === "hybrid"
+              ? "70% semântico + 30% heurístico"
+              : "Fallback: apenas heurístico"}
           </div>
         </div>
       </div>
