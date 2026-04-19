@@ -83,6 +83,33 @@ export interface PolicyRule {
   action: "block" | "warn" | "sanitize";
 }
 
+export interface IntentSuggestion {
+  id: string;
+  cluster_size: number;
+  sample_messages: string[];
+  suggested_intent_name: string;
+  suggested_response: string;
+  estimated_daily_savings: number;
+  avg_response_length: number;
+  confidence: number;
+}
+
+export interface SuggestionsResponse {
+  tenant: string;
+  total_samples: number;
+  suggestions: IntentSuggestion[];
+  count: number;
+}
+
+export interface SuggestionApprovalResponse {
+  status: string;
+  suggestion_id: string;
+  intent_name: string;
+  response: string;
+  yaml_snippet: string;
+  note: string;
+}
+
 export interface CacheStats {
   enabled: boolean;
   hits: number;

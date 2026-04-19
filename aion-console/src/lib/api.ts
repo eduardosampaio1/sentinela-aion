@@ -1,4 +1,12 @@
-import type { Stats, AionEvent, BehaviorDial, ModelInfo, CacheStats } from "./types";
+import type {
+  Stats,
+  AionEvent,
+  BehaviorDial,
+  ModelInfo,
+  CacheStats,
+  SuggestionsResponse,
+  SuggestionApprovalResponse,
+} from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL || "http://localhost:8080";
 
@@ -90,6 +98,28 @@ export async function getAudit(limit = 50): Promise<Record<string, unknown>[]> {
 // Cache stats
 export async function getCacheStats(): Promise<CacheStats> {
   return fetchApi("/v1/cache/stats");
+}
+
+// Intent suggestions (auto-discovery)
+export async function getSuggestions(): Promise<SuggestionsResponse> {
+  return fetchApi("/v1/estixe/suggestions");
+}
+
+export async function approveSuggestion(
+  suggestionId: string,
+  body?: { intent_name?: string; response?: string },
+): Promise<SuggestionApprovalResponse> {
+  return fetchApi(`/v1/estixe/suggestions/${suggestionId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export async function rejectSuggestion(suggestionId: string): Promise<{ status: string }> {
+  return fetchApi(`/v1/estixe/suggestions/${suggestionId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 // Overrides

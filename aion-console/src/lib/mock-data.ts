@@ -1,4 +1,13 @@
-import type { Stats, AionEvent, BehaviorDial, ModelInfo, IntentCategory, SecurityRule, CacheStats } from "./types";
+import type {
+  Stats,
+  AionEvent,
+  BehaviorDial,
+  ModelInfo,
+  IntentCategory,
+  SecurityRule,
+  CacheStats,
+  IntentSuggestion,
+} from "./types";
 
 // ═══════════════════════════════════════════
 // OPERATIONAL STATE — what the user sees first
@@ -419,6 +428,54 @@ export const mockIntents: IntentCategory[] = [
     enabled: true,
     examples: ["ok", "entendi", "sim", "certo", "got it", "yes"],
     response: "Entendido! Algo mais?",
+  },
+];
+
+export const mockSuggestions: IntentSuggestion[] = [
+  {
+    id: "cl_a1b2c3d4e5f6",
+    cluster_size: 47,
+    sample_messages: [
+      "qual o horário de funcionamento",
+      "horário de atendimento?",
+      "que horas vocês abrem",
+      "vocês atendem aos sábados?",
+      "quando vocês fecham",
+    ],
+    suggested_intent_name: "intent_horario",
+    suggested_response: "Edite esta resposta",
+    estimated_daily_savings: 12.4,
+    avg_response_length: 180,
+    confidence: 0.912,
+  },
+  {
+    id: "cl_f6e5d4c3b2a1",
+    cluster_size: 23,
+    sample_messages: [
+      "como rastrear meu pedido",
+      "onde está minha encomenda",
+      "status do meu pedido",
+      "rastreamento do pedido",
+    ],
+    suggested_intent_name: "intent_rastreio",
+    suggested_response: "Edite esta resposta",
+    estimated_daily_savings: 8.2,
+    avg_response_length: 220,
+    confidence: 0.874,
+  },
+  {
+    id: "cl_999888777666",
+    cluster_size: 15,
+    sample_messages: [
+      "preciso de ajuda com meu cadastro",
+      "problema no cadastro",
+      "não consigo me cadastrar",
+    ],
+    suggested_intent_name: "intent_cadastro",
+    suggested_response: "Edite esta resposta",
+    estimated_daily_savings: 4.1,
+    avg_response_length: 310,
+    confidence: 0.831,
   },
 ];
 

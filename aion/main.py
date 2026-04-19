@@ -558,6 +558,28 @@ async def chat_completions(request: Request):
             except Exception:
                 pass  # cache store is non-critical
 
+            # Record passthrough sample for suggestion engine (opt-in)
+            try:
+                from aion.config import get_estixe_settings
+                from aion.estixe.suggestions import get_suggestion_engine
+                from aion.shared.tokens import extract_user_message
+                _estixe_settings = get_estixe_settings()
+                if _estixe_settings.suggestions_enabled:
+                    _user_msg = extract_user_message(effective_request)
+                    if _user_msg:
+                        _resp_text = (
+                            response.choices[0].message.content
+                            if response.choices and response.choices[0].message
+                            else ""
+                        )
+                        _cost = context.metadata.get("estimated_cost", 0.0)
+                        asyncio.create_task(asyncio.to_thread(
+                            get_suggestion_engine().record,
+                            context.tenant, _user_msg, len(_resp_text or ""), _cost,
+                        ))
+            except Exception:
+                pass  # suggestion recording is non-critical
+
             pass_headers = _build_response_headers(context)
             pass_headers["X-Aion-Decision"] = "passthrough"
             _add_contract_headers(pass_headers, contract, mode="transparent")
@@ -1029,6 +1051,85 @@ async def reload_intents():
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 
+@app.get("/v1/estixe/suggestions", tags=["Control Plane"])
+async def list_suggestions(request: Request):
+    """List auto-discovered bypass intent suggestions for tenant."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    try:
+        from aion.estixe.suggestions import get_suggestion_engine
+        engine = get_suggestion_engine()
+        suggestions = engine.generate(tenant)
+        return {
+            "tenant": tenant,
+            "total_samples": engine.tenant_sample_count(tenant),
+            "suggestions": [s.to_dict() for s in suggestions],
+            "count": len(suggestions),
+        }
+    except Exception as exc:
+        logger.warning("Suggestion generation failed: %s", exc)
+        return {"tenant": tenant, "total_samples": 0, "suggestions": [], "count": 0}
+
+
+@app.post("/v1/estixe/suggestions/{suggestion_id}/approve", tags=["Control Plane"])
+async def approve_suggestion(suggestion_id: str, request: Request):
+    """Approve a suggestion — marks it for intent creation.
+
+    Returns the intent YAML snippet that the user should add to intents.yaml.
+    Body (optional): {"intent_name": "...", "response": "..."}
+    """
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    from aion.estixe.suggestions import get_suggestion_engine
+    engine = get_suggestion_engine()
+    existing = next((s for s in engine.generate(tenant) if s.id == suggestion_id), None)
+    if not existing:
+        return _error_response(404, f"Suggestion '{suggestion_id}' not found", "not_found", "invalid_request")
+
+    intent_name = body.get("intent_name", existing.suggested_intent_name)
+    response_text = body.get("response", existing.suggested_response)
+
+    if not engine.approve(tenant, suggestion_id):
+        return _error_response(404, f"Suggestion '{suggestion_id}' not found", "not_found", "invalid_request")
+
+    # Build YAML snippet for user to add to intents.yaml
+    examples_yaml = "\n".join(f'      - "{msg}"' for msg in existing.sample_messages)
+    yaml_snippet = (
+        f"{intent_name}:\n"
+        f"    action: bypass\n"
+        f"    examples:\n{examples_yaml}\n"
+        f"    responses:\n"
+        f'      - "{response_text}"'
+    )
+
+    return {
+        "status": "approved",
+        "suggestion_id": suggestion_id,
+        "intent_name": intent_name,
+        "response": response_text,
+        "yaml_snippet": yaml_snippet,
+        "note": "Adicione este bloco ao config/intents.yaml e chame /v1/estixe/intents/reload",
+    }
+
+
+@app.post("/v1/estixe/suggestions/{suggestion_id}/reject", tags=["Control Plane"])
+async def reject_suggestion(suggestion_id: str, request: Request):
+    """Reject a suggestion so it doesn't resurface."""
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+
+    from aion.estixe.suggestions import get_suggestion_engine
+    get_suggestion_engine().reject(tenant, suggestion_id)
+    return {"status": "rejected", "suggestion_id": suggestion_id}
+
+
 @app.post("/v1/estixe/policies/reload", tags=["Control Plane"])
 async def reload_policies():
     if not _pipeline:
@@ -1104,6 +1205,13 @@ async def delete_tenant_data(tenant: str):
         get_cache().delete_tenant(tenant)
     except Exception:
         logger.debug("Cache delete failed for tenant %s", tenant)
+
+    # Clear suggestion engine samples
+    try:
+        from aion.estixe.suggestions import get_suggestion_engine
+        get_suggestion_engine().delete_tenant(tenant)
+    except Exception:
+        logger.debug("Suggestion engine delete failed for tenant %s", tenant)
 
     # Clear NEMOS data (decision memory, economics, baseline)
     nemos_deleted = 0

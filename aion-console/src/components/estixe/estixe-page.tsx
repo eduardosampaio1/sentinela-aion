@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Zap,
   Plus,
@@ -14,11 +14,23 @@ import {
   Pencil,
   Check,
   X,
+  Sparkles,
+  ThumbsUp,
+  ThumbsDown,
+  Copy,
 } from "lucide-react";
 import { Toggle } from "@/components/ui/toggle";
 import { Badge } from "@/components/ui/badge";
-import { mockIntents, mockSecurityRules, mockModuleStats } from "@/lib/mock-data";
-import { reloadIntents, reloadPolicies, setOverrides } from "@/lib/api";
+import { mockIntents, mockSecurityRules, mockModuleStats, mockSuggestions } from "@/lib/mock-data";
+import {
+  reloadIntents,
+  reloadPolicies,
+  setOverrides,
+  getSuggestions,
+  approveSuggestion,
+  rejectSuggestion,
+} from "@/lib/api";
+import type { IntentSuggestion, SuggestionApprovalResponse } from "@/lib/types";
 
 export function EstixePage() {
   const [bypassEnabled, setBypassEnabled] = useState(true);
@@ -30,7 +42,70 @@ export function EstixePage() {
   const [thresholdSaved, setThresholdSaved] = useState(false);
   const [editingIntent, setEditingIntent] = useState<string | null>(null);
   const [editingResponse, setEditingResponse] = useState("");
+  const [suggestions, setSuggestions] = useState<IntentSuggestion[]>([]);
+  const [suggestionsLoaded, setSuggestionsLoaded] = useState(false);
+  const [suggestionEditing, setSuggestionEditing] = useState<string | null>(null);
+  const [suggestionName, setSuggestionName] = useState("");
+  const [suggestionResp, setSuggestionResp] = useState("");
+  const [approvalResult, setApprovalResult] = useState<SuggestionApprovalResponse | null>(null);
   const estixeStats = mockModuleStats.estixe;
+
+  // Fetch suggestions from backend (fallback to mock if unreachable)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getSuggestions();
+        if (!cancelled) {
+          setSuggestions(res.suggestions ?? []);
+          setSuggestionsLoaded(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setSuggestions(mockSuggestions);
+          setSuggestionsLoaded(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const startApproving = (s: IntentSuggestion) => {
+    setSuggestionEditing(s.id);
+    setSuggestionName(s.suggested_intent_name);
+    setSuggestionResp("");
+  };
+
+  const cancelApproving = () => {
+    setSuggestionEditing(null);
+    setSuggestionName("");
+    setSuggestionResp("");
+  };
+
+  const confirmApprove = async (s: IntentSuggestion) => {
+    try {
+      const res = await approveSuggestion(s.id, {
+        intent_name: suggestionName,
+        response: suggestionResp,
+      });
+      setApprovalResult(res);
+      setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+    } catch {
+      // Fallback: local-only approval
+      setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+    } finally {
+      cancelApproving();
+    }
+  };
+
+  const handleReject = async (s: IntentSuggestion) => {
+    try {
+      await rejectSuggestion(s.id);
+    } catch {}
+    setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+  };
 
   const startEditing = (intentId: string, currentResponse: string) => {
     setEditingIntent(intentId);
@@ -233,6 +308,167 @@ export function EstixePage() {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Suggestions — auto-discovery */}
+      {suggestionsLoaded && suggestions.length > 0 && (
+        <div className="rounded-xl border border-amber-800/50 bg-gradient-to-br from-amber-950/30 to-transparent p-5">
+          <div className="mb-4 flex items-start justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-900/30">
+                <Sparkles className="h-4 w-4 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-[var(--color-text)]">
+                  Novas categorias sugeridas
+                </h2>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  O AION detectou clusters de perguntas repetidas que poderiam virar bypass. Aprove para economizar.
+                </p>
+              </div>
+            </div>
+            <Badge variant="warning">{suggestions.length} sugestões</Badge>
+          </div>
+
+          <div className="space-y-3">
+            {suggestions.map((s) => (
+              <div key={s.id} className="rounded-lg border border-amber-900/50 bg-[var(--color-surface)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <code className="font-[family-name:var(--font-mono)] text-sm font-semibold text-amber-400">
+                        {s.suggested_intent_name}
+                      </code>
+                      <Badge variant="muted">{s.cluster_size} requests</Badge>
+                      <Badge variant="success">
+                        ~R$ {s.estimated_daily_savings.toFixed(2)}/dia
+                      </Badge>
+                      <span className="text-[10px] text-[var(--color-text-muted)]">
+                        confiança: {(s.confidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+
+                    <div className="mt-2 space-y-1">
+                      {s.sample_messages.slice(0, 3).map((msg, i) => (
+                        <div
+                          key={i}
+                          className="truncate rounded bg-white/5 px-2 py-1 text-xs text-[var(--color-text-muted)]"
+                        >
+                          &quot;{msg}&quot;
+                        </div>
+                      ))}
+                      {s.sample_messages.length > 3 && (
+                        <div className="text-[10px] text-[var(--color-text-muted)]">
+                          +{s.sample_messages.length - 3} exemplos similares
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-col gap-1.5">
+                    <button
+                      onClick={() => startApproving(s)}
+                      className="flex cursor-pointer items-center gap-1 rounded bg-green-900/40 px-2 py-1 text-xs font-semibold text-green-300 hover:bg-green-900/60"
+                      title="Aprovar"
+                    >
+                      <ThumbsUp className="h-3 w-3" />
+                      Aprovar
+                    </button>
+                    <button
+                      onClick={() => handleReject(s)}
+                      className="flex cursor-pointer items-center gap-1 rounded bg-red-900/30 px-2 py-1 text-xs font-semibold text-red-300 hover:bg-red-900/50"
+                      title="Rejeitar — não mostrar de novo"
+                    >
+                      <ThumbsDown className="h-3 w-3" />
+                      Rejeitar
+                    </button>
+                  </div>
+                </div>
+
+                {/* Approval editor (inline) */}
+                {suggestionEditing === s.id && (
+                  <div className="mt-3 space-y-2 rounded border border-[var(--color-primary)]/50 bg-[var(--color-bg)] p-3">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        Nome do intent
+                      </label>
+                      <input
+                        type="text"
+                        value={suggestionName}
+                        onChange={(e) => setSuggestionName(e.target.value)}
+                        className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        Resposta automática
+                      </label>
+                      <textarea
+                        value={suggestionResp}
+                        onChange={(e) => setSuggestionResp(e.target.value)}
+                        rows={2}
+                        placeholder="Digite a resposta que o AION enviará para esse intent..."
+                        className="w-full resize-none rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={cancelApproving}
+                        className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      >
+                        <X className="h-3 w-3" /> Cancelar
+                      </button>
+                      <button
+                        onClick={() => confirmApprove(s)}
+                        disabled={!suggestionName.trim() || !suggestionResp.trim()}
+                        className="flex cursor-pointer items-center gap-1 rounded bg-[var(--color-cta)] px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Check className="h-3 w-3" /> Criar intent
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Approval result modal */}
+      {approvalResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl bg-[var(--color-surface)] p-6 shadow-xl">
+            <div className="mb-4 flex items-center gap-2">
+              <Check className="h-5 w-5 text-green-400" />
+              <h3 className="text-lg font-semibold text-[var(--color-text)]">
+                Intent &quot;{approvalResult.intent_name}&quot; aprovado
+              </h3>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {approvalResult.note}
+            </p>
+            <div className="mt-3 relative">
+              <pre className="overflow-x-auto rounded-lg bg-[var(--color-bg)] p-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text)]">
+                {approvalResult.yaml_snippet}
+              </pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(approvalResult.yaml_snippet)}
+                className="absolute right-2 top-2 cursor-pointer rounded bg-[var(--color-surface)] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                title="Copiar"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setApprovalResult(null)}
+                className="cursor-pointer rounded-lg bg-[var(--color-cta)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Entendi
+              </button>
+            </div>
           </div>
         </div>
       )}

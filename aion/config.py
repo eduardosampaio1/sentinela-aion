@@ -93,6 +93,11 @@ class EstixeSettings(BaseSettings):
     max_tokens_per_request: int = 4096
     intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
     cache_embeddings: bool = True
+    # ── Suggestions (auto-discovery) ──
+    suggestions_enabled: bool = False  # opt-in: ESTIXE_SUGGESTIONS_ENABLED=true
+    suggestions_min_cluster_size: int = 3
+    suggestions_similarity_threshold: float = 0.85
+    suggestions_sampling_rate: float = 1.0  # 1.0 = sample every passthrough
 
 
 class ScoringWeights(BaseSettings):
