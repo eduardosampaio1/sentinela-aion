@@ -31,6 +31,8 @@ class BypassResult:
     response: Optional[ChatCompletionResponse] = None
     intent: str = ""
     confidence: float = 0.0
+    should_block: bool = False        # True when semantic intent action=block
+    block_reason: str = ""
 
 
 class BypassEngine:
@@ -39,12 +41,46 @@ class BypassEngine:
     def __init__(self, classifier: SemanticClassifier) -> None:
         self._classifier = classifier
 
-    async def check(self, user_message: str, context: PipelineContext) -> BypassResult:
-        """Check if the user message can be bypassed."""
-        match = self._classifier.classify(user_message)
+    async def check(
+        self,
+        user_message: str,
+        context: PipelineContext,
+        block_min_threshold: float | None = None,
+        bypass_threshold: float | None = None,
+    ) -> BypassResult:
+        """Check if the user message can be bypassed.
+
+        Args:
+            block_min_threshold: Enforces a minimum confidence floor for action=block intents.
+            bypass_threshold: Override for bypass threshold — passed directly to classify()
+                instead of mutating the shared settings object (prevents race conditions
+                under concurrent load).
+        """
+        match = self._classifier.classify(
+            user_message,
+            block_min_threshold=block_min_threshold,
+            bypass_threshold=bypass_threshold,
+        )
 
         if match is None:
             return BypassResult(should_bypass=False)
+
+        if match.action == "block":
+            # Semantic block — intent classifier recognized a malicious pattern
+            block_reason = getattr(match, "block_reason", None) or f"Conteúdo bloqueado por política semântica ({match.intent})"
+            context.metadata["detected_intent"] = match.intent
+            context.metadata["intent_confidence"] = match.confidence
+            logger.info(
+                "SEMANTIC BLOCK: intent='%s' confidence=%.3f input='%s'",
+                match.intent, match.confidence, user_message[:80],
+            )
+            return BypassResult(
+                should_bypass=False,
+                should_block=True,
+                block_reason=block_reason,
+                intent=match.intent,
+                confidence=match.confidence,
+            )
 
         if match.action != "bypass":
             # Intent recognized but action is passthrough — don't bypass

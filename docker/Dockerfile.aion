@@ -1,0 +1,87 @@
+# AION — Production Docker image with embedding model bundled
+#
+# Build context: D:/projetos/aion-sim/aion (the AION source root).
+# Result: runtime image ~1.4GB, cold start <5s (no model download).
+#
+# Three stages:
+#   1. deps         → install Python deps (cacheable layer)
+#   2. model-cache  → pre-download embedding model into /opt/hf-cache
+#   3. runtime      → slim non-root image with everything baked in
+
+# ── Stage 1: install deps ──
+FROM python:3.11-slim AS deps
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY pyproject.toml README.md /build/
+COPY aion /build/aion
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip wheel setuptools && \
+    pip install /build/ && \
+    pip install redis uvloop \
+                opentelemetry-api opentelemetry-sdk \
+                opentelemetry-instrumentation-fastapi \
+                opentelemetry-instrumentation-httpx \
+                opentelemetry-exporter-otlp-proto-grpc \
+                prometheus-client
+
+
+# ── Stage 2: cache embedding model in FLAT directory ──
+# snapshot_download para layout plano que sentence-transformers carrega direto
+# via `SentenceTransformer('/opt/hf-model')` sem depender de resolução HF.
+#
+# ONNX quantization int8: opção documentada em PRODUCTION_CHECKLIST.md.
+# Em produção dedicada (não laptop com 6 containers concorrentes), o PyTorch
+# FP32 + LRU cache de classificação já entrega p95 < 300ms. ONNX fica para
+# quando tiver que extrair últimos 30% em GPU-less deploys.
+FROM deps AS model-cache
+
+RUN python -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', \
+                  local_dir='/opt/hf-model', \
+                  local_dir_use_symlinks=False); \
+print('model snapshot downloaded to /opt/hf-model')"
+
+
+# ── Stage 3: runtime (slim, non-root, offline-capable) ──
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    AION_RUNTIME_DIR=/var/aion/runtime \
+    ESTIXE_EMBEDDING_MODEL=/opt/hf-model
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 aion \
+    && mkdir -p /var/aion/runtime \
+    && chown -R aion:aion /var/aion
+
+# Copy venv + model cache from previous stages
+COPY --from=deps /opt/venv /opt/venv
+COPY --from=model-cache /opt/hf-model /opt/hf-model
+
+WORKDIR /app
+
+USER aion
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+  CMD curl -fsS http://localhost:8080/ready || exit 1
+
+CMD ["python", "-m", "aion.cli"]

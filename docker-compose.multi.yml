@@ -1,0 +1,103 @@
+# AION-sim MULTI — 2 replicas + LB + Redis, SEM observability (~5-6GB RAM)
+#
+# Uso:
+#   docker compose -f docker-compose.multi.yml up -d
+#
+# Para testes de multi-replica (cross-replica Redis, LB failover) sem
+# carregar Grafana/Prometheus/Jaeger.
+
+name: aion-sim-multi
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: aion-redis
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+    deploy:
+      resources: { limits: { memory: 256M } }
+
+  mock-llm:
+    build: { context: ., dockerfile: docker/Dockerfile.mock_llm }
+    container_name: aion-mock-llm
+    ports: ["8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()"]
+      interval: 10s
+      retries: 3
+    deploy:
+      resources: { limits: { memory: 256M } }
+
+  aion1: &aion
+    build: { context: ./aion, dockerfile: ../docker/Dockerfile.aion }
+    container_name: aion1
+    depends_on:
+      redis: { condition: service_healthy }
+      mock-llm: { condition: service_healthy }
+    environment: &aion-env
+      AION_PORT: 8080
+      AION_ENVIRONMENT: staging
+      AION_LOG_LEVEL: info
+      AION_FAIL_MODE: open
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "true"
+      AION_DEFAULT_BASE_URL: http://mock-llm:8001/v1
+      OPENAI_API_KEY: sk-sim-demo-not-real
+      REDIS_URL: redis://redis:6379/0
+      AION_REQUIRE_CHAT_AUTH: "false"
+      AION_REQUIRE_TENANT: "false"
+      AION_CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+      ESTIXE_BYPASS_THRESHOLD: "0.80"
+      AION_REPLICA_ID: aion1
+    volumes:
+      - aion-runtime-1:/var/aion/runtime
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/ready"]
+      interval: 10s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources: { limits: { memory: 1536M, cpus: "1.5" } }
+
+  aion2:
+    <<: *aion
+    container_name: aion2
+    environment:
+      <<: *aion-env
+      AION_REPLICA_ID: aion2
+    volumes:
+      - aion-runtime-2:/var/aion/runtime
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: aion-nginx
+    depends_on: [aion1, aion2]
+    ports: ["8080:8080"]
+    volumes:
+      - ./docker/nginx-2replicas.conf:/etc/nginx/nginx.conf:ro
+    deploy:
+      resources: { limits: { memory: 128M } }
+
+  console:
+    image: python:3.11-slim
+    container_name: aion-console
+    depends_on: [nginx]
+    ports: ["3000:3000"]
+    volumes:
+      - ./console:/app
+    working_dir: /app
+    environment:
+      AION_URL: http://nginx:8080
+    command: python server.py
+    deploy:
+      resources: { limits: { memory: 128M } }
+
+volumes:
+  aion-runtime-1:
+  aion-runtime-2:

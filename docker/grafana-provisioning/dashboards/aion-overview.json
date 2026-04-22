@@ -1,0 +1,104 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "description": "Total requests processed per replica",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "title": "Requests por réplica",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(aion_requests_total[1m])", "legendFormat": "{{instance}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "description": "Decisões do AION (bypass/block/passthrough)",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "title": "Distribuição de decisões",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "sum by (decision) (rate(aion_decisions_total[1m]))", "legendFormat": "{{decision}}", "refId": "A"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "description": "Cache hit rate da classificação de risco",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 6},
+      "id": 3,
+      "title": "Classify cache hit rate",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "aion_classify_cache_hit_rate", "legendFormat": "{{replica}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}}
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "description": "In-flight requests",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 6},
+      "id": 4,
+      "title": "Requests in-flight",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "aion_requests_in_flight", "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 12},
+      "id": 5,
+      "title": "Classifier degraded",
+      "type": "stat",
+      "targets": [
+        {"expr": "aion_classifier_degraded", "legendFormat": "{{replica}}", "refId": "A"}
+      ],
+      "fieldConfig": {"defaults": {
+        "thresholds": {"mode": "absolute", "steps": [
+          {"value": null, "color": "green"},
+          {"value": 1, "color": "red"}
+        ]}
+      }}
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 12},
+      "id": 6,
+      "title": "Categorias de risco (incl. shadow)",
+      "type": "stat",
+      "targets": [
+        {"expr": "aion_estixe_risk_categories", "legendFormat": "{{replica}} total", "refId": "A"},
+        {"expr": "aion_estixe_shadow_categories", "legendFormat": "{{replica}} shadow", "refId": "B"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 12},
+      "id": 7,
+      "title": "Erros totais",
+      "type": "stat",
+      "targets": [
+        {"expr": "aion_errors_total", "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["aion"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "AION — Overview",
+  "uid": "aion-overview",
+  "version": 1,
+  "weekStart": ""
+}

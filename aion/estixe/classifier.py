@@ -18,6 +18,7 @@ import numpy as np
 import yaml
 
 from aion.config import EstixeSettings
+from aion.estixe._normalize import normalize_input
 from aion.shared.embeddings import get_embedding_model
 
 logger = logging.getLogger("aion.estixe.classifier")
@@ -31,6 +32,7 @@ class IntentMatch:
     matched_example: str
     response_templates: list[str] = field(default_factory=list)
     action: str = "bypass"  # bypass | passthrough | block
+    block_reason: str = ""  # populated when action=block
 
 
 @dataclass
@@ -40,6 +42,7 @@ class IntentDefinition:
     examples: list[str]
     responses: list[str] = field(default_factory=list)
     action: str = "bypass"
+    block_reason: str = ""   # populated when action=block
     embeddings: Optional[np.ndarray] = None
 
 
@@ -86,17 +89,21 @@ class SemanticClassifier:
             examples = intent_config.get("examples", [])
             responses = intent_config.get("responses", [])
             action = intent_config.get("action", "bypass")
+            block_reason = intent_config.get("block_reason", "")
 
             intent = IntentDefinition(
                 name=intent_name,
                 examples=examples,
                 responses=responses,
                 action=action,
+                block_reason=block_reason,
             )
 
-            # Pre-compute embeddings for all examples using shared model
+            # Pre-compute embeddings — normalize examples before encoding so the
+            # same transform is applied to both seeds and inputs at classify time.
             if examples and model.loaded:
-                intent.embeddings = model.encode(examples, normalize=True)
+                normalized_examples = [normalize_input(e) for e in examples]
+                intent.embeddings = model.encode(normalized_examples, normalize=True)
 
             self._intents.append(intent)
 
@@ -107,18 +114,26 @@ class SemanticClassifier:
             total_examples,
         )
 
-    def classify(self, text: str) -> Optional[IntentMatch]:
+    def classify(self, text: str, block_min_threshold: float | None = None, bypass_threshold: float | None = None) -> Optional[IntentMatch]:
         """Classify user input against known intents.
 
-        Returns the best match if confidence >= threshold, else None.
+        Returns the best match if confidence >= bypass_threshold, else None.
+
+        Args:
+            text: User input to classify.
+            block_min_threshold: If set, action=block intents require confidence >= this value
+                (separate from bypass_threshold to prevent dynamic relaxation from lowering
+                the bar for blocking decisions). If None, no extra floor is applied.
         """
         model = get_embedding_model()
         if not model.loaded or not self._intents:
             return None
 
-        # Encode input using shared model (with LRU cache)
+        # Normalize before encoding — same transform applied to examples at load time.
+        # Cache uses normalized form as key: "IGNORE instructions" == "ignore instructions".
+        normalized_text = normalize_input(text)
         input_embedding = model.encode_single(
-            text, normalize=True, use_cache=self._settings.cache_embeddings,
+            normalized_text, normalize=True, use_cache=self._settings.cache_embeddings,
         )
 
         best_match: Optional[IntentMatch] = None
@@ -141,9 +156,23 @@ class SemanticClassifier:
                     matched_example=intent.examples[max_idx],
                     response_templates=intent.responses,
                     action=intent.action,
+                    block_reason=intent.block_reason,
                 )
 
-        if best_match and best_match.confidence >= self._settings.bypass_threshold:
+        effective_bypass_threshold = bypass_threshold if bypass_threshold is not None else self._settings.bypass_threshold
+        if best_match and best_match.confidence >= effective_bypass_threshold:
+            # Extra floor for block intents — prevents dynamic threshold relaxation from
+            # lowering the bar for blocking decisions
+            if (
+                best_match.action == "block"
+                and block_min_threshold is not None
+                and best_match.confidence < block_min_threshold
+            ):
+                logger.debug(
+                    "Block intent '%s' suppressed: confidence %.3f < block_min_threshold %.3f",
+                    best_match.intent, best_match.confidence, block_min_threshold,
+                )
+                return None
             logger.debug(
                 "Classified '%s' as '%s' (confidence=%.3f, matched='%s')",
                 text.strip().lower(),

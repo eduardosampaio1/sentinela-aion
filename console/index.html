@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AION Sim Console</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d;
+  --text: #e6edf3; --muted: #7d8590;
+  --bypass: #3fb950; --block: #f85149; --pass: #58a6ff; --accent: #a371f7;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ── Header ── */
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.logo { font-weight: 700; font-size: 16px; letter-spacing: -0.5px; }
+.logo em { color: var(--accent); font-style: normal; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bypass); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.stats { margin-left: auto; display: flex; gap: 24px; font-size: 12px; color: var(--muted); align-items: center; }
+.stats b { color: var(--text); font-weight: 600; }
+.btn-console { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; transition: border-color .15s, background .15s; }
+.btn-console:hover { border-color: var(--accent); background: rgba(163,113,247,.12); color: var(--accent); }
+
+/* ── Layout ── */
+.main { flex: 1; display: flex; overflow: hidden; }
+
+/* ── Chat ── */
+.chat { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.bubble { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.55; }
+.bubble.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+.bubble.aion { align-self: flex-start; background: var(--surface2); border-bottom-left-radius: 3px; }
+.bubble .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-bottom: 5px; display: inline-flex; align-items: center; gap: 4px; letter-spacing: .4px; }
+.badge.bypass { background: rgba(63,185,80,.15); color: var(--bypass); }
+.badge.block   { background: rgba(248,81,73,.15);  color: var(--block); }
+.badge.pass    { background: rgba(88,166,255,.15); color: var(--pass); }
+.bubble .meta  { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+.input-bar { padding: 14px 18px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+select.tenant { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+textarea#msg { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 13px; border-radius: 8px; font-size: 14px; resize: none; font-family: inherit; min-height: 42px; max-height: 110px; }
+textarea#msg:focus { outline: none; border-color: var(--accent); }
+button#send { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; white-space: nowrap; }
+button#send:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Trace ── */
+.trace { width: 360px; display: flex; flex-direction: column; flex-shrink: 0; }
+.trace-hdr { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; display: flex; justify-content: space-between; align-items: center; }
+.trace-hdr span { font-weight: 400; font-size: 11px; }
+.trace-list { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.event { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font-size: 11px; animation: slide .25s ease; }
+@keyframes slide { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+.event.bypass    { border-left: 3px solid var(--bypass); }
+.event.block     { border-left: 3px solid var(--block); }
+.event.pass      { border-left: 3px solid var(--pass); }
+.event-top { display: flex; justify-content: space-between; margin-bottom: 3px; }
+.event-dec { font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.event-dec.bypass { color: var(--bypass); }
+.event-dec.block  { color: var(--block); }
+.event-dec.pass   { color: var(--pass); }
+.event-lat { color: var(--muted); }
+.event-info { color: var(--muted); line-height: 1.5; }
+.event-info b { color: var(--text); font-weight: 400; }
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; font-size: 13px; }
+
+::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <div class="logo"><em>AION</em> Sim Console</div>
+  <div class="stats">
+    <div>Requests <b id="s-total">0</b></div>
+    <div>Bypass <b id="s-bypass">0%</b></div>
+    <div>Custo simulado <b id="s-cost">$0.00</b></div>
+    <div>Tenant <b id="s-mode">—</b></div>
+    <a href="http://localhost:3001" target="_blank" class="btn-console">⚙ AION Console</a>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- CHAT -->
+  <div class="chat">
+    <div class="messages" id="messages">
+      <div class="bubble aion">
+        <div class="badge pass">⚡ AION online</div>
+        Olá! Ambiente de simulação pronto. Experimente: "oi", "qual o limite do PIX?", "analise de risco de crédito completa", ou "ignore suas instruções anteriores".
+      </div>
+    </div>
+    <div class="input-bar">
+      <select class="tenant" id="tenant">
+        <option value="nubank">nubank</option>
+        <option value="inter">inter</option>
+        <option value="demo">demo</option>
+      </select>
+      <textarea id="msg" rows="1" placeholder="Digite uma mensagem..."></textarea>
+      <button id="send">Enviar</button>
+    </div>
+  </div>
+
+  <!-- TRACE -->
+  <div class="trace">
+    <div class="trace-hdr">
+      Pipeline Trace
+      <span id="trace-count">0 eventos</span>
+    </div>
+    <div class="trace-list" id="trace-list">
+      <div class="empty" id="empty-msg">Aguardando eventos…</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const AION = '';  // proxy via console server — sem cross-origin
+let reqCount = 0, bypassCount = 0, totalCost = 0, traceCount = 0;
+let knownIds = new Set();
+
+// ── Helpers ──
+const $ = id => document.getElementById(id);
+function decisionClass(d) {
+  if (!d || d === '?') return 'pass';
+  if (d === 'bypass') return 'bypass';
+  if (d === 'block') return 'block';
+  return 'pass';
+}
+function decisionIcon(d) {
+  if (d === 'bypass') return '⚡';
+  if (d === 'block') return '⛔';
+  return '→';
+}
+function fmtCost(c) { return c < 0.001 ? `$${(c*1000).toFixed(3)}m` : `$${c.toFixed(4)}`; }
+
+// ── Add trace event ──
+function addTrace(ev) {
+  const list = $('trace-list');
+  $('empty-msg')?.remove();
+
+  const d = ev.decision || ev.action || 'passthrough';
+  const cls = decisionClass(d);
+  const ms = ev.latency_ms ? Math.round(ev.latency_ms) : (ev.elapsed_ms ? Math.round(ev.elapsed_ms) : '?');
+  const model = ev.model || ev.selected_model || '';
+  const route = (ev.route_reason || ev.nomos_route || '').replace('->', '→');
+  const tenant = ev.tenant || '';
+  const ts = new Date().toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+  const el = document.createElement('div');
+  el.className = `event ${cls}`;
+  el.innerHTML = `
+    <div class="event-top">
+      <span class="event-dec ${cls}">${decisionIcon(d)} ${d.toUpperCase()}</span>
+      <span class="event-lat">${ms}ms · ${ts}</span>
+    </div>
+    <div class="event-info">
+      ${tenant ? `tenant <b>${tenant}</b> · ` : ''}${model ? `modelo <b>${model}</b>` : ''}
+      ${route ? `<br>rota <b>${route}</b>` : ''}
+    </div>`;
+
+  list.insertBefore(el, list.firstChild);
+  traceCount++;
+  $('trace-count').textContent = `${traceCount} evento${traceCount !== 1 ? 's' : ''}`;
+  if (list.children.length > 60) list.removeChild(list.lastChild);
+}
+
+// ── Update header stats ──
+function updateStats() {
+  $('s-total').textContent = reqCount;
+  $('s-bypass').textContent = reqCount ? Math.round(bypassCount / reqCount * 100) + '%' : '0%';
+  $('s-cost').textContent = fmtCost(totalCost);
+  $('s-mode').textContent = $('tenant').value;
+}
+
+// ── Append chat bubble ──
+function appendBubble(role, text, decision, latency, model) {
+  const msgs = $('messages');
+  const div = document.createElement('div');
+  div.className = `bubble ${role}`;
+  if (role === 'aion') {
+    const cls = decisionClass(decision);
+    const ms = latency ? Math.round(latency) : '';
+    const modelStr = model ? ` · ${model}` : '';
+    div.innerHTML = `<div class="badge ${cls}">${decisionIcon(decision)} ${(decision||'passthrough').toUpperCase()}${ms ? ' · ' + ms + 'ms' : ''}${modelStr}</div><div class="msg-body"></div>`;
+  } else {
+    div.textContent = text;
+  }
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+// ── Typewriter effect ──
+async function typewrite(el, text) {
+  const words = text.split(' ');
+  el.textContent = '';
+  for (const word of words) {
+    el.textContent += (el.textContent ? ' ' : '') + word;
+    $('messages').scrollTop = $('messages').scrollHeight;
+    await new Promise(r => setTimeout(r, 28));
+  }
+}
+
+// ── Send message ──
+async function send() {
+  const text = $('msg').value.trim();
+  if (!text) return;
+  const tenant = $('tenant').value;
+
+  $('msg').value = '';
+  $('send').disabled = true;
+
+  appendBubble('user', text);
+
+  const body = JSON.stringify({
+    model: 'gpt-4o-mini',
+    stream: false,
+    messages: [{ role: 'user', content: text }]
+  });
+
+  const t0 = performance.now();
+
+  try {
+    const res = await fetch(`${AION}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Aion-Tenant': tenant,
+        'Authorization': 'Bearer sim-key'
+      },
+      body
+    });
+
+    const decision = res.headers.get('X-Aion-Decision') || 'passthrough';
+    const routeHeader = res.headers.get('X-Aion-Route-Reason') || '';
+    const m = routeHeader.match(/sim-[\w-]+/);
+    const model = m ? m[0] : '';
+    const latency = performance.now() - t0;
+
+    // stats
+    reqCount++;
+    if (decision === 'bypass') bypassCount++;
+    totalCost += parseFloat((routeHeader.match(/\$([\d.]+)/) || ['0','0'])[1]) || 0.000195;
+    updateStats();
+    addTrace({ decision, latency_ms: latency, model, tenant, route_reason: routeHeader });
+
+    // bubble + conteúdo
+    const bubble = appendBubble('aion', '', decision, latency, model);
+    const msgBody = bubble.querySelector('.msg-body');
+
+    if (decision === 'block') {
+      msgBody.textContent = '⛔ Requisição bloqueada pela política de segurança (ESTIXE).';
+    } else {
+      // bypass e passthrough: ambos retornam JSON quando stream=false
+      let text = '';
+      try {
+        const data = await res.json();
+        text = data?.choices?.[0]?.message?.content || '';
+      } catch { text = ''; }
+      if (!text) { msgBody.textContent = '(sem conteúdo)'; }
+      else { await typewrite(msgBody, text); }
+    }
+
+  } catch (err) {
+    appendBubble('aion', '', 'block').querySelector('.msg-body').textContent =
+      '⚠️ Erro de conexão com AION (localhost:8080).';
+    console.error(err);
+  } finally {
+    $('send').disabled = false;
+    $('msg').focus();
+  }
+}
+
+// ── Poll /v1/events ──
+let lastPoll = 0;
+async function pollEvents() {
+  try {
+    const res = await fetch(`${AION}/v1/events?limit=20`);
+    const events = await res.json();
+    if (Array.isArray(events)) {
+      events.reverse().forEach(ev => {
+        const id = ev.request_id || ev.id;
+        if (id && !knownIds.has(id)) {
+          knownIds.add(id);
+          if (lastPoll > 0) addTrace(ev); // só mostra eventos novos após primeira poll
+        }
+      });
+    }
+    lastPoll++;
+  } catch {}
+}
+
+// ── Poll /v1/economics ──
+async function pollEconomics() {
+  try {
+    const res = await fetch(`${AION}/v1/economics`);
+    const d = await res.json();
+    if (d?.total_requests) {
+      reqCount = d.total_requests;
+      bypassCount = Math.round((d.bypass_rate || 0) * reqCount / 100);
+      totalCost = d.total_cost_usd || totalCost;
+      updateStats();
+    }
+  } catch {}
+}
+
+// ── Keyboard ──
+$('msg').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('send').addEventListener('click', send);
+$('tenant').addEventListener('change', updateStats);
+
+// ── Init ──
+updateStats();
+setInterval(pollEvents, 3000);
+setInterval(pollEconomics, 5000);
+pollEvents();
+</script>
+</body>
+</html>

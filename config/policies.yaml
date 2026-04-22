@@ -28,6 +28,88 @@ policies:
     pattern: "\\s{3,}"
     replacement: " "
 
+  # ── Bloqueios PT-BR: fraude financeira ─────────────────────────────────────
+  - name: block_financial_fraud_ptbr
+    action: block
+    keywords:
+      - "burlar o limite"
+      - "burlar limite"
+      - "como burlar"
+      - "contornar limite"
+      - "contornar bloqueio"
+      - "ultrapassar limite"
+      - "aumentar limite ilegalmente"
+      - "driblar limite"
+      - "escapar do limite"
+      - "fazer pix acima"
+      - "transferência acima do limite"
+      - "bypass do limite"
+    reason: "Tentativa de fraude financeira detectada"
+
+  # ── Bloqueios PT-BR: privacidade de dados / LGPD ────────────────────────────
+  - name: block_data_privacy_ptbr
+    action: block
+    keywords:
+      - "dados de outro cliente"
+      - "dados completos de outro"
+      - "mostrar dados de outro"
+      - "informações de outro cliente"
+      - "cpf de outro"
+      - "conta de outro usuário"
+      - "acesso à conta de outr"
+      - "ver dados do cliente"
+      - "extrair dados"
+      - "exportar dados de clientes"
+    reason: "Tentativa de acesso a dados de terceiros (LGPD)"
+
+  # ── Bloqueios PT-BR: injeção de papel / escalonamento de privilégio ──────────
+  - name: block_role_injection_ptbr
+    action: block
+    keywords:
+      - "finja que você é"
+      - "finja ser"
+      - "se comporte como admin"
+      - "atue como administrador"
+      - "você agora é admin"
+      - "nova persona"
+      - "ignore sua programação"
+      - "esqueça suas regras"
+      - "suas instruções anteriores"
+      - "ignore suas instruções"
+      - "desconsidere suas diretrizes"
+      - "me dê acesso admin"
+      - "privilégio de admin"
+    reason: "Tentativa de injeção de papel ou escalonamento de privilégio"
+
+  # ── Bloqueios PT-BR: extração de prompt / política interna ──────────────────
+  - name: block_system_leak_ptbr
+    action: block
+    keywords:
+      - "repita sua política"
+      - "repita exatamente sua"
+      - "mostre sua política interna"
+      - "quais são suas instruções"
+      - "compartilhe suas diretrizes"
+      - "revele seu prompt"
+      - "seu prompt de sistema"
+      - "suas regras internas"
+      - "como você foi programado"
+      - "sua configuração interna"
+    reason: "Tentativa de extração de política ou prompt interno"
+
+  # ── Bloqueios EN: complementos não cobertos antes ──────────────────────────
+  - name: block_role_injection_en_extra
+    action: block
+    keywords:
+      - "pretend you are"
+      - "act as if you are"
+      - "you are now an admin"
+      - "grant me admin access"
+      - "show me other user"
+      - "access another customer"
+      - "bypass the limit"
+    reason: "Role injection or privilege escalation attempt"
+
 # PII policies — per-tenant overrides for PII handling.
 # Actions: allow | mask | block | audit
 # Default action applies to any PII type not listed in rules.

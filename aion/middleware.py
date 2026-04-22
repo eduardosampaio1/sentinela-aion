@@ -81,15 +81,66 @@ _local_audit_log: deque[dict] = deque(maxlen=10_000)
 _local_overrides: dict[str, dict] = {}  # tenant → overrides
 
 
+# ── File-based persistence fallback (when no Redis) ──
+# Problema que isso resolve: _local_overrides e in-memory => restart zera configs.
+# Em prod real, use Redis (REDIS_URL). Em sim/dev, persiste em JSON para sobreviver a restart.
+def _overrides_file() -> "Path":
+    from pathlib import Path
+    import os
+    # AION_RUNTIME_DIR: base para estado persistente local (default: cwd/.runtime)
+    base = Path(os.environ.get("AION_RUNTIME_DIR", ".runtime"))
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "overrides.json"
+
+
+def _persist_overrides_to_disk() -> None:
+    """Serializa _local_overrides para disco. No-op se erro."""
+    try:
+        with open(_overrides_file(), "w", encoding="utf-8") as f:
+            json.dump(_local_overrides, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.debug("overrides persist to disk failed: %s", e)
+
+
+def _load_overrides_from_disk() -> None:
+    """Carrega _local_overrides do disco na inicializacao. Chamado 1x em lifespan."""
+    global _local_overrides
+    try:
+        path = _overrides_file()
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                _local_overrides = json.load(f)
+            logger.info(
+                "Overrides carregados do disco: %d tenants (arquivo=%s)",
+                len(_local_overrides), path,
+            )
+    except Exception as e:
+        logger.warning("Falha ao carregar overrides do disco: %s", e)
+
+
 # ════════════════════════════════════════════
 # Redis client (async, lazy — same as behavior.py)
 # ════════════════════════════════════════════
 
+# Circuit breaker leve: quando Redis falha, marca disponibilidade=False por
+# _redis_retry_interval segundos. Evita timeout em cada call quando Redis cai.
+_redis_last_failure: float = 0.0
+_redis_retry_interval: float = 10.0  # segundos entre retries quando down
+
+
 async def _get_redis():
-    """Get or create async Redis client. Returns None if unavailable."""
-    global _redis_client, _redis_available
-    if _redis_client is not None:
-        return _redis_client if _redis_available else None
+    """Get or create async Redis client. Returns None if unavailable.
+
+    Circuit breaker: se Redis falhou recentemente (<10s), retorna None sem tentar.
+    """
+    global _redis_client, _redis_available, _redis_last_failure
+
+    # Circuit breaker: se falhou recentemente, skip
+    if _redis_last_failure > 0 and (time.time() - _redis_last_failure) < _redis_retry_interval:
+        return None
+
+    if _redis_client is not None and _redis_available:
+        return _redis_client
 
     settings = get_settings()
     if not settings.redis_url:
@@ -99,16 +150,41 @@ async def _get_redis():
     try:
         import redis.asyncio as aioredis
         _redis_client = aioredis.from_url(
-            settings.redis_url, decode_responses=True, socket_timeout=2.0
+            settings.redis_url,
+            decode_responses=True,
+            socket_timeout=1.0,      # Agressivo: falhar rápido
+            socket_connect_timeout=1.0,
         )
         await _redis_client.ping()
         _redis_available = True
-        logger.info("Middleware store: Redis connected (cluster-safe)")
+        _redis_last_failure = 0.0
+        logger.info("Middleware store: Redis connected")
         return _redis_client
-    except Exception:
+    except Exception as e:
         _redis_available = False
-        logger.warning("Middleware store: Redis unavailable, using local fallback")
+        _redis_last_failure = time.time()
+        if _redis_client is not None:
+            try:
+                await _redis_client.aclose()
+            except Exception:
+                pass
+            _redis_client = None
+        logger.warning("Middleware store: Redis down (%s) — fallback local por %.0fs", type(e).__name__, _redis_retry_interval)
         return None
+
+
+def _mark_redis_failure():
+    """Marca Redis indisponivel depois de falha em op. Chamado por callers."""
+    global _redis_available, _redis_last_failure, _redis_client
+    _redis_available = False
+    _redis_last_failure = time.time()
+    if _redis_client is not None:
+        try:
+            import asyncio
+            asyncio.ensure_future(_redis_client.aclose())
+        except Exception:
+            pass
+        _redis_client = None
 
 
 # ════════════════════════════════════════════
@@ -153,6 +229,7 @@ async def _check_rate_limit(key: str, limit: int) -> bool:
             return False
         return True
     except Exception:
+        _mark_redis_failure()
         logger.warning("Redis rate limit failed, falling back to local")
         return _local_check_rate_limit(key, limit)
 
@@ -215,7 +292,7 @@ async def get_audit_log(limit: int = 100, tenant: Optional[str] = None) -> list[
 # ════════════════════════════════════════════
 
 async def set_override(key: str, value: Any, tenant: str = "default") -> None:
-    """Set runtime override. Redis + local."""
+    """Set runtime override. Redis + local + disk (sobrevive restart sem Redis)."""
     # Local
     if tenant not in _local_overrides:
         _local_overrides[tenant] = {}
@@ -223,12 +300,18 @@ async def set_override(key: str, value: Any, tenant: str = "default") -> None:
 
     # Redis
     r = await _get_redis()
+    redis_ok = False
     if r:
         redis_key = f"aion:overrides:{tenant}"
         try:
             await r.hset(redis_key, key, json.dumps(value))
+            redis_ok = True
         except Exception:
             logger.warning("Redis override write failed")
+
+    # Disk persistence: so se Redis nao esta disponivel (evita storage redundante)
+    if not redis_ok:
+        _persist_overrides_to_disk()
 
 
 async def get_overrides(tenant: str = "default") -> dict:
@@ -247,15 +330,20 @@ async def get_overrides(tenant: str = "default") -> dict:
 
 
 async def clear_overrides(tenant: str = "default") -> None:
-    """Clear all overrides. Redis + local."""
+    """Clear all overrides. Redis + local + disk."""
     _local_overrides.pop(tenant, None)
 
     r = await _get_redis()
+    redis_ok = False
     if r:
         try:
             await r.delete(f"aion:overrides:{tenant}")
+            redis_ok = True
         except Exception:
             pass
+
+    if not redis_ok:
+        _persist_overrides_to_disk()
 
 
 # ════════════════════════════════════════════

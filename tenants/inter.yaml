@@ -1,0 +1,31 @@
+# ══════════════════════════════════════════════════════════════
+#  Tenant: inter — Super App financeiro e marketplace
+#  Perfil: volume médio, PIX-heavy, e-commerce integrado
+# ══════════════════════════════════════════════════════════════
+
+tenant_id: inter
+display_name: "Banco Inter"
+description: "Super App - conta, PIX, investimentos, marketplace"
+
+# ── Controles de acesso ──────────────────────────────────────
+rate_limit: 100          # requests/min
+
+# ── Política de PII (LGPD Nível Médio) ──────────────────────
+# Inter equilibra UX e compliance - politica moderada
+pii_policy:
+  default_action: mask   # padrão: mascara
+  rules:
+    cpf: mask            # CPF mascarado
+    rg: mask
+    cnpj: audit          # CNPJ → apenas audita (empresas parceiras)
+    email: audit         # email → audita (para marketing opt-in)
+    phone: mask
+    credit_card: block   # cartão → bloqueia
+    bank_account: mask
+
+# ── Notas para demo ──────────────────────────────────────────
+# Cenários de destaque:
+#   - "Como faço um PIX?" → ESTIXE bypass (intenção FAQ simples)
+#   - "Qual meu saldo?" → ESTIXE bypass
+#   - Análise de investimento → NOMOS roteia para sim-gpt-4o
+#   - Histórico longo → METIS comprime antes de enviar

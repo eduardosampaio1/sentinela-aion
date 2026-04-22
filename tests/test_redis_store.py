@@ -16,12 +16,14 @@ def reset_middleware_state():
     """Reset all middleware state between tests."""
     mw._redis_client = None
     mw._redis_available = False
+    mw._redis_last_failure = 0.0  # reset circuit breaker
     mw._local_rate_limits.clear()
     mw._local_audit_log.clear()
     mw._local_overrides.clear()
     yield
     mw._redis_client = None
     mw._redis_available = False
+    mw._redis_last_failure = 0.0
     mw._local_rate_limits.clear()
     mw._local_audit_log.clear()
     mw._local_overrides.clear()

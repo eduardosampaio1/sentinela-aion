@@ -33,15 +33,15 @@ _PII_PATTERNS = [
     # Phone (international formats)
     (r"\b\+?\d{1,3}[-.\s]?\(?\d{2,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}\b", "phone_number"),
     # SSN (US)
-    (r"\b\d{3}[-.]?\d{2}[-.]?\d{4}\b", "ssn"),
+    (r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b", "ssn"),
     # Email
     (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "email"),
     # Date of birth
     (r"\b\d{2}[./]\d{2}[./]\d{4}\b", "date_of_birth"),
 
     # ── Brazilian PII ──
-    # CPF: 000.000.000-00 or 00000000000
-    (r"\b\d{3}\.?\d{3}\.?\d{3}[-.]?\d{2}\b", "cpf"),
+    # CPF: 000.000.000-00, 00000000000, 000 000 000 00, 000-000-000-00 — aceita . - espaço em qualquer posição
+    (r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{2}\b", "cpf"),
     # CNPJ: 00.000.000/0000-00 or 00000000000000
     (r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}[-.]?\d{2}\b", "cnpj"),
     # RG (common formats: 00.000.000-0 or MG-00.000.000)
@@ -223,3 +223,28 @@ class Guardrails:
 
     def check_token_limit(self, prompt_tokens: int) -> bool:
         return prompt_tokens <= self._settings.max_tokens_per_request
+
+    def reload(self) -> dict:
+        """Recompila patterns PII a partir de _PII_PATTERNS no modulo.
+
+        Uso:
+            - Dev: edita guardrails.py (adicionar/alterar regex), chama endpoint
+              POST /v1/estixe/guardrails/reload, novos patterns ativos sem restart.
+            - Prod: redeploy reseta naturalmente; endpoint fica util em scenarios
+              onde patterns vem de external source (v2 roadmap).
+
+        Retorna summary para API response.
+        """
+        import importlib
+        from aion.estixe import guardrails as _self_module
+        importlib.reload(_self_module)
+        # Re-pega a lista nova do modulo recarregado
+        self._pii_patterns = [
+            (re.compile(p, re.IGNORECASE), name)
+            for p, name in _self_module._PII_PATTERNS
+        ]
+        return {
+            "status": "reloaded",
+            "pattern_count": len(self._pii_patterns),
+            "pattern_types": sorted({name for _, name in self._pii_patterns}),
+        }

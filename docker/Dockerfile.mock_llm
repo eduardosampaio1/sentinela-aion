@@ -1,0 +1,17 @@
+# Mock LLM — minimal Python HTTP server compatible with OpenAI /v1/chat/completions
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN pip install --no-cache-dir fastapi uvicorn
+
+WORKDIR /app
+COPY mock_llm /app/mock_llm
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=10s --timeout=2s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()" || exit 1
+
+CMD ["python", "/app/mock_llm/server.py"]

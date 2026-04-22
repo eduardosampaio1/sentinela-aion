@@ -1,0 +1,25 @@
+# .wslconfig recomendado para rodar AION-sim no Windows sem estourar RAM.
+#
+# Copie este arquivo para C:\Users\<seu_usuario>\.wslconfig
+# Depois: reinicie Docker Desktop (Settings > Resources > "Restart WSL").
+#
+# Por que isso existe:
+# Sem este arquivo, o Docker Desktop WSL2 (Vmmem) pode consumir ATÉ 80% da RAM
+# do host — o Windows fica travado quando a stack full sobe. Com memory limit,
+# Windows tem sempre >= 6GB livres.
+
+[wsl2]
+# Limita WSL2 a 8GB (suficiente pra modo lite + multi sem observability)
+memory=8GB
+
+# CPUs: ajuste pra metade dos cores do seu processador
+processors=4
+
+# Swap em arquivo (evita OOM do kernel Linux)
+swap=4GB
+
+# Libera memória ociosa mais agressivamente
+pageReporting=true
+
+# Localhost forwarding (precisa pro docker port mapping funcionar direito)
+localhostForwarding=true
