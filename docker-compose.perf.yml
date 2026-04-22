@@ -1,0 +1,86 @@
+# AION-sim PERF — 2 replicas + nginx proxy_cache para benchmark de "milhões de decisões/s"
+#
+# Uso:
+#   docker compose -f docker-compose.perf.yml up -d
+#
+# Stack:
+#   - 2 AION replicas (decisão real quando cache miss)
+#   - nginx com proxy_cache (decisão cached ≈ 50k/s no LB em microssegundos)
+#   - Redis (L2 cache compartilhado + overrides + velocity)
+#   - mock-llm
+#
+# Target:
+#   - Cache HIT (nginx): >95% das queries repetidas, <1ms latência
+#   - Cache MISS (AION pipeline): 500/s por replica, ~50-100ms
+
+name: aion-sim-perf
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: aion-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports: ["6379:6379"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 5 }
+    deploy: { resources: { limits: { memory: 384M } } }
+
+  mock-llm:
+    build: { context: ., dockerfile: docker/Dockerfile.mock_llm }
+    container_name: aion-mock-llm
+    ports: ["8001:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()"]
+      interval: 10s
+      retries: 3
+    deploy: { resources: { limits: { memory: 256M } } }
+
+  aion1: &aion
+    build: { context: ./aion, dockerfile: ../docker/Dockerfile.aion }
+    container_name: aion1
+    depends_on:
+      redis: { condition: service_healthy }
+      mock-llm: { condition: service_healthy }
+    environment: &aion-env
+      AION_PORT: 8080
+      AION_ENVIRONMENT: staging
+      AION_LOG_LEVEL: warning        # reduz logging overhead no bench
+      AION_FAIL_MODE: open
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "false"    # desativa pra focar ESTIXE no bench
+      AION_METIS_ENABLED: "false"
+      AION_DEFAULT_BASE_URL: http://mock-llm:8001/v1
+      OPENAI_API_KEY: sk-sim-demo
+      REDIS_URL: redis://redis:6379/0
+      AION_REQUIRE_CHAT_AUTH: "false"
+      AION_REQUIRE_TENANT: "false"
+      ESTIXE_BYPASS_THRESHOLD: "0.80"
+      AION_REPLICA_ID: aion1
+      AION_WORKERS: "4"
+    volumes: [aion-runtime-1:/var/aion/runtime]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/ready"]
+      interval: 10s
+      start_period: 30s
+      retries: 3
+    deploy: { resources: { limits: { memory: 2560M, cpus: "4" } } }
+
+  aion2:
+    <<: *aion
+    container_name: aion2
+    environment:
+      <<: *aion-env
+      AION_REPLICA_ID: aion2
+    volumes: [aion-runtime-2:/var/aion/runtime]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: aion-nginx
+    depends_on: [aion1, aion2]
+    ports: ["8080:8080"]
+    volumes:
+      - ./docker/nginx-with-cache.conf:/etc/nginx/nginx.conf:ro
+    deploy: { resources: { limits: { memory: 256M, cpus: "2" } } }
+
+volumes:
+  aion-runtime-1:
+  aion-runtime-2:

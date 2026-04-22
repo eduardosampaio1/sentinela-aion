@@ -1,0 +1,43 @@
+groups:
+  - name: aion-alerts
+    rules:
+      - alert: AionHighErrorRate
+        expr: rate(aion_errors_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AION error rate > 5/s"
+          description: "tenant {{ $labels.tenant }} replica {{ $labels.instance }}"
+
+      - alert: AionBlockRateSustained
+        expr: rate(aion_decisions_total{decision="block"}[5m]) / rate(aion_requests_total[5m]) > 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Block rate > 15% sustentado 5min (ataque distribuido ou config errada)"
+
+      - alert: AionHighLatencyP95
+        expr: histogram_quantile(0.95, rate(aion_request_latency_seconds_bucket[5m])) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency > 500ms"
+
+      - alert: AionDegraded
+        expr: aion_classifier_degraded == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AION classifier degraded (embedding model unavailable)"
+
+      - alert: AionReplicaDown
+        expr: up{job="aion"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AION replica {{ $labels.instance }} down"

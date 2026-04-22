@@ -66,6 +66,47 @@ class ModuleStatus:
             )
 
 
+# ── Telemetry metadata whitelist ──
+# Campos dinamicos de context.metadata que vao para /v1/events.
+# Mantem schema previsivel mas expoe sinais importantes do ESTIXE.
+_TELEMETRY_ESTIXE_KEYS = (
+    # Velocity (rolling-window block counter)
+    "velocity_alert", "velocity_recent_blocks",
+    # Shadow mode (categoria em observacao, nao bloqueia)
+    "shadow_risk_category", "shadow_risk_level", "shadow_risk_confidence",
+    "shadow_risk_matched_seed",
+    # Flagged (risk_level=medium, FLAG + CONTINUE)
+    "flagged_risk_category", "flagged_risk_confidence", "flagged_risk_matched_seed",
+    "flagged_risk_source",
+    # Detected (risk_level critical/high que bloqueou)
+    "detected_risk_category", "risk_level", "risk_confidence",
+    "risk_matched_seed", "risk_threshold_used", "risk_source",
+    # Output guard
+    "output_risk_category", "output_risk_confidence",
+    # PII
+    "pii_violations", "pii_audited",
+    # Intent
+    "detected_intent", "intent_confidence",
+)
+
+
+def _build_telemetry_metadata(context) -> dict:
+    """Build telemetry metadata, including dynamic ESTIXE signals from context."""
+    md = {
+        "module_latencies": context.module_latencies,
+        "safe_mode": context.metadata.get("safe_mode", False),
+        "skipped_modules": context.metadata.get("skipped_modules", []),
+        "failed_modules": context.metadata.get("failed_modules", []),
+        "complexity_score": context.metadata.get("complexity_score", 0),
+        "route_reason": context.metadata.get("route_reason", ""),
+    }
+    # Include ESTIXE dynamic signals when present — skip absent to keep payload lean
+    for key in _TELEMETRY_ESTIXE_KEYS:
+        if key in context.metadata:
+            md[key] = context.metadata[key]
+    return md
+
+
 class Pipeline:
     """Dynamically assembles and runs the module chain."""
 
@@ -316,6 +357,15 @@ class Pipeline:
 
         tokens_saved = max(0, context.tokens_before - context.tokens_after)
 
+        # Extrai o texto da última mensagem do usuário para exibição no console
+        input_text = ""
+        req = context.original_request or context.modified_request
+        if req and req.messages:
+            user_msgs = [m for m in req.messages if getattr(m, "role", "") == "user"]
+            if user_msgs:
+                content = getattr(user_msgs[-1], "content", "")
+                input_text = str(content)[:200] if content else ""
+
         event = TelemetryEvent(
             event_type=decision_str,
             module=module_that_decided,
@@ -326,14 +376,8 @@ class Pipeline:
             cost_saved=cost_saved,
             latency_ms=round(total_latency, 2),
             tenant=context.tenant,
-            metadata={
-                "module_latencies": context.module_latencies,
-                "safe_mode": context.metadata.get("safe_mode", False),
-                "skipped_modules": context.metadata.get("skipped_modules", []),
-                "failed_modules": context.metadata.get("failed_modules", []),
-                "complexity_score": context.metadata.get("complexity_score", 0),
-                "route_reason": context.metadata.get("route_reason", ""),
-            },
+            input_text=input_text,
+            metadata=_build_telemetry_metadata(context),
         )
         await emit(event)
 

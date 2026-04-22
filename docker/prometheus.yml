@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: aion-sim
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: aion
+    metrics_path: /metrics
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - aion1:8080
+          - aion2:8080
+          - aion3:8080
+        labels:
+          service: aion
+
+  - job_name: nginx
+    metrics_path: /nginx/health
+    static_configs:
+      - targets:
+          - nginx:8080
+        labels:
+          service: nginx-lb
+
+  - job_name: redis
+    static_configs:
+      - targets:
+          - redis:6379
+        labels:
+          service: redis
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

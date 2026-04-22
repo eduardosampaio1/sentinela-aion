@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -94,7 +95,8 @@ class PolicyEngine:
 
     async def check(self, user_message: str, context: PipelineContext) -> PolicyResult:
         result = PolicyResult()
-        message_lower = user_message.lower()
+        # NFC-normalize then lower — handles NFD/NFC mismatch from different HTTP clients
+        message_lower = unicodedata.normalize("NFC", user_message).lower()
 
         for rule in self._rules:
             matched = False
@@ -112,7 +114,7 @@ class PolicyEngine:
 
             if not matched and rule.keywords:
                 for keyword in rule.keywords:
-                    if keyword.lower() in message_lower:
+                    if unicodedata.normalize("NFC", keyword).lower() in message_lower:
                         matched = True
                         break
 

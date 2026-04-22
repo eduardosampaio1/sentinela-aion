@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -209,17 +210,20 @@ _overrides: dict = {}
 
 def _build_response_headers(context: PipelineContext) -> dict[str, str]:
     """Build standard response headers for every response."""
+    import os
+    replica_id = os.environ.get("AION_REPLICA_ID", "local")
     headers = {
         "X-Aion-Decision": context.decision.value if context.decision != Decision.CONTINUE else "passthrough",
         "X-Request-ID": context.request_id,
+        "X-Aion-Replica": replica_id,
     }
     # Cache status header
     if "cache_hit" in context.metadata:
         headers["X-Aion-Cache"] = "HIT" if context.metadata["cache_hit"] else "MISS"
-    # Route reason from NOMOS
+    # Route reason from NOMOS — sanitize para Latin-1 (HTTP headers nao aceitam Unicode)
     route_reason = context.metadata.get("route_reason", "")
     if route_reason:
-        headers["X-Aion-Route-Reason"] = route_reason
+        headers["X-Aion-Route-Reason"] = route_reason.replace("\u2192", "->").encode("latin-1", errors="replace").decode("latin-1")
     # Degradation headers
     if _pipeline:
         headers.update(_pipeline.get_degraded_headers())
@@ -255,6 +259,18 @@ async def lifespan(app: FastAPI):
         settings.nomos_enabled,
         settings.metis_enabled,
     )
+
+    # Load persisted overrides from disk (fallback quando sem Redis) — evita perder
+    # config de tenant em restart do AION.
+    from aion.middleware import _load_overrides_from_disk
+    _load_overrides_from_disk()
+
+    # OpenTelemetry tracing — no-op se OTEL_EXPORTER_OTLP_ENDPOINT não setado
+    try:
+        from aion.observability import setup_telemetry
+        setup_telemetry(app)
+    except Exception as e:
+        logger.warning("OpenTelemetry setup failed (non-fatal): %s", e)
 
     # Build pipeline
     _pipeline = build_pipeline()
@@ -338,7 +354,7 @@ if _settings_cors.cors_origins:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["X-Aion-Decision", "X-Request-ID", "X-Aion-Route-Reason", "X-Aion-Mode"],
+        expose_headers=["X-Aion-Decision", "X-Request-ID", "X-Aion-Route-Reason", "X-Aion-Mode", "X-Aion-Replica"],
     )
 
 
@@ -396,6 +412,89 @@ async def _idempotency_store(
     await get_idempotency_cache().set(tenant, key, contract, response_dict, executed)
 
 
+@app.post("/v1/decide", tags=["Decision Gateway"])
+async def decide(request: Request):
+    """Pure decision endpoint: retorna CONTINUE/BLOCK/BYPASS SEM chamar LLM.
+
+    AION é um gate pré-LLM. Este endpoint expõe essa semântica pura para clientes
+    que já têm seu próprio LLM/provider e só querem usar o AION como controle de
+    segurança + cache de decisão.
+
+    Target: milhões de decisões/s quando cache warm (>80% hit rate esperado).
+
+    Request body: OpenAI ChatCompletion format (messages, model, etc).
+    Response:
+      {
+        "decision": "continue" | "block" | "bypass",
+        "reason": string | null,
+        "bypass_response": {...} | null,        # quando decision=bypass
+        "filtered_messages": [...] | null,      # quando PII foi redacted
+        "detected_intent": string | null,
+        "confidence": float | null,
+        "metadata": {...},                       # sinais ESTIXE
+        "latency_ms": float,
+        "source": "cache" | "pipeline"          # indicador de fast-path
+      }
+    """
+    settings = get_settings()
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+
+    t0 = time.perf_counter()
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response(400, "Invalid JSON body", "invalid_json", "invalid_request")
+
+    from aion.shared.schemas import ChatCompletionRequest, PipelineContext
+    try:
+        chat_request = ChatCompletionRequest(**body)
+    except Exception as e:
+        return _error_response(400, f"Invalid request format: {e}", "invalid_request")
+
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    context = PipelineContext(
+        tenant=tenant,
+        original_request=chat_request,
+        modified_request=chat_request.model_copy(deep=True),
+    )
+
+    # Propaga pii_policy + thresholds se o cliente mandou override
+    if "pii_policy" in body:
+        context.metadata["pii_policy"] = body["pii_policy"]
+    if "estixe_thresholds" in body:
+        context.metadata["estixe_thresholds"] = body["estixe_thresholds"]
+
+    # Roda SÓ os pre-modules (ESTIXE). Não chama LLM.
+    for module in _pipeline._pre_modules:
+        if module.name == "estixe":
+            await module.process(chat_request, context)
+            break
+
+    latency = (time.perf_counter() - t0) * 1000
+    result = context.estixe_result
+
+    resp = {
+        "decision": result.action.value.lower() if result else "continue",
+        "reason": result.block_reason if result else None,
+        "detected_intent": result.intent_detected if result else None,
+        "confidence": result.intent_confidence if result else None,
+        "pii_sanitized": result.pii_sanitized if result else False,
+        "metadata": dict(context.metadata),
+        "latency_ms": round(latency, 3),
+        "source": context.metadata.get("decision_source", "pipeline"),
+    }
+
+    # Se bloqueou, devolve 200 com decision=block (não 403 — cliente decide o que fazer)
+    # Isso é diferente de /v1/chat/completions que aplica a decisão.
+    headers = {
+        "X-Aion-Replica": os.environ.get("AION_REPLICA_ID", "local"),
+        "X-Aion-Decision": resp["decision"],
+        "X-Aion-Decision-Source": resp["source"],
+    }
+    return JSONResponse(content=resp, headers=headers)
+
+
 @app.post("/v1/chat/completions", tags=["LLM Proxy"])
 async def chat_completions(request: Request):
     """OpenAI-compatible chat completions endpoint (Transparent mode)."""
@@ -405,8 +504,16 @@ async def chat_completions(request: Request):
 
     settings = get_settings()
 
-    # Parse request body
-    body = await request.json()
+    # Parse request body — guard against malformed JSON or bad encoding (e.g. cp1252 curl)
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response(
+            400,
+            "Invalid request body: malformed JSON or non-UTF-8 encoding",
+            "invalid_request",
+            "invalid_request_error",
+        )
 
     # Validate message count (Track A1)
     messages = body.get("messages", [])
@@ -433,6 +540,15 @@ async def chat_completions(request: Request):
         context.modified_request = chat_request
     if idemp_key:
         context.metadata["idempotency_key"] = idemp_key
+
+    # Apply per-tenant runtime overrides to pipeline context (sim customization)
+    _tenant_ov = await get_overrides(tenant)
+    if "pii_policy" in _tenant_ov:
+        context.metadata["pii_policy"] = _tenant_ov["pii_policy"]
+    if "estixe_thresholds" in _tenant_ov:
+        # Per-tenant risk threshold overrides, e.g. {"fraud_enablement": 0.70}
+        # Passed to RiskClassifier.classify() without mutating shared settings.
+        context.metadata["estixe_thresholds"] = _tenant_ov["estixe_thresholds"]
 
     # Ensure pipeline is initialized
     global _pipeline
@@ -509,17 +625,77 @@ async def chat_completions(request: Request):
 
     try:
         if chat_request.stream:
-            async def stream_with_timeout():
+            # Output guard para streaming: buffer-accumulate-check-flush.
+            # Trade-off v1: usuario recebe todos os tokens de uma vez no fim, em vez
+            # de incrementalmente. Isso garante S2' (PII) e S3' (risco estrutural)
+            # sobre o output completo. V2 ideal: check incremental em windows.
+            async def stream_with_guard():
+                buffered_chunks: list[str] = []
+                accumulated_content: list[str] = []
+
                 try:
                     async with asyncio.timeout(_STREAM_TIMEOUT):
                         async for chunk in forward_request_stream(
                             effective_request, context, settings
                         ):
-                            yield chunk
+                            buffered_chunks.append(chunk)
+                            # Extrai delta.content de cada chunk SSE para o buffer de verificacao
+                            if chunk.startswith("data:"):
+                                payload = chunk[5:].strip()
+                                if payload and payload != "[DONE]":
+                                    try:
+                                        import json as _json
+                                        obj = _json.loads(payload)
+                                        for ch in obj.get("choices", []) or []:
+                                            delta = ch.get("delta") or {}
+                                            content = delta.get("content")
+                                            if content:
+                                                accumulated_content.append(content)
+                                    except Exception:
+                                        pass  # Chunk nao-JSON (heartbeat etc) — preserva, nao analisa
                 except asyncio.TimeoutError:
                     logger.warning("Stream timeout after %ds (request_id=%s)", _STREAM_TIMEOUT, context.request_id)
-                finally:
-                    await _pipeline.emit_telemetry(context)
+
+                # Verificacao do output COMPLETO apos buffer fechado
+                full_text = "".join(accumulated_content)
+                blocked_by_guard = False
+                if settings.estixe_enabled and full_text:
+                    from aion.shared.contracts import EstixeAction as _EA
+                    for _mod in _pipeline._pre_modules:
+                        if _mod.name == "estixe":
+                            _out_check = await _mod.check_llm_output(full_text, context)
+                            if _out_check.action == _EA.BLOCK:
+                                blocked_by_guard = True
+                                context.metadata["output_stream_blocked"] = True
+                                context.metadata["output_stream_block_reason"] = _out_check.block_reason
+                                logger.warning(
+                                    "STREAM OUTPUT BLOQUEADO (buffered): %s",
+                                    _out_check.block_reason,
+                                )
+                            elif _out_check.pii_sanitized:
+                                # PII detectado mas nao blocker: flagear pro cliente via header/metadata.
+                                # V1: chunks originais passam (trade-off conhecido — output ja foi
+                                # acumulado). V2: reescrever chunks com conteudo sanitizado.
+                                context.metadata["output_stream_pii_sanitized"] = True
+                            break
+
+                # Flush
+                if blocked_by_guard:
+                    import json as _json
+                    err_payload = _json.dumps({
+                        "error": {
+                            "message": context.metadata.get("output_stream_block_reason", "Output blocked"),
+                            "type": "policy_error",
+                            "code": "output_blocked",
+                        }
+                    })
+                    yield f"data: {err_payload}\n\n"
+                    yield "data: [DONE]\n\n"
+                else:
+                    for ck in buffered_chunks:
+                        yield ck
+
+                await _pipeline.emit_telemetry(context)
 
             stream_headers = _build_response_headers(context)
             stream_headers["X-Aion-Decision"] = "passthrough"
@@ -527,7 +703,7 @@ async def chat_completions(request: Request):
             stream_headers["Connection"] = "keep-alive"
             _add_contract_headers(stream_headers, contract, mode="transparent")
             return StreamingResponse(
-                stream_with_timeout(),
+                stream_with_guard(),
                 media_type="text/event-stream",
                 headers=stream_headers,
             )
@@ -536,6 +712,34 @@ async def chat_completions(request: Request):
             response = await forward_request(effective_request, context, settings)
             llm_latency = (time.perf_counter() - t0) * 1000
             context.module_latencies["llm"] = round(llm_latency, 2)
+
+            # P6: Output guard — S2' (PII) + S3' (risco estrutural) no output do LLM
+            if settings.estixe_enabled:
+                from aion.shared.contracts import EstixeAction as _EA
+                for _mod in _pipeline._pre_modules:
+                    if _mod.name == "estixe":
+                        _out_text = (
+                            (response.choices[0].message.content or "")
+                            if response.choices and response.choices[0].message
+                            else ""
+                        )
+                        _out_check = await _mod.check_llm_output(_out_text, context)
+                        if _out_check.action == _EA.BLOCK:
+                            await _pipeline.emit_telemetry(context)
+                            return JSONResponse(
+                                status_code=403,
+                                content={"error": {
+                                    "message": _out_check.block_reason,
+                                    "type": "policy_error",
+                                    "code": "output_blocked",
+                                }},
+                                headers=_build_response_headers(context),
+                            )
+                        if context.metadata.get("filtered_llm_output"):
+                            response.choices[0].message.content = (
+                                context.metadata.pop("filtered_llm_output")
+                            )
+                        break
 
             try:
                 response = await _pipeline.run_post(response, context)
@@ -618,6 +822,13 @@ async def _run_pipeline_and_build_contract(
     context.original_request = chat_request
     if not context.modified_request:
         context.modified_request = chat_request
+
+    # Apply per-tenant runtime overrides to pipeline context (sim customization)
+    _tenant_ov = await get_overrides(tenant)
+    if "pii_policy" in _tenant_ov:
+        context.metadata["pii_policy"] = _tenant_ov["pii_policy"]
+    if "estixe_thresholds" in _tenant_ov:
+        context.metadata["estixe_thresholds"] = _tenant_ov["estixe_thresholds"]
 
     global _pipeline
     if _pipeline is None:
@@ -880,6 +1091,21 @@ async def health():
     health_data["requests_in_flight"] = get_in_flight()
     health_data["ready"] = _pipeline_ready.is_set()
 
+    # P7: ESTIXE sub-component health (classifier degradation alert)
+    degraded_components = health_data.get("degraded_components", [])
+    for _mod in _pipeline._pre_modules:
+        if _mod.name == "estixe" and hasattr(_mod, "health"):
+            estixe_health = _mod.health
+            health_data["estixe"] = estixe_health
+            if estixe_health.get("classifier") == "unavailable":
+                if "estixe_classifier" not in degraded_components:
+                    degraded_components.append("estixe_classifier")
+            break
+
+    if degraded_components:
+        health_data["degraded_components"] = degraded_components
+        health_data["mode"] = "degraded"
+
     mode = health_data.get("mode", "unknown")
     status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503
     return JSONResponse(status_code=status, content=health_data)
@@ -916,6 +1142,42 @@ async def metrics():
         lines.append(f'aion_pipeline_latency_ms{{quantile="0.5"}} {counters["latency_p50_ms"]}')
         lines.append(f'aion_pipeline_latency_ms{{quantile="0.95"}} {counters["latency_p95_ms"]}')
         lines.append(f'aion_pipeline_latency_ms{{quantile="0.99"}} {counters["latency_p99_ms"]}')
+
+    # ── ESTIXE-specific signals (obs panels) ──
+    replica_id = os.environ.get("AION_REPLICA_ID", "local")
+    lines.append(f'# HELP aion_classifier_degraded 1 if embedding classifier unavailable')
+    lines.append(f'# TYPE aion_classifier_degraded gauge')
+    if _pipeline:
+        for mod in _pipeline._pre_modules:
+            if mod.name == "estixe":
+                health_data = mod.health
+                is_degraded = 1 if health_data.get("degraded") else 0
+                lines.append(f'aion_classifier_degraded{{replica="{replica_id}"}} {is_degraded}')
+                lines.append(f'aion_estixe_risk_categories{{replica="{replica_id}"}} {health_data.get("risk_categories", 0)}')
+                lines.append(f'aion_estixe_shadow_categories{{replica="{replica_id}"}} {health_data.get("risk_shadow_categories", 0)}')
+                cs = health_data.get("risk_classify_cache", {})
+                lines.append(f'aion_classify_cache_size{{replica="{replica_id}"}} {cs.get("size", 0)}')
+                lines.append(f'aion_classify_cache_hits_total{{replica="{replica_id}"}} {cs.get("hits", 0)}')
+                lines.append(f'aion_classify_cache_misses_total{{replica="{replica_id}"}} {cs.get("misses", 0)}')
+                lines.append(f'aion_classify_cache_hit_rate{{replica="{replica_id}"}} {cs.get("hit_rate", 0)}')
+
+                # ── DecisionCache (hot path) ──
+                dc = health_data.get("decision_cache", {})
+                lines.append(f'# HELP aion_decision_cache_hit_rate Hit rate do cache de decisão do pipeline inteiro')
+                lines.append(f'# TYPE aion_decision_cache_hit_rate gauge')
+                lines.append(f'aion_decision_cache_size{{replica="{replica_id}"}} {dc.get("size", 0)}')
+                lines.append(f'aion_decision_cache_hits_total{{replica="{replica_id}"}} {dc.get("hits", 0)}')
+                lines.append(f'aion_decision_cache_misses_total{{replica="{replica_id}"}} {dc.get("misses", 0)}')
+                lines.append(f'aion_decision_cache_hit_rate{{replica="{replica_id}"}} {dc.get("hit_rate", 0)}')
+                lines.append(f'aion_decision_cache_evictions_total{{replica="{replica_id}"}} {dc.get("evictions", 0)}')
+
+                # ── Tier hits (onde decisões são tomadas) ──
+                th = health_data.get("tier_hits", {})
+                lines.append(f'# HELP aion_tier_hits_total Decisions taken per tier (hot→cold)')
+                lines.append(f'# TYPE aion_tier_hits_total counter')
+                for tier, count in th.items():
+                    lines.append(f'aion_tier_hits_total{{replica="{replica_id}",tier="{tier}"}} {count}')
+                break
 
     return Response(content="\n".join(lines) + "\n", media_type="text/plain")
 
@@ -1007,6 +1269,27 @@ async def toggle_module(module_name: str, request: Request):
 # ──────────────────────────────────────────────
 
 
+@app.get("/v1/pipeline", tags=["Observability"])
+async def pipeline_topology():
+    """Retorna a topologia do pipeline: pre-LLM, post-LLM, settings dos modulos.
+
+    Util para debug (inconsistencia tipo 'METIS aparece no log mas nao em active_modules').
+    """
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    settings = get_settings()
+    return {
+        "pre_llm_modules": [m.name for m in _pipeline._pre_modules],
+        "post_llm_modules": [m.name for m in _pipeline._post_modules],
+        "module_settings": {
+            "estixe_enabled": settings.estixe_enabled,
+            "nomos_enabled": settings.nomos_enabled,
+            "metis_enabled": settings.metis_enabled,
+        },
+        "safe_mode": settings.safe_mode,
+    }
+
+
 @app.get("/v1/stats", tags=["Observability"])
 async def stats(request: Request):
     settings = get_settings()
@@ -1018,7 +1301,11 @@ async def stats(request: Request):
 async def events(request: Request, limit: int = 100):
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
-    return get_recent_events(limit, tenant)
+    # Tenant "default" = visão agregada de todos os tenants (dashboard do console)
+    tenant_filter = None if tenant == settings.default_tenant else tenant
+    # Usa Redis para cross-replica visibility (fallback local se Redis down)
+    from aion.shared.telemetry import get_recent_events_redis
+    return await get_recent_events_redis(limit, tenant_filter)
 
 
 @app.get("/v1/models", tags=["Observability"])
@@ -1042,12 +1329,17 @@ async def audit_log_endpoint(request: Request, limit: int = 100):
 
 @app.post("/v1/estixe/intents/reload", tags=["Control Plane"])
 async def reload_intents():
+    """Reload intents.yaml AND risk_taxonomy.yaml without restart.
+
+    Reloads both SemanticClassifier (intents.yaml) and RiskClassifier (risk_taxonomy.yaml)
+    so that seed/example changes take effect immediately.
+    """
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
     for module in _pipeline._pre_modules:
         if module.name == "estixe":
-            await module._classifier.reload()
-            return {"status": "reloaded", "intents": module._classifier.intent_count, "examples": module._classifier.example_count}
+            summary = await module.reload()
+            return {"status": "reloaded", **summary}
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 
@@ -1138,6 +1430,22 @@ async def reload_policies():
         if module.name == "estixe":
             await module._policy.reload()
             return {"status": "reloaded", "rules": module._policy.rule_count}
+    raise HTTPException(status_code=404, detail="ESTIXE not active")
+
+
+@app.post("/v1/estixe/guardrails/reload", tags=["Control Plane"])
+async def reload_guardrails():
+    """Hot-reload regex PII patterns sem restart.
+
+    Util quando:
+      - Dev adiciona novo padrao (cartao virtual, nova PII regional) e quer testar
+      - Ajuste de regex exige recompilacao apos edicao do guardrails.py
+    """
+    if not _pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    for module in _pipeline._pre_modules:
+        if module.name == "estixe":
+            return module._guardrails.reload()
     raise HTTPException(status_code=404, detail="ESTIXE not active")
 
 

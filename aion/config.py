@@ -89,10 +89,28 @@ class EstixeSettings(BaseSettings):
     )
 
     bypass_threshold: float = 0.85
+    block_min_threshold: float = 0.82    # min confidence for action=block intents (prevents relaxation)
+    risk_check_enabled: bool = True       # enable RiskClassifier (S3 structural risk layer)
+    risk_check_threshold: float = 0.78   # default threshold for risk categories (overridden per-category in YAML)
+    # Output guard usa threshold = risk_threshold + output_threshold_boost para reduzir
+    # falsos positivos em respostas do LLM que mencionam termos sensiveis em contexto
+    # benigno (ex: "fraude" em resposta sobre como reportar uma fraude). Input permanece
+    # no threshold original (rigoroso) — output eh mais tolerante por design.
+    output_threshold_boost: float = 0.06
     embedding_model: str = "all-MiniLM-L6-v2"
     max_tokens_per_request: int = 4096
     intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
     cache_embeddings: bool = True
+    # ── Velocity detection (probing / brute-force attack mitigation) ──
+    # When a tenant accumulates velocity_block_threshold blocks within
+    # velocity_window_seconds, all risk thresholds are tightened by velocity_tighten_delta.
+    # NOTE: state is process-local (non-distributed). For multi-process deployments,
+    # delegate velocity tracking to NEMOS (which has tenant-scoped Redis state).
+    velocity_enabled: bool = True
+    velocity_block_threshold: int = 5      # blocks in window to trigger tightening
+    velocity_window_seconds: int = 60      # rolling window size in seconds
+    velocity_tighten_delta: float = 0.05   # how much to lower thresholds when triggered
+
     # ── Suggestions (auto-discovery) ──
     suggestions_enabled: bool = False  # opt-in: ESTIXE_SUGGESTIONS_ENABLED=true
     suggestions_min_cluster_size: int = 3
