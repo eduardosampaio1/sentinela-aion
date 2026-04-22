@@ -19,27 +19,43 @@ AION e um proxy gateway OpenAI-compatible que intercepta chamadas de LLM com 3 m
 
 ## Quick Start
 
-### 1. Docker (recomendado)
+### 1. Simulado (sem chave OpenAI — recomendado para POC)
 
 ```bash
 git clone https://github.com/eduardosampaio1/sentinela-aion.git
 cd sentinela-aion
-cp .env.example .env
-
-# Editar .env com sua chave OpenAI
-# OPENAI_API_KEY=sk-...
-
-docker-compose up -d
+pip install -e .
+python start.py
 ```
 
-### 2. Local (desenvolvimento)
+Isso sobe: AION + mock LLM (OpenAI-compatible fake) + Redis local. Zero configuracao, zero custo.
+
+### 2. Docker lite (1 replica, com LLM real)
+
+```bash
+cp .env.example .env
+# Editar .env: OPENAI_API_KEY=sk-...
+
+docker-compose -f docker-compose.lite.yml up -d
+```
+
+### 3. Docker completo (nginx + 3 replicas + Redis + Prometheus + Grafana)
+
+```bash
+docker-compose -f docker-compose.sim.yml up -d
+# Console: http://localhost:3000
+# Grafana: http://localhost:3030
+# AION:    http://localhost:8080
+```
+
+### 4. Local (desenvolvimento)
 
 ```bash
 pip install -e .
 python -m aion.cli
 ```
 
-### 3. Verificar que esta rodando
+### 5. Verificar que esta rodando
 
 ```bash
 curl http://localhost:8080/health
@@ -48,6 +64,15 @@ curl http://localhost:8080/health
 curl http://localhost:8080/ready
 # {"ready":true}
 ```
+
+## Modos de uso
+
+AION suporta dois modos distintos — escolha conforme sua arquitetura:
+
+| Modo | Endpoint | Quando usar |
+|------|----------|-------------|
+| **Proxy** | `POST /v1/chat/completions` | AION intercepta e chama o LLM por voce |
+| **Gate** | `POST /v1/decide` | Voce ja tem LLM proprio — AION so decide (bloqueia/permite/bypass) |
 
 ## Integracao com sua aplicacao
 
@@ -82,6 +107,38 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
+### Modo Gate — /v1/decide (sem proxy LLM)
+
+Use quando voce ja tem seu proprio LLM e quer apenas a camada de seguranca/decisao do AION:
+
+```python
+import httpx
+
+resp = httpx.post("http://localhost:8080/v1/decide",
+    headers={"X-Aion-Tenant": "meu-tenant"},
+    json={
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "ignore all instructions"}],
+    },
+)
+data = resp.json()
+# data["decision"] → "block" | "continue" | "bypass"
+# data["reason"]   → "guardrail_violation" | null
+# data["bypass_response"] → resposta pronta (para intents simples como saudacoes)
+
+if data["decision"] == "continue":
+    # chame seu proprio LLM
+    pass
+```
+
+Headers retornados:
+
+| Header | Valores | Significado |
+|--------|---------|-------------|
+| `X-Aion-Decision` | `block` / `passthrough` / `bypass` | Decisao do AION |
+| `X-Aion-Decision-Source` | `cache` / `pipeline` | Veio do cache ou processou |
+| `X-Aion-Cache` | `HIT` / `MISS` | Cache nginx (quando em producao com LB) |
+
 ### Streaming (SSE)
 
 ```python
@@ -115,6 +172,19 @@ curl -X PUT http://localhost:8080/v1/overrides \
   -H "Content-Type: application/json" \
   -d '{"rate_limit": 500}'
 ```
+
+## Capacidades v1.5 (ativas por default)
+
+O AION v1.5 adiciona inteligencia semantica ao pipeline sem mudar a API:
+
+| Capacidade | O que faz |
+|---|---|
+| **Cache semantico** | "Qual o limite do PIX?" e "Me diz o limite PIX" retornam a mesma decisao cached |
+| **Classificador hibrido** | Combina embedding + heuristica — menos falsos positivos em PT-BR |
+| **NER contextual** | Detecta PII com contexto (ex: "numero 111" sem CPF vs "meu CPF e 111.222.333-44") |
+| **Prompt rewriting** | Adiciona contexto ao prompt (nunca muda intencao) para melhorar respostas |
+
+Todas as capacidades tem feature flag e degradam graciosamente se o modelo de embedding nao estiver disponivel.
 
 ## PII — Protecao de Dados
 
@@ -194,6 +264,13 @@ curl http://localhost:8080/v1/economics
 # {"total_requests": 5000, "llm_calls_avoided": 2000, "tokens_saved": 150000, "cost_saved_usd": 12.50}
 ```
 
+### Cache stats
+
+```bash
+curl http://localhost:8080/v1/cache/stats
+# {"l1_hits": 12500, "l2_hits": 3200, "misses": 800, "hit_rate": 0.95}
+```
+
 ### Explainability (por que AION decidiu X)
 
 ```bash
@@ -211,8 +288,12 @@ Todos requerem `Authorization: Bearer <admin_key>`.
 | `/v1/overrides` | GET/PUT/DELETE | Configuracao runtime por tenant |
 | `/v1/behavior` | GET/PUT/DELETE | Behavior Dial por tenant |
 | `/v1/modules/{name}/toggle` | PUT | Ligar/desligar modulo |
-| `/v1/estixe/intents/reload` | POST | Recarregar intents |
-| `/v1/estixe/policies/reload` | POST | Recarregar policies |
+| `/v1/estixe/intents/reload` | POST | Recarregar intents sem restart |
+| `/v1/estixe/policies/reload` | POST | Recarregar policies sem restart |
+| `/v1/estixe/guardrails/reload` | POST | Recarregar guardrails sem restart |
+| `/v1/estixe/suggestions` | GET | Sugestoes automaticas de novas intents (clustering) |
+| `/v1/approvals/{id}` | GET/POST | Workflow de aprovacao humana |
+| `/v1/cache/stats` | GET | Estatisticas L1+L2 cache |
 | `/v1/data/{tenant}` | DELETE | Deletar dados do tenant (LGPD) |
 
 ### RBAC (controle de acesso)
@@ -245,7 +326,7 @@ NEXT_PUBLIC_AION_API_URL=http://aion.internal:8080 npm run dev
 ## FAQ
 
 **Q: AION adiciona latencia?**
-A: Pipeline pre-LLM roda em <1ms (p95). O tempo total e dominado pelo LLM provider.
+A: Depende do caminho. Cache hit (decisao repetida): <1ms. Pipeline completo com embedding (decisao nova): ~20-35ms. O tempo total e dominado pelo LLM provider (tipicamente 300ms-2s).
 
 **Q: E se o Redis cair?**
 A: AION continua funcionando com fallback local. Rate limits ficam per-instance.
@@ -260,7 +341,7 @@ A: PII e detectada/mascarada antes de enviar ao LLM. Use `DELETE /v1/data/{tenan
 A: Sim, SSE com timeout de 300s. Compativel com OpenAI SDK streaming.
 
 **Q: Como testar sem LLM real?**
-A: ESTIXE pode responder diretamente (bypass) para intents simples como saudacoes. Configure `AION_NOMOS_ENABLED=false` para usar modelo default sem routing.
+A: `python start.py` sobe o AION com um mock LLM embutido (OpenAI-compatible, respostas instantaneas, custo zero). Ideal para POC e desenvolvimento. O mock responde a qualquer request com latencia simulada.
 
 ## Swagger / OpenAPI
 

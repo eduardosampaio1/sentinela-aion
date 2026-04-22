@@ -77,6 +77,10 @@ _SAFE_METADATA_KEYS = {
     # ESTIXE — PII (counts/types only; raw content excluido por _sanitize)
     "pii_violations",
     "pii_audited",
+    # Cache tier — origem da decisão (auditoria de cache hit vs pipeline fresh)
+    # Crítico: falso negativo cacheado propaga-se; auditores precisam identificar
+    # se um CONTINUE veio do pipeline ou do cache para rastrear a decisão original.
+    "decision_source",   # "cache" | "pipeline"
 }
 
 
