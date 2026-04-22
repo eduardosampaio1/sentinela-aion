@@ -69,7 +69,7 @@ if _base.startswith("http://localhost") or _base.startswith("http://127."):
 os.environ["NOMOS_MODELS_CONFIG_PATH"] = str(SIM_DIR / "config" / "models.sim.yaml")
 
 AION_PATH    = Path(cfg.get("AION_PATH", r"D:\projetos\aion"))
-CONSOLE_PATH = AION_PATH / "aion-console"   # aion-console dentro do AION isolado
+CONSOLE_PATH = SIM_DIR / "aion-console"     # Next.js dashboard local do sentinela-aion
 PYTHON       = sys.executable
 
 # Detecta npm (Next.js)
@@ -187,8 +187,10 @@ def main():
         shutdown()
 
     # [2] AION
+    print("  Nota: primeira execução baixa modelo de embeddings (~150 MB via HuggingFace).")
+    print("        Os pontos abaixo podem demorar até 3 min na primeira vez.\n")
     start_proc([PYTHON, "-m", "aion.cli"], cwd=AION_PATH)
-    if not wait_for("http://localhost:8080/ready", "AION (8080)", timeout=120):
+    if not wait_for("http://localhost:8080/ready", "AION (8080)", timeout=180):
         shutdown()
 
     # [2.1] Configura tenants via API de overrides
@@ -205,13 +207,22 @@ def main():
         shutdown()
 
     # [4] AION Console (Next.js — painel de controle com dados reais)
-    if CONSOLE_PATH.exists() and (CONSOLE_PATH / "node_modules").exists():
-        start_proc([NPM, "start", "--", "--port", "3001"], cwd=CONSOLE_PATH)
-        if not wait_for("http://localhost:3001", "AION Console (3001)", timeout=30):
-            print("  AVISO: AION Console não subiu — continuando sem ele.")
+    if CONSOLE_PATH.exists():
+        if not (CONSOLE_PATH / "node_modules").exists():
+            print("  Instalando dependências do AION Console (primeira vez)...")
+            result = subprocess.run(
+                [NPM, "install"], cwd=str(CONSOLE_PATH),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                print("  AVISO: npm install falhou — pulando AION Console.")
+                CONSOLE_PATH = None  # type: ignore[assignment]
+        if CONSOLE_PATH is not None:
+            start_proc([NPM, "run", "dev", "--", "--port", "3001"], cwd=CONSOLE_PATH)
+            if not wait_for("http://localhost:3001", "AION Console (3001)", timeout=60):
+                print("  AVISO: AION Console não subiu — continuando sem ele.")
     else:
-        print("  AVISO: aion-console sem node_modules — pulando porta 3001.")
-        print("         Execute: cd aion/aion-console && npm install && npm run build")
+        print("  AVISO: pasta aion-console não encontrada — pulando porta 3001.")
 
     print()
     print("  ✓ Ambiente simulado pronto!")
