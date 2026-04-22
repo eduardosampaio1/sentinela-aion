@@ -28,6 +28,12 @@ intents:
       - "hi"
       - "hey"
       - "good morning"
+      - "e ai"
+      - "tudo bem"
+      - "tudo certo"
+      - "como vai"
+      - "oi tudo bom"
+      - "e ai tudo bem"
     responses:
       - "Ola! Como posso ajudar?"
 
@@ -38,6 +44,9 @@ intents:
       - "ate mais"
       - "bye"
       - "goodbye"
+      - "tchau obrigado"
+      - "valeu ate mais"
+      - "obrigado tchau"
     responses:
       - "Ate mais!"
 
