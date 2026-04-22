@@ -117,6 +117,20 @@ class EstixeSettings(BaseSettings):
     suggestions_similarity_threshold: float = 0.85
     suggestions_sampling_rate: float = 1.0  # 1.0 = sample every passthrough
 
+    # ── Shadow mode calibration / auto-promotion ──
+    # Volume + time gates
+    shadow_promote_min_requests: int = 1000
+    shadow_promote_min_days: int = 7
+    # Stability gate: max acceptable confidence std-dev before promotion.
+    # Prevents promoting a noisy category (high variance = signal not yet stable).
+    shadow_promote_min_stability: float = 0.05
+    # Drift control: max threshold delta allowed per promotion step.
+    # Prevents a single promotion from making a large jump (e.g. 0.74 → 0.85).
+    shadow_promote_max_threshold_delta: float = 0.10
+    # Cooldown: min days between two successive promotions of the same category.
+    # Absorbs false signals from sudden traffic spikes.
+    shadow_promote_cooldown_days: float = 3.0
+
 
 class ScoringWeights(BaseSettings):
     """Weights for NOMOS multi-factor model scoring. Lower total = better model."""

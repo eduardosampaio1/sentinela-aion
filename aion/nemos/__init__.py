@@ -30,6 +30,7 @@ from aion.nemos.models import (
     PolicyStats,
 )
 from aion.nemos.recommendations import Recommendation, generate_recommendations
+from aion.nemos.shadow import ShadowObservation
 from aion.nemos.store import NemosStore
 
 logger = logging.getLogger("aion.nemos")
@@ -38,6 +39,7 @@ _MEMORY_TTL = 30 * 86400       # 30 days
 _DAILY_ECON_TTL = 30 * 86400   # 30 days
 _WEEKLY_ECON_TTL = 90 * 86400  # 90 days
 _SNAPSHOT_TTL = 90 * 86400     # 90 days
+_SHADOW_TTL = 90 * 86400       # 90 days — shadow obs outlive individual requests
 
 
 class Nemos:
@@ -341,6 +343,109 @@ class Nemos:
         if getattr(baseline, "drift_detected", False):
             return "adaptive"
         return "stabilized"
+
+    # ══════════════════════════════════════════════
+    # Shadow Mode Calibration
+    # ══════════════════════════════════════════════
+
+    async def record_shadow_observation(
+        self, tenant: str, category: str, confidence: float
+    ) -> None:
+        """Record a shadow-mode observation (fire-and-forget, 0ms on response path).
+
+        Accumulates per-tenant, per-category statistics for promotion readiness.
+        No user content stored — only confidence aggregates.
+        """
+        key = f"aion:estixe:{tenant}:shadow:{category}"
+        obs = await self._load_shadow_observation(tenant, category)
+        obs.record(confidence)
+        await self._store.set_json(key, obs.to_dict(), ttl_seconds=_SHADOW_TTL)
+
+    async def get_shadow_stats(self, tenant: str) -> dict[str, ShadowObservation]:
+        """Get all shadow observations for a tenant keyed by category."""
+        keys = await self._store.keys_by_prefix(f"aion:estixe:{tenant}:shadow:")
+        result: dict[str, ShadowObservation] = {}
+        for key in keys:
+            category = key.split(":")[-1]
+            obs = await self._load_shadow_observation(tenant, category)
+            if obs.total_seen > 0:
+                result[category] = obs
+        return result
+
+    async def mark_shadow_promoted(
+        self,
+        tenant: str,
+        category: str,
+        previous_threshold: "float | None" = None,
+    ) -> None:
+        """Mark category as promoted. Stores previous_threshold for rollback."""
+        import time as _time
+        now = _time.time()
+        key = f"aion:estixe:{tenant}:shadow:{category}"
+        obs = await self._load_shadow_observation(tenant, category)
+        obs.promoted = True
+        obs.promoted_at = now
+        obs.last_promotion_ts = now
+        obs.previous_threshold = previous_threshold
+        await self._store.set_json(key, obs.to_dict(), ttl_seconds=_SHADOW_TTL)
+
+    async def mark_shadow_rolled_back(self, tenant: str, category: str) -> None:
+        """Clear promoted flag after rollback (cooldown stays in last_promotion_ts)."""
+        key = f"aion:estixe:{tenant}:shadow:{category}"
+        obs = await self._load_shadow_observation(tenant, category)
+        obs.promoted = False
+        obs.promoted_at = 0.0
+        # previous_threshold cleared — rollback consumed it
+        obs.previous_threshold = None
+        await self._store.set_json(key, obs.to_dict(), ttl_seconds=_SHADOW_TTL)
+
+    async def record_promotion_event(
+        self,
+        tenant: str,
+        category: str,
+        event: dict,
+    ) -> None:
+        """Append a promotion/rollback event to the auditable history list."""
+        key = f"aion:estixe:{tenant}:shadow:{category}:history"
+        existing: list = (await self._store.get_json(key)) or []
+        existing.append(event)
+        # Keep last 100 events per category
+        if len(existing) > 100:
+            existing = existing[-100:]
+        await self._store.set_json(key, existing, ttl_seconds=_SHADOW_TTL)
+
+    async def get_promotion_history(
+        self, tenant: str, category: str
+    ) -> list[dict]:
+        """Return full event history for a shadow category."""
+        key = f"aion:estixe:{tenant}:shadow:{category}:history"
+        return (await self._store.get_json(key)) or []
+
+    async def get_all_promotion_history(self, tenant: str) -> dict[str, list[dict]]:
+        """Return promotion history for all shadow categories of a tenant."""
+        keys = await self._store.keys_by_prefix(f"aion:estixe:{tenant}:shadow:")
+        result: dict[str, list[dict]] = {}
+        for key in keys:
+            # Only history keys, not the main obs key
+            if not key.endswith(":history"):
+                continue
+            parts = key.split(":")
+            # key format: aion:estixe:{tenant}:shadow:{category}:history
+            if len(parts) >= 6:
+                category = parts[4]
+                history = await self._store.get_json(key)
+                if history:
+                    result[category] = history
+        return result
+
+    async def _load_shadow_observation(
+        self, tenant: str, category: str
+    ) -> ShadowObservation:
+        key = f"aion:estixe:{tenant}:shadow:{category}"
+        data = await self._store.get_json(key)
+        if data:
+            return ShadowObservation.from_dict(data)
+        return ShadowObservation(category=category, tenant=tenant)
 
     # ══════════════════════════════════════════════
     # LGPD

@@ -22,7 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useAionData } from "@/lib/use-aion-data";
 import { useRealtimeStats } from "@/lib/use-realtime";
-import { mockEvents } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
 
 const fmtBRL = (n: number) => `R$ ${n.toFixed(2)}`;
@@ -32,21 +31,23 @@ const fmtInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
 export function StatusPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Try real API first, fallback to mock jitter
+  // Real API for connection status and live events only
   const liveData = useAionData(3000, autoRefresh);
-  const mockData = useRealtimeStats(3000, autoRefresh && !liveData.connected);
+  // Mock jitter always runs — drives all animated numbers for demo
+  const mockData = useRealtimeStats(2000, autoRefresh);
 
-  // Use live data if connected, otherwise mock
-  const source = liveData.connected ? liveData : mockData;
-  const stats = source.stats;
-  const modules = source.modules;
-  const dist = source.distribution;
-  const opState = source.operational;
+  // Always use jittered mockData for display numbers so every metric pulses.
+  // liveData is used only for: connection badge + real event feed (when available).
+  const stats = mockData.stats;
+  const modules = mockData.modules;
+  const dist = mockData.distribution;
+  const opState = mockData.operational;
   const status: ServiceStatus = liveData.connected ? "online" : "online";
 
+  // Live feed: real API events when connected, otherwise realtime mock feed
   const recentEvents = liveData.connected && liveData.events.length > 0
     ? liveData.events.slice(0, 5)
-    : mockEvents.slice(0, 5);
+    : mockData.events.slice(0, 5);
 
   const totalEconomy = modules.nomos.cost_optimized + modules.estixe.cost_avoided + modules.metis.cost_saved;
 
@@ -164,7 +165,9 @@ export function StatusPage() {
           </span>
           <span className="mx-1">·</span>
           <span>
-            Uptime: <strong className="text-[var(--color-text)]">{opState.uptime_hours}h</strong>
+            Uptime: <strong className="text-[var(--color-text)] font-[family-name:var(--font-mono)]">
+              <AnimatedNumber value={opState.uptime_hours} format={(n) => `${n.toFixed(1)}h`} />
+            </strong>
           </span>
         </div>
       </div>
@@ -459,8 +462,10 @@ export function StatusPage() {
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Erros: </span>
-            <strong className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">{stats.errors}</strong>
-            <span className="text-xs text-[var(--color-text-muted)]"> ({((stats.errors / stats.total_requests) * 100).toFixed(1)}%)</span>
+            <AnimatedNumber value={stats.errors} className="font-[family-name:var(--font-mono)] font-bold text-[var(--color-text)]" />
+            <span className="text-xs text-[var(--color-text-muted)]"> (</span>
+            <AnimatedNumber value={(stats.errors / stats.total_requests) * 100} format={(n) => `${n.toFixed(1)}%`} className="text-xs text-[var(--color-text-muted)]" />
+            <span className="text-xs text-[var(--color-text-muted)]">)</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -496,7 +501,7 @@ function DistributionBar({ label, pct, color }: { label: string; pct: number; co
         </div>
       </div>
       <span className="w-10 font-[family-name:var(--font-mono)] text-xs font-semibold text-[var(--color-text)]">
-        {pct}%
+        <AnimatedNumber value={pct} format={(n) => `${Math.round(n)}%`} duration={700} />
       </span>
     </div>
   );

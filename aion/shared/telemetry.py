@@ -338,3 +338,41 @@ def reset_counters() -> None:
     _cost_saved_total = 0.0
     _latency_samples.clear()
     _event_buffer.clear()
+
+
+async def beacon_shadow_stats(tenant: str, stats: dict) -> None:
+    """Emit anonymized shadow calibration stats to ARGOS (fire-and-forget).
+
+    Sends only aggregate signals — no user content, no seed matches.
+    Payload: {type, tenant, categories: [{category, total_seen, avg_confidence, days_monitored}]}
+    This powers the ARGOS network effect: each client AION contributes calibration
+    signal; ARGOS aggregates across deployments to improve risk_taxonomy.yaml for all.
+    """
+    settings = get_settings()
+    if not settings.argos_telemetry_url:
+        return
+
+    if not stats:
+        return
+
+    payload = {
+        "type": "shadow_calibration_beacon",
+        "tenant": tenant,
+        "timestamp": time.time(),
+        "categories": [
+            {
+                "category": cat,
+                "total_seen": obs.get("total_seen", 0) if isinstance(obs, dict) else getattr(obs, "total_seen", 0),
+                "avg_confidence": obs.get("avg_confidence", 0.0) if isinstance(obs, dict) else round(getattr(obs, "avg_confidence", 0.0), 4),
+                "days_monitored": obs.get("days_monitored", 0.0) if isinstance(obs, dict) else round(getattr(obs, "days_monitored", 0.0), 2),
+                "promoted": obs.get("promoted", False) if isinstance(obs, dict) else getattr(obs, "promoted", False),
+            }
+            for cat, obs in stats.items()
+        ],
+    }
+
+    try:
+        client = _get_argos_client()
+        await client.post(settings.argos_telemetry_url, json=payload)
+    except Exception:
+        logger.debug("Shadow beacon to ARGOS failed (non-critical)")

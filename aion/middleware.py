@@ -27,7 +27,7 @@ _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 # ── Admin paths ──
 _ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit"}
-_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/")
+_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/")
 
 # ── RBAC: map (method, path_prefix) → required permission ──
 _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
@@ -46,6 +46,9 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
     ("POST", "/v1/estixe/", "estixe:reload"),
     ("DELETE", "/v1/data/", "data:delete"),
     ("GET", "/v1/audit", "audit:read"),
+    # Calibration (shadow mode) — read available to operators, mutations require admin
+    ("GET", "/v1/calibration/", "overrides:read"),
+    ("POST", "/v1/calibration/", "overrides:write"),
 ]
 
 # ── API key → role mapping (loaded from config) ──

@@ -465,6 +465,11 @@ async def decide(request: Request):
     if "estixe_thresholds" in body:
         context.metadata["estixe_thresholds"] = body["estixe_thresholds"]
 
+    # Apply per-tenant shadow_mode override (same logic as /v1/chat/completions)
+    _decide_ov = await get_overrides(tenant)
+    if _decide_ov.get("shadow_mode"):
+        context.metadata["shadow_mode"] = True
+
     # Roda SÓ os pre-modules (ESTIXE). Não chama LLM.
     for module in _pipeline._pre_modules:
         if module.name == "estixe":
@@ -549,6 +554,10 @@ async def chat_completions(request: Request):
         # Per-tenant risk threshold overrides, e.g. {"fraud_enablement": 0.70}
         # Passed to RiskClassifier.classify() without mutating shared settings.
         context.metadata["estixe_thresholds"] = _tenant_ov["estixe_thresholds"]
+    if _tenant_ov.get("shadow_mode"):
+        # Global observation mode: all risk matches observe without blocking.
+        # Set via PUT /v1/overrides {"shadow_mode": true} for new-client calibration.
+        context.metadata["shadow_mode"] = True
 
     # Ensure pipeline is initialized
     global _pipeline
@@ -1447,6 +1456,393 @@ async def reload_guardrails():
         if module.name == "estixe":
             return module._guardrails.reload()
     raise HTTPException(status_code=404, detail="ESTIXE not active")
+
+
+@app.get("/v1/calibration/{tenant}", tags=["Control Plane"])
+async def get_calibration(tenant: str):
+    """Shadow mode calibration report for a tenant.
+
+    Returns per-category shadow observation statistics accumulated by NEMOS:
+    - Volume, days monitored, confidence mean/std, stability score
+    - Promotion readiness across all 4 gates
+    - Last promotion timestamp and rollback availability
+
+    Use to decide when to promote, or to detect unstable signals needing more data.
+    """
+    from aion.config import get_estixe_settings
+    from aion.nemos import get_nemos
+
+    estixe_cfg = get_estixe_settings()
+    nemos = get_nemos()
+    shadow_stats = await nemos.get_shadow_stats(tenant)
+
+    min_requests = estixe_cfg.shadow_promote_min_requests
+    min_days = estixe_cfg.shadow_promote_min_days
+    max_std = estixe_cfg.shadow_promote_min_stability
+    cooldown_days = estixe_cfg.shadow_promote_cooldown_days
+
+    # Current tenant thresholds (to show drift headroom)
+    tenant_overrides = await get_overrides(tenant)
+    tenant_thresholds: dict = tenant_overrides.get("estixe_thresholds") or {}
+    shadow_mode_active = bool(tenant_overrides.get("shadow_mode"))
+
+    categories = []
+    ready_count = 0
+    for category, obs in shadow_stats.items():
+        current_threshold = tenant_thresholds.get(category)
+        suggested = obs.suggested_threshold()
+        drift_headroom = (
+            round(abs(suggested - current_threshold), 3)
+            if current_threshold is not None else None
+        )
+        cooldown_remaining = obs.cooldown_remaining_days(cooldown_days)
+
+        gate_status = {
+            "volume": obs.total_seen >= min_requests,
+            "time": obs.days_monitored >= min_days,
+            "stability": obs.is_stable_enough(max_std),
+            "cooldown": cooldown_remaining == 0.0,
+        }
+        all_gates_pass = all(gate_status.values()) and not obs.promoted
+
+        entry = {
+            "category": category,
+            "total_seen": obs.total_seen,
+            "days_monitored": round(obs.days_monitored, 2),
+            "avg_confidence": round(obs.avg_confidence, 4),
+            "min_confidence": round(obs.min_confidence, 4),
+            "max_confidence": round(obs.max_confidence, 4),
+            "confidence_std": round(obs.confidence_std, 4),
+            "stability_score": round(obs.stability_score, 3),
+            "promoted": obs.promoted,
+            "promoted_at": obs.promoted_at or None,
+            "rollback_available": obs.promoted and obs.previous_threshold is not None,
+            "cooldown_remaining_days": round(cooldown_remaining, 1),
+            "current_threshold": current_threshold,
+            "suggested_threshold": suggested,
+            "drift_headroom": drift_headroom,
+            "gates": gate_status,
+            "ready_to_promote": all_gates_pass,
+        }
+        categories.append(entry)
+        if all_gates_pass:
+            ready_count += 1
+
+    # Sort: ready first, then promoted (under monitoring), then by volume desc
+    categories.sort(key=lambda c: (
+        -int(c["ready_to_promote"]),
+        -int(c["promoted"]),
+        -c["total_seen"],
+    ))
+
+    # Beacon to ARGOS: anonymized aggregate (fire-and-forget, non-blocking)
+    if shadow_stats:
+        try:
+            from aion.shared.telemetry import beacon_shadow_stats
+            asyncio.create_task(beacon_shadow_stats(tenant, shadow_stats))
+        except Exception:
+            pass
+
+    return {
+        "tenant": tenant,
+        "shadow_mode_active": shadow_mode_active,
+        "promotion_criteria": {
+            "min_requests": min_requests,
+            "min_days": min_days,
+            "max_confidence_std": max_std,
+            "cooldown_days": cooldown_days,
+            "max_threshold_delta": estixe_cfg.shadow_promote_max_threshold_delta,
+        },
+        "total_shadow_categories": len(categories),
+        "ready_to_promote": ready_count,
+        "categories": categories,
+    }
+
+
+@app.get("/v1/calibration/{tenant}/history", tags=["Control Plane"])
+async def get_calibration_history(tenant: str):
+    """Full promotion/rollback audit trail for all shadow categories of a tenant.
+
+    Returns: {category -> [event, ...]} where each event has:
+      event, timestamp, threshold_before, threshold_after,
+      observations_count, avg_confidence, confidence_std, stability_score, force
+    """
+    from aion.nemos import get_nemos
+    nemos = get_nemos()
+    history = await nemos.get_all_promotion_history(tenant)
+    return {
+        "tenant": tenant,
+        "total_categories_with_history": len(history),
+        "history": history,
+    }
+
+
+@app.post("/v1/calibration/{tenant}/promote", tags=["Control Plane"])
+async def promote_shadow_category(tenant: str, request: Request):
+    """Promote a shadow category to enforcement for a tenant.
+
+    Body: {"category": "social_engineering", "threshold": 0.74, "force": false}
+    - threshold optional — defaults to auto-suggested value (avg_confidence * 0.95)
+    - force=true bypasses volume/days/stability criteria (not drift control or cooldown)
+
+    Gates applied (in order):
+      1. Volume + time: total_seen >= min_requests AND days_monitored >= min_days
+      2. Stability: confidence_std <= max_std (signal consistent, not noisy)
+      3. Cooldown: days since last promotion >= cooldown_days
+      4. Drift: |new_threshold - current_threshold| <= max_delta (no large jumps)
+
+    Effect: writes per-tenant estixe_thresholds override (immediate, no restart).
+    Rollback: POST /v1/calibration/{tenant}/rollback {"category": "..."}
+    """
+    from aion.config import get_estixe_settings
+    from aion.nemos import get_nemos
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response(400, "Invalid JSON body", "invalid_json", "invalid_request")
+
+    category = body.get("category")
+    if not category:
+        return _error_response(400, "Missing required field: category", "missing_field", "invalid_request")
+
+    estixe_cfg = get_estixe_settings()
+    nemos = get_nemos()
+    obs = await nemos._load_shadow_observation(tenant, category)
+
+    if obs.total_seen == 0:
+        return _error_response(
+            404,
+            f"No shadow observations found for category '{category}' in tenant '{tenant}'",
+            "not_found",
+            "invalid_request",
+        )
+
+    if obs.promoted:
+        return _error_response(
+            409,
+            f"Category '{category}' is already promoted for tenant '{tenant}'",
+            "already_promoted",
+            "invalid_request",
+        )
+
+    force = bool(body.get("force", False))
+    gates_failed = []
+
+    # Gate 1 — Volume + time (force=true bypasses)
+    min_requests = estixe_cfg.shadow_promote_min_requests
+    min_days = estixe_cfg.shadow_promote_min_days
+    if not obs.is_promotion_ready(min_requests, min_days):
+        gates_failed.append({
+            "gate": "volume_and_time",
+            "reason": (
+                f"Need {min_requests} requests (have {obs.total_seen}) "
+                f"and {min_days} days (have {round(obs.days_monitored, 1)})"
+            ),
+        })
+
+    # Gate 2 — Stability (force=true bypasses)
+    max_std = estixe_cfg.shadow_promote_min_stability
+    if not obs.is_stable_enough(max_std):
+        gates_failed.append({
+            "gate": "stability",
+            "reason": (
+                f"confidence_std={round(obs.confidence_std, 4)} exceeds max={max_std} "
+                f"(stability_score={round(obs.stability_score, 3)}). "
+                f"Signal needs more consistent observations."
+            ),
+        })
+
+    if gates_failed and not force:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "promotion_criteria_not_met",
+                "message": "Use force=true to bypass volume/stability gates (drift and cooldown still apply).",
+                "gates_failed": gates_failed,
+                "observations": obs.to_dict(),
+            },
+        )
+
+    # Gate 3 — Cooldown (NOT bypassed by force — prevents rapid re-promotion)
+    cooldown_days = estixe_cfg.shadow_promote_cooldown_days
+    cooldown_remaining = obs.cooldown_remaining_days(cooldown_days)
+    if cooldown_remaining > 0:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "promotion_cooldown_active",
+                "message": (
+                    f"Category '{category}' was promoted recently. "
+                    f"Cooldown: {round(cooldown_remaining, 1)} days remaining."
+                ),
+                "cooldown_days": cooldown_days,
+                "remaining_days": round(cooldown_remaining, 1),
+            },
+        )
+
+    # Resolve threshold: explicit > auto-suggested
+    threshold = body.get("threshold")
+    threshold = round(float(threshold), 3) if threshold is not None else obs.suggested_threshold()
+
+    # Gate 4 — Drift control (NOT bypassed by force — prevents runaway threshold jumps)
+    existing_overrides = await get_overrides(tenant)
+    existing_thresholds: dict = existing_overrides.get("estixe_thresholds") or {}
+    current_threshold = existing_thresholds.get(category)
+    max_delta = estixe_cfg.shadow_promote_max_threshold_delta
+    if current_threshold is not None:
+        delta = abs(threshold - current_threshold)
+        if delta > max_delta:
+            clamped = round(current_threshold + (max_delta if threshold > current_threshold else -max_delta), 3)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "threshold_drift_exceeded",
+                    "message": (
+                        f"Requested threshold {threshold} deviates {round(delta, 3)} from "
+                        f"current {current_threshold} (max_delta={max_delta}). "
+                        f"Suggested safe value: {clamped}"
+                    ),
+                    "current_threshold": current_threshold,
+                    "requested_threshold": threshold,
+                    "max_delta": max_delta,
+                    "suggested_threshold": clamped,
+                },
+            )
+
+    # ── All gates passed — apply promotion ──
+
+    # 1. Write per-tenant threshold override (immediate, no restart)
+    existing_thresholds[category] = threshold
+    await set_override("estixe_thresholds", existing_thresholds, tenant)
+
+    # 2. Mark promoted in NEMOS (stores previous_threshold for rollback)
+    await nemos.mark_shadow_promoted(tenant, category, previous_threshold=current_threshold)
+
+    # 3. Record auditable history event
+    history_event = {
+        "event": "promote",
+        "timestamp": time.time(),
+        "threshold_before": current_threshold,
+        "threshold_after": threshold,
+        "observations_count": obs.total_seen,
+        "days_monitored": round(obs.days_monitored, 2),
+        "avg_confidence": round(obs.avg_confidence, 4),
+        "confidence_std": round(obs.confidence_std, 4),
+        "stability_score": round(obs.stability_score, 3),
+        "force": force,
+        "gates_bypassed": [g["gate"] for g in gates_failed] if force else [],
+    }
+    await nemos.record_promotion_event(tenant, category, history_event)
+
+    logger.info(
+        "SHADOW PROMOTED: tenant='%s' category='%s' threshold=%.3f "
+        "(prev=%.3f force=%s std=%.4f stability=%.3f n=%d)",
+        tenant, category, threshold,
+        current_threshold or 0.0, force,
+        obs.confidence_std, obs.stability_score, obs.total_seen,
+    )
+
+    return {
+        "status": "promoted",
+        "tenant": tenant,
+        "category": category,
+        "threshold_before": current_threshold,
+        "threshold_applied": threshold,
+        "effect": "immediate — threshold override active via estixe_thresholds",
+        "rollback_available": True,
+        "persist_note": (
+            f"To make permanent, set 'threshold: {threshold}' and remove 'shadow: true' "
+            f"from '{category}' in risk_taxonomy.yaml, then POST /v1/estixe/intents/reload"
+        ),
+        "signal_quality": {
+            "observations": obs.total_seen,
+            "days_monitored": round(obs.days_monitored, 2),
+            "avg_confidence": round(obs.avg_confidence, 4),
+            "confidence_std": round(obs.confidence_std, 4),
+            "stability_score": round(obs.stability_score, 3),
+        },
+        "gates_bypassed": history_event["gates_bypassed"],
+    }
+
+
+@app.post("/v1/calibration/{tenant}/rollback", tags=["Control Plane"])
+async def rollback_shadow_category(tenant: str, request: Request):
+    """Roll back a promoted shadow category to its pre-promotion threshold.
+
+    Body: {"category": "social_engineering"}
+
+    Restores the threshold that was active before the last promotion.
+    If no prior threshold existed (taxonomy default), removes the override entirely.
+    Records a rollback event in the auditable history.
+
+    After rollback the category re-enters shadow mode — observations keep accumulating.
+    """
+    from aion.nemos import get_nemos
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response(400, "Invalid JSON body", "invalid_json", "invalid_request")
+
+    category = body.get("category")
+    if not category:
+        return _error_response(400, "Missing required field: category", "missing_field", "invalid_request")
+
+    nemos = get_nemos()
+    obs = await nemos._load_shadow_observation(tenant, category)
+
+    if not obs.promoted:
+        return _error_response(
+            409,
+            f"Category '{category}' is not currently promoted for tenant '{tenant}'",
+            "not_promoted",
+            "invalid_request",
+        )
+
+    previous_threshold = obs.previous_threshold
+    existing_overrides = await get_overrides(tenant)
+    existing_thresholds: dict = existing_overrides.get("estixe_thresholds") or {}
+    current_threshold = existing_thresholds.get(category)
+
+    # Restore or remove threshold
+    if previous_threshold is not None:
+        existing_thresholds[category] = previous_threshold
+    else:
+        existing_thresholds.pop(category, None)
+    await set_override("estixe_thresholds", existing_thresholds, tenant)
+
+    # Update NEMOS state
+    await nemos.mark_shadow_rolled_back(tenant, category)
+
+    # Record rollback event in history
+    history_event = {
+        "event": "rollback",
+        "timestamp": time.time(),
+        "threshold_before": current_threshold,
+        "threshold_after": previous_threshold,
+        "reason": body.get("reason", "manual_rollback"),
+    }
+    await nemos.record_promotion_event(tenant, category, history_event)
+
+    logger.info(
+        "SHADOW ROLLBACK: tenant='%s' category='%s' threshold %.3f → %s",
+        tenant, category, current_threshold or 0.0,
+        f"{previous_threshold:.3f}" if previous_threshold is not None else "taxonomy_default",
+    )
+
+    return {
+        "status": "rolled_back",
+        "tenant": tenant,
+        "category": category,
+        "threshold_restored": previous_threshold,
+        "effect": (
+            "taxonomy default threshold restored"
+            if previous_threshold is None
+            else f"threshold reverted to {previous_threshold}"
+        ),
+        "note": "Category is back in shadow mode — observations continue accumulating.",
+    }
 
 
 @app.get("/v1/behavior", tags=["Control Plane"])

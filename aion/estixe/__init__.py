@@ -275,19 +275,33 @@ class EstixeModule:
         # 3. S3: Structural risk classification — RiskClassifier (probabilístico)
         # threshold_overrides already resolved above (with velocity) — reuse here.
         # Executa ANTES do intent classifier para bloquear antes de consultar intents.yaml
+        #
+        # tenant_shadow_mode: override {"shadow_mode": true} via PUT /v1/overrides makes
+        # ALL risk categories observe-only for this tenant — regardless of taxonomy config.
+        # Useful for new clients where false-positive rate is still unknown.
+        tenant_shadow_mode: bool = bool(context.metadata.get("shadow_mode"))
         if self._settings.risk_check_enabled:
             risk = self._risk_classifier.classify(user_message, threshold_overrides=threshold_overrides)
             if risk is not None:
-                if risk.shadow:
+                if risk.shadow or tenant_shadow_mode:
                     # Shadow mode: log observation, do NOT block — category is being evaluated
                     context.metadata["shadow_risk_category"] = risk.category
                     context.metadata["shadow_risk_level"] = risk.risk_level
                     context.metadata["shadow_risk_confidence"] = risk.confidence
                     context.metadata["shadow_risk_matched_seed"] = risk.matched_seed
                     logger.info(
-                        "SHADOW OBSERVATION: category='%s' level='%s' conf=%.3f — not enforced",
-                        risk.category, risk.risk_level, risk.confidence,
+                        "SHADOW OBSERVATION: category='%s' level='%s' conf=%.3f tenant_shadow=%s",
+                        risk.category, risk.risk_level, risk.confidence, tenant_shadow_mode,
                     )
+                    # Record to NEMOS for calibration (fire-and-forget)
+                    import asyncio as _asyncio
+                    try:
+                        from aion.nemos import get_nemos
+                        _asyncio.create_task(get_nemos().record_shadow_observation(
+                            context.tenant, risk.category, risk.confidence
+                        ))
+                    except Exception:
+                        pass
                 elif risk.risk_level in ("critical", "high"):
                     block_reason = (
                         f"Solicitação bloqueada: risco estrutural "
