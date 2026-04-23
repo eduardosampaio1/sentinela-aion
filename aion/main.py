@@ -260,6 +260,17 @@ async def lifespan(app: FastAPI):
         settings.metis_enabled,
     )
 
+    # License validation — must run before anything else.
+    # INVALID = explicit error banner + sys.exit(1). No silent failure.
+    from aion.license import validate_license_or_abort, LicenseState
+    lic = validate_license_or_abort()
+
+    # Gating: disable premium modules if license expired
+    if lic.state == LicenseState.EXPIRED:
+        logger.warning("Licença expirada — desabilitando NOMOS e METIS avançado (fail-open)")
+        settings.nomos_enabled = False
+        settings.metis_enabled = False
+
     # Load persisted overrides from disk (fallback quando sem Redis) — evita perder
     # config de tenant em restart do AION.
     from aion.middleware import _load_overrides_from_disk
