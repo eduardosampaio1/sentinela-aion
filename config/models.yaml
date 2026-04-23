@@ -46,3 +46,34 @@ models:
     capabilities: [fast, cheap, long_context]
     complexity_range: [0, 50]
     risk_tier: low
+
+# ── Custom / Private providers ──────────────────────────────────────────────
+# Para clientes com IA própria (Azure OpenAI, vLLM, Ollama, LLaMA, etc.)
+# Qualquer API compatível com OpenAI funciona — basta declarar aqui e definir:
+#   AION_DEFAULT_PROVIDER=<provider>
+#   AION_DEFAULT_BASE_URL=https://seu-endpoint/v1
+#   <PROVIDER_UPPER>_API_KEY=<chave>  (opcional se a IA não exige auth)
+#
+# Exemplo: cliente com Azure OpenAI
+# - name: gpt-4o-azure
+#   provider: azure
+#   api_key_env: AZURE_API_KEY
+#   cost_per_1k_input: 0.0025
+#   cost_per_1k_output: 0.01
+#   max_tokens: 128000
+#   latency_p50_ms: 900
+#   capabilities: [balanced, reasoning, code]
+#   complexity_range: [0, 100]
+#   risk_tier: high
+#
+# Exemplo: LLaMA 3 via vLLM no servidor interno do cliente
+# - name: llama-3-70b
+#   provider: llama
+#   api_key_env: LLAMA_API_KEY   # deixar vazio se sem auth: LLAMA_API_KEY=""
+#   cost_per_1k_input: 0.0       # custo zero = infra própria
+#   cost_per_1k_output: 0.0
+#   max_tokens: 131072
+#   latency_p50_ms: 600
+#   capabilities: [general, reasoning]
+#   complexity_range: [0, 80]
+#   risk_tier: high               # dado fica on-premise = máximo nível de segurança

@@ -35,11 +35,22 @@ client = OpenAI(
 
 ## Quick Start com Docker
 
+Dois modos de operacao, escolha o que se encaixa no cliente:
+
+**Modo Decision** — AION decide, sua app chama o LLM (sem compartilhar chaves):
 ```bash
-cp .env.example .env
-# Edite .env
-docker-compose up
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.decision.yml
+echo "AION_LICENSE=<seu-jwt>" > .env
+docker compose -f docker-compose.decision.yml up -d
 ```
+
+**Modo Proxy** — AION intercepta tudo, incluindo a chamada ao LLM (zero-code na app):
+```bash
+# .env com AION_LICENSE + chave do LLM (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+docker compose -f docker-compose.proxy.yml up -d
+```
+
+Verificar: `curl http://localhost:8080/health`
 
 ## Modulos
 

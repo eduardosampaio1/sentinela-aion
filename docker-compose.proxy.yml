@@ -1,0 +1,85 @@
+# AION — Modo Proxy
+#
+# O AION intercepta as chamadas ao LLM e as executa diretamente.
+# Suporta multiplos providers (OpenAI, Anthropic, Gemini) e qualquer API
+# OpenAI-compatible (Azure, vLLM, LLaMA, Ollama, etc.).
+#
+# Fluxo:
+#   App → POST /v1/chat/completions → AION → LLM → App
+#   (OpenAI SDK-compatible: troque apenas base_url="http://localhost:8080/v1")
+#
+# Quando usar este modo:
+#   - Cliente quer integracao zero-code (so troca base_url)
+#   - NOMOS e METIS ativos (roteamento inteligente + otimizacao)
+#   - Multi-provider sem mudar a aplicacao
+#
+# Setup:
+#   1. Copie este arquivo para o ambiente do cliente
+#   2. Crie .env com as variaveis abaixo
+#   3. docker compose -f docker-compose.proxy.yml up -d
+
+services:
+  aion:
+    image: ghcr.io/eduardosampaio1/sentinela-aion:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Licenca (obrigatorio)
+      AION_LICENSE: ${AION_LICENSE}
+
+      # LLM Providers — configure os que o cliente usar
+      # Para IA propria (Azure, vLLM, LLaMA, Ollama, etc.) use AION_DEFAULT_API_KEY
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AION_DEFAULT_API_KEY: ${AION_DEFAULT_API_KEY:-}
+
+      # Modo proxy: todos os modulos ativos
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "true"
+
+      # Provider padrao (usado quando NOMOS nao roteia)
+      # OpenAI-compatible customizado:
+      #   AION_DEFAULT_PROVIDER=azure  + AION_DEFAULT_BASE_URL=https://cliente.openai.azure.com/...
+      #   AION_DEFAULT_PROVIDER=llama  + AION_DEFAULT_BASE_URL=http://llm.intranet:8000/v1
+      AION_DEFAULT_PROVIDER: ${AION_DEFAULT_PROVIDER:-openai}
+      AION_DEFAULT_MODEL: ${AION_DEFAULT_MODEL:-gpt-4o-mini}
+      AION_DEFAULT_BASE_URL: ${AION_DEFAULT_BASE_URL:-}
+
+      # Comportamento seguro: se AION falhar, deixa passar para o LLM
+      AION_FAIL_MODE: "open"
+      AION_PORT: "8080"
+
+      # Redis (recomendado para producao)
+      REDIS_URL: ${REDIS_URL:-}
+
+      # Multi-tenancy
+      AION_REQUIRE_TENANT: ${AION_REQUIRE_TENANT:-false}
+      AION_DEFAULT_TENANT: "default"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Redis — cache de decisoes, velocity detection, overrides persistentes
+  # Remova este servico se preferir Redis externo (ElastiCache, Upstash, Redis Cloud)
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
