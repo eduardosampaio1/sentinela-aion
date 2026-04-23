@@ -30,8 +30,8 @@ services:
 
   mock-llm:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.mock_llm
+      context: ..
+      dockerfile: ../docker/Dockerfile.mock_llm
     container_name: aion-mock-llm
     ports:
       - "8001:8001"
@@ -46,7 +46,7 @@ services:
 
   aion:
     build:
-      context: ./aion
+      context: ../aion
       dockerfile: ../docker/Dockerfile.aion
     container_name: aion
     depends_on:

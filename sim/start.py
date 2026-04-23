@@ -66,10 +66,10 @@ if _base.startswith("http://localhost") or _base.startswith("http://127."):
             os.environ[key_var] = sim_val
 
 # NOMOS_MODELS_CONFIG_PATH como caminho absoluto (independe do CWD)
-os.environ["NOMOS_MODELS_CONFIG_PATH"] = str(SIM_DIR / "config" / "models.sim.yaml")
+os.environ["NOMOS_MODELS_CONFIG_PATH"] = str(SIM_DIR / "models.sim.yaml")
 
-AION_PATH    = Path(cfg.get("AION_PATH", r"D:\projetos\aion"))
-CONSOLE_PATH = SIM_DIR / "aion-console"     # Next.js dashboard local do sentinela-aion
+AION_PATH    = Path(cfg.get("AION_PATH", str(SIM_DIR.parent)))
+CONSOLE_PATH = SIM_DIR.parent / "aion-console"  # Next.js dashboard na raiz do repo
 PYTHON       = sys.executable
 
 # Detecta npm (Next.js)

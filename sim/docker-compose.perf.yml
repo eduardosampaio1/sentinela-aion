@@ -25,7 +25,7 @@ services:
     deploy: { resources: { limits: { memory: 384M } } }
 
   mock-llm:
-    build: { context: ., dockerfile: docker/Dockerfile.mock_llm }
+    build: { context: .., dockerfile: ../docker/Dockerfile.mock_llm }
     container_name: aion-mock-llm
     ports: ["8001:8001"]
     healthcheck:
@@ -35,7 +35,7 @@ services:
     deploy: { resources: { limits: { memory: 256M } } }
 
   aion1: &aion
-    build: { context: ./aion, dockerfile: ../docker/Dockerfile.aion }
+    build: { context: ../aion, dockerfile: ../docker/Dockerfile.aion }
     container_name: aion1
     depends_on:
       redis: { condition: service_healthy }
