@@ -58,6 +58,10 @@ class EmbeddingModel:
         settings = get_estixe_settings()
         try:
             from sentence_transformers import SentenceTransformer
+            logger.info(
+                "Carregando modelo '%s' (primeira execucao: ~150 MB, pode demorar 2-3 min)...",
+                settings.embedding_model,
+            )
             self._model = SentenceTransformer(settings.embedding_model)
             self._model_name = settings.embedding_model
             self._loaded = True

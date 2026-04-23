@@ -499,6 +499,24 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
 
         _requests_in_flight += 1
         try:
-            return await call_next(request)
+            response = await call_next(request)
         finally:
             _requests_in_flight -= 1
+
+        # Inject license state header
+        try:
+            from aion.license import get_license, LicenseState
+            lic = get_license()
+            response.headers["x-aion-license"] = lic.state.value
+            if lic.state == LicenseState.GRACE:
+                response.headers["x-aion-license-warning"] = (
+                    f"license expires in {lic.days_remaining:.0f}d — renew at contato@baluarte.ai"
+                )
+            elif lic.state == LicenseState.EXPIRED:
+                response.headers["x-aion-license-warning"] = (
+                    "license expired — running in degraded mode, contact contato@baluarte.ai"
+                )
+        except Exception:
+            pass
+
+        return response
