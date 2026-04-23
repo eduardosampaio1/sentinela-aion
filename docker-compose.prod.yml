@@ -1,0 +1,74 @@
+# AION — Modo Proxy (Produção)
+#
+# Neste modo o AION intercepta as chamadas ao LLM e as executa.
+# Suporta múltiplos providers (OpenAI, Anthropic, Gemini) com roteamento
+# automático via NOMOS e otimização de prompt via METIS.
+#
+# Fluxo:
+#   App → POST /v1/chat/completions → AION → LLM → App
+#   (OpenAI SDK-compatible: troque apenas base_url="http://localhost:8080/v1")
+#
+# Setup:
+#   1. Copie este arquivo para o ambiente do cliente
+#   2. Crie .env com as variáveis abaixo
+#   3. docker compose -f docker-compose.prod.yml up -d
+
+services:
+  aion:
+    image: ghcr.io/eduardosampaio1/sentinela-aion:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Licença (obrigatório)
+      AION_LICENSE: ${AION_LICENSE}
+
+      # LLM Providers — configure os que o cliente usar
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # Modo proxy: todos os módulos ativos
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "true"
+
+      # Provider padrão (usado quando NOMOS não roteia)
+      AION_DEFAULT_PROVIDER: ${AION_DEFAULT_PROVIDER:-openai}
+      AION_DEFAULT_MODEL: ${AION_DEFAULT_MODEL:-gpt-4o-mini}
+
+      # Comportamento seguro: se AION falhar, deixa passar para o LLM
+      AION_FAIL_MODE: "open"
+      AION_PORT: "8080"
+
+      # Redis (recomendado para produção)
+      REDIS_URL: ${REDIS_URL:-}
+
+      # Multi-tenancy
+      AION_REQUIRE_TENANT: ${AION_REQUIRE_TENANT:-false}
+      AION_DEFAULT_TENANT: "default"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Redis — cache de decisões, velocity detection, overrides persistentes
+  # Remova este serviço se preferir usar Redis externo (ElastiCache, Upstash)
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
