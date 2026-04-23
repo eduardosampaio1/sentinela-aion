@@ -30,23 +30,24 @@ python start.py
 
 Isso sobe: AION + mock LLM (OpenAI-compatible fake) + Redis local. Zero configuracao, zero custo.
 
-### 2. Docker lite (1 replica, com LLM real)
+### 2. Docker — Modo Decision (AION decide, voce chama o LLM)
 
 ```bash
-cp .env.example .env
-# Editar .env: OPENAI_API_KEY=sk-...
-
-docker-compose -f docker-compose.lite.yml up -d
+echo "AION_LICENSE=<seu-jwt>" > .env
+docker compose -f docker-compose.decision.yml up -d
 ```
 
-### 3. Docker completo (nginx + 3 replicas + Redis + Prometheus + Grafana)
+Neste modo o AION retorna `BLOCK / BYPASS / CONTINUE` via `POST /v1/decide`.
+Sua app usa a decisao e chama o LLM com suas proprias credenciais.
+
+### 3. Docker — Modo Proxy (AION intercepta tudo)
 
 ```bash
-docker-compose -f docker-compose.sim.yml up -d
-# Console: http://localhost:3000
-# Grafana: http://localhost:3030
-# AION:    http://localhost:8080
+# .env com AION_LICENSE + OPENAI_API_KEY (ou outro provider)
+docker compose -f docker-compose.proxy.yml up -d
 ```
+
+Neste modo sua app aponta `base_url` para o AION e nao muda mais nada.
 
 ### 4. Local (desenvolvimento)
 

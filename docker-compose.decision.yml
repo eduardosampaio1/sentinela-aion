@@ -1,16 +1,20 @@
-# AION — Modo Decisão (POC)
+# AION — Modo Decision
 #
-# Neste modo o AION NÃO fala com o LLM.
-# Ele retorna a decisão (BLOCK / BYPASS / CONTINUE) para a sua app,
-# que é responsável por chamar o LLM com suas próprias credenciais.
+# O AION analisa e decide (BLOCK / BYPASS / CONTINUE) mas NAO fala com o LLM.
+# Sua aplicacao e responsavel por chamar o LLM com suas proprias credenciais.
 #
 # Fluxo:
-#   App → POST /v1/decide → AION → decisão → App → LLM (se CONTINUE)
+#   App → POST /v1/decide → AION → decisao → App → LLM (se CONTINUE)
+#
+# Quando usar este modo:
+#   - Cliente nao quer compartilhar chaves do LLM
+#   - Cliente tem IA propria (Azure, vLLM, LLaMA, etc.)
+#   - Avaliacao inicial (POC) — menor superficie de integracao
 #
 # Setup (3 comandos):
-#   1. curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.poc.yml
+#   1. curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.decision.yml
 #   2. echo "AION_LICENSE=<seu-jwt>" > .env
-#   3. docker compose -f docker-compose.poc.yml up -d
+#   3. docker compose -f docker-compose.decision.yml up -d
 #
 # Verificar: curl http://localhost:8080/health
 
@@ -20,10 +24,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Licença (obrigatório)
+      # Licenca (obrigatorio)
       AION_LICENSE: ${AION_LICENSE}
 
-      # Modo decisão: ESTIXE ativo, NOMOS/METIS desligados
+      # Modo decision: ESTIXE ativo, NOMOS/METIS desligados
       AION_ESTIXE_ENABLED: "true"
       AION_NOMOS_ENABLED: "false"
       AION_METIS_ENABLED: "false"
@@ -32,7 +36,7 @@ services:
       AION_FAIL_MODE: "open"
       AION_PORT: "8080"
 
-      # Multi-tenancy (opcional — remova se não usar)
+      # Multi-tenancy (opcional)
       AION_REQUIRE_TENANT: "false"
       AION_DEFAULT_TENANT: "default"
 
@@ -41,7 +45,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s  # primeira execução baixa modelo de embeddings (~150 MB)
+      start_period: 30s
     restart: unless-stopped
     deploy:
       resources:

@@ -102,7 +102,9 @@ def _resolve_api_key(provider: str) -> str:
         "google": "GEMINI_API_KEY",
     }
     env_var = key_map.get(provider, f"{provider.upper()}_API_KEY")
-    return os.environ.get(env_var, "")
+    key = os.environ.get(env_var, "")
+    # Fallback: AION_DEFAULT_API_KEY covers custom providers without naming convention
+    return key or os.environ.get("AION_DEFAULT_API_KEY", "")
 
 
 def _build_headers(provider: str, api_key: str) -> dict[str, str]:
