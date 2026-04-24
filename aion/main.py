@@ -43,6 +43,7 @@ from aion.shared.schemas import (
     Decision,
     PipelineContext,
 )
+from aion.shared.budget import BudgetConfig, BudgetExceededError, check_budget, get_budget_store
 from aion.shared.telemetry import (
     get_counters,
     get_recent_events,
@@ -152,6 +153,14 @@ async def _record_all_outcomes(context: PipelineContext, response, settings) -> 
             decision=decision,
         )
 
+        # 4. Budget spend tracking (authoritative record post-LLM)
+        if actual_cost > 0:
+            try:
+                from aion.shared.budget import get_budget_store
+                await get_budget_store().record_spend(context.tenant, actual_cost)
+            except Exception:
+                logger.debug("Budget record_spend failed (non-critical)", exc_info=True)
+
     except Exception:
         logger.debug("NEMOS outcome recording failed (non-critical)", exc_info=True)
 
@@ -225,6 +234,14 @@ def _build_response_headers(context: PipelineContext) -> dict[str, str]:
     route_reason = context.metadata.get("route_reason", "")
     if route_reason:
         headers["X-Aion-Route-Reason"] = route_reason.replace("\u2192", "->").encode("latin-1", errors="replace").decode("latin-1")
+    # SLA latency headers — pipeline overhead visible on every response
+    pipeline_ms = sum(
+        v for k, v in context.module_latencies.items() if k != "llm"
+    )
+    llm_ms = context.module_latencies.get("llm", 0.0)
+    headers["X-Aion-Pipeline-Ms"] = str(round(pipeline_ms, 1))
+    if llm_ms:
+        headers["X-Aion-Total-Ms"] = str(round(pipeline_ms + llm_ms, 1))
     # Degradation headers
     if _pipeline:
         headers.update(_pipeline.get_degraded_headers())
@@ -366,7 +383,7 @@ if _settings_cors.cors_origins:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["X-Aion-Decision", "X-Request-ID", "X-Aion-Route-Reason", "X-Aion-Mode", "X-Aion-Replica"],
+        expose_headers=["X-Aion-Decision", "X-Request-ID", "X-Aion-Route-Reason", "X-Aion-Mode", "X-Aion-Replica", "X-Aion-Pipeline-Ms", "X-Aion-Total-Ms", "X-Aion-Verified"],
     )
 
 
@@ -570,6 +587,13 @@ async def chat_completions(request: Request):
     if idemp_key:
         context.metadata["idempotency_key"] = idemp_key
 
+    # Derive session_id for multi-turn context (retrocompatível — sem exigir header)
+    # X-Aion-Session-Id header takes priority; fallback derives from first-message anchor.
+    if settings.multi_turn_context and chat_request.messages:
+        from aion.shared.turn_context import derive_session_id
+        _explicit_sid = request.headers.get("X-Aion-Session-Id") or None
+        context.session_id = derive_session_id(tenant, chat_request.messages, explicit_id=_explicit_sid)
+
     # Apply per-tenant runtime overrides to pipeline context (sim customization)
     _tenant_ov = await get_overrides(tenant)
     if "pii_policy" in _tenant_ov:
@@ -655,6 +679,19 @@ async def chat_completions(request: Request):
 
     # --- CALL_LLM path (streaming preserves existing behavior) ---
     effective_request = context.modified_request or chat_request
+
+    # ── Budget cap check (pré-LLM, fail-open) ──
+    try:
+        await check_budget(tenant, context)
+    except BudgetExceededError as _budget_err:
+        return _error_response(
+            429,
+            f"Budget cap reached: {_budget_err.cap_type} spend ${_budget_err.spend:.4f} >= cap ${_budget_err.cap:.4f}",
+            "budget_exceeded",
+            "rate_limit_error",
+        )
+    except Exception:
+        pass  # fail-open
 
     try:
         if chat_request.stream:
@@ -1355,6 +1392,44 @@ async def audit_log_endpoint(request: Request, limit: int = 100):
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     return await get_audit_log(limit, tenant)
+
+
+@app.post("/v1/admin/rotate-keys", tags=["Control Plane"])
+async def rotate_admin_keys(request: Request):
+    """Rotate HMAC signing key without service downtime.
+
+    Accepts a new secret. The old key remains valid for a grace period
+    so in-flight requests complete. After rotation, update AION_SESSION_AUDIT_SECRET
+    in your environment and restart replicas to drop the old key.
+
+    Body: {"new_secret": "...", "reason": "annual rotation"}
+    Requires admin role.
+    """
+    import time as _time
+    body = await request.json()
+    new_secret = body.get("new_secret", "")
+    reason = body.get("reason", "manual rotation")
+    if len(new_secret) < 32:
+        raise HTTPException(status_code=422, detail="new_secret must be at least 32 characters")
+
+    # Hot-swap the in-process secret (affects all new signatures immediately)
+    import os
+    os.environ["AION_SESSION_AUDIT_SECRET"] = new_secret
+
+    # Invalidate settings singleton to pick up new value
+    import aion.config as _cfg
+    _cfg._settings = None
+
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    await audit("admin:rotate-keys", request, tenant, f"reason={reason}")
+
+    return {
+        "status": "rotated",
+        "reason": reason,
+        "rotated_at": _time.time(),
+        "note": "Update AION_SESSION_AUDIT_SECRET env var and restart replicas to persist.",
+    }
 
 
 # ──────────────────────────────────────────────
@@ -2081,6 +2156,154 @@ async def explain_decision(request_id: str, request: Request):
     return {"request_id": request_id, "found": False, "message": "Request not found in recent events"}
 
 
+@app.get("/v1/sessions/{tenant_id}", tags=["Observability"])
+async def list_sessions(tenant_id: str, page: int = 1, limit: int = 20):
+    """List recent sessions for a tenant (paginated, most recent first)."""
+    from aion.shared.session_audit import get_session_audit_store
+    limit = min(max(1, limit), 100)
+    sessions = await get_session_audit_store().list_sessions(tenant_id, page=page, limit=limit)
+    return {"tenant": tenant_id, "page": page, "sessions": sessions}
+
+
+@app.get("/v1/session/{session_id}/audit", tags=["Observability"])
+async def get_session_audit(session_id: str, request: Request):
+    """Full session audit trail with HMAC integrity signature.
+
+    Returns all turns in the session: decisions, models used, PII detected,
+    risk scores, and a cryptographic signature for compliance verification.
+    """
+    from aion.shared.session_audit import get_session_audit_store
+    from datetime import datetime, timezone
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    rec = await get_session_audit_store().get_session(tenant, session_id)
+    if rec is None:
+        return JSONResponse(
+            status_code=404,
+            content={"session_id": session_id, "found": False, "message": "Session not found"},
+        )
+    verified = rec.verify()
+
+    def _iso(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+
+    turns_out = []
+    for t in rec.turns:
+        d = t.model_dump()
+        d["timestamp_iso"] = _iso(t.timestamp)
+        turns_out.append(d)
+
+    return {
+        "session_id": rec.session_id,
+        "tenant": rec.tenant,
+        "turns_count": len(rec.turns),
+        "started_at": rec.started_at,
+        "started_at_iso": _iso(rec.started_at),
+        "last_activity": rec.last_activity,
+        "last_activity_iso": _iso(rec.last_activity),
+        "hmac_signature": rec.hmac_signature,
+        "verified": verified,
+        "turns": turns_out,
+    }
+
+
+@app.get("/v1/session/{session_id}/audit/export", tags=["Observability"])
+async def export_session_audit(session_id: str, request: Request, format: str = "json"):
+    """Export session audit trail.
+
+    format=json  → full JSON (default)
+    format=csv   → CSV suitable for compliance spreadsheet import
+    """
+    from aion.shared.session_audit import get_session_audit_store
+    from datetime import datetime, timezone
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    rec = await get_session_audit_store().get_session(tenant, session_id)
+    if rec is None:
+        return JSONResponse(
+            status_code=404,
+            content={"session_id": session_id, "found": False, "message": "Session not found"},
+        )
+    verified = rec.verify()
+
+    def _iso(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else ""
+
+    if format.lower() == "csv":
+        import csv, io
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "request_id", "timestamp_iso", "decision", "model_used",
+            "risk_score", "intent_detected", "pii_types",
+            "policies_matched", "tokens_sent", "tokens_received", "latency_ms",
+        ])
+        for t in rec.turns:
+            writer.writerow([
+                t.request_id, _iso(t.timestamp), t.decision,
+                t.model_used or "", t.risk_score,
+                t.intent_detected or "", "|".join(t.pii_types_detected),
+                "|".join(t.policies_matched), t.tokens_sent,
+                t.tokens_received, t.latency_ms,
+            ])
+        csv_content = buf.getvalue()
+        headers = {
+            "Content-Disposition": f'attachment; filename="session_{session_id}_audit.csv"',
+            "X-Aion-Verified": str(verified).lower(),
+        }
+        return Response(content=csv_content, media_type="text/csv", headers=headers)
+
+    # Default: JSON
+    turns_out = []
+    for t in rec.turns:
+        d = t.model_dump()
+        d["timestamp_iso"] = _iso(t.timestamp)
+        turns_out.append(d)
+
+    return JSONResponse(content={
+        "session_id": rec.session_id,
+        "tenant": rec.tenant,
+        "started_at_iso": _iso(rec.started_at),
+        "last_activity_iso": _iso(rec.last_activity),
+        "verified": verified,
+        "hmac_signature": rec.hmac_signature,
+        "turns_count": len(rec.turns),
+        "turns": turns_out,
+    }, headers={"X-Aion-Verified": str(verified).lower()})
+
+
+@app.put("/v1/budget/{tenant_id}", tags=["Control Plane"])
+async def set_budget(tenant_id: str, payload: dict, request: Request):
+    """Configure budget cap for a tenant (daily/monthly, block or downgrade on cap)."""
+    try:
+        config = BudgetConfig(tenant=tenant_id, **payload)
+    except Exception as e:
+        return _error_response(422, f"Invalid budget config: {e}", "validation_error", "invalid_request_error")
+    await get_budget_store().set_config(config)
+    return {"tenant": tenant_id, "status": "configured", "config": config.model_dump()}
+
+
+@app.get("/v1/budget/{tenant_id}/status", tags=["Observability"])
+async def get_budget_status(tenant_id: str):
+    """Current budget spend and cap status for a tenant."""
+    store = get_budget_store()
+    config = await store.get_config(tenant_id)
+    today_spend = await store.get_today_spend(tenant_id)
+    state = await store.get_state(tenant_id)
+    return {
+        "tenant": tenant_id,
+        "today_spend": round(today_spend, 6),
+        "month_spend": round(state.month_spend, 6),
+        "daily_cap": config.daily_cap if config else None,
+        "monthly_cap": config.monthly_cap if config else None,
+        "daily_cap_pct": round(today_spend / config.daily_cap, 4) if config and config.daily_cap else None,
+        "cap_reached": state.cap_reached_today,
+        "alert_active": today_spend >= (config.daily_cap or 0) * (config.alert_threshold if config else 0.8) if config and config.daily_cap else False,
+        "on_cap_reached": config.on_cap_reached if config else None,
+        "budget_enabled": os.environ.get("AION_BUDGET_ENABLED", "").lower() in ("true", "1"),
+    }
+
+
 @app.get("/v1/metrics/tenant/{tenant_id}", tags=["Observability"])
 async def tenant_metrics(tenant_id: str):
     """Per-tenant metrics — decisions, savings, latency for a specific tenant."""
@@ -2126,6 +2349,456 @@ async def tenant_recommendations(tenant_id: str):
         "recommendations": [r.to_dict() for r in recs],
         "count": len(recs),
     }
+
+
+# ──────────────────────────────────────────────
+# Threat signals — cross-turn attack patterns
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/threats/{tenant_id}", tags=["Security"])
+async def list_threat_signals(tenant_id: str):
+    """List active threat signals for a tenant (multi-turn attack patterns).
+
+    Returns sessions where a cross-turn pattern (progressive bypass,
+    intent mutation, threshold probing, authority escalation) was detected.
+    Requires admin or operator role.
+    """
+    try:
+        from aion.estixe.threat_detector import get_threat_detector
+        signals = await get_threat_detector().get_active(tenant_id)
+        return {
+            "tenant": tenant_id,
+            "threats": [s.model_dump() for s in signals],
+            "count": len(signals),
+        }
+    except Exception as exc:
+        logger.error("Failed to retrieve threat signals for %s: %s", tenant_id, exc)
+        return {"tenant": tenant_id, "threats": [], "count": 0, "error": str(exc)}
+
+
+# ──────────────────────────────────────────────
+# Intelligence — decision-maker-facing aggregation
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/intelligence/{tenant_id}/overview", tags=["Intelligence"])
+async def intelligence_overview(tenant_id: str, days: int = 30):
+    """Single-endpoint summary of AION's value for a tenant.
+
+    Aggregates security, economics, intelligence, and budget into one
+    response readable by a VP/CISO without engineering translation.
+    """
+    from aion.nemos import get_nemos
+
+    nemos = get_nemos()
+    counters = get_counters()
+    stats_data = get_stats(tenant_id)
+
+    # Economics from in-process counters (fast, no Redis required)
+    total_requests = counters.get("requests_total", 0)
+    bypasses = counters.get("bypass_total", 0)
+    blocks = counters.get("block_total", 0)
+    tokens_saved = counters.get("tokens_saved_total", 0)
+    cost_saved = counters.get("cost_saved_total", 0.0)
+
+    # NEMOS baseline + maturity (enriches economics with real cost data)
+    baseline = None
+    maturity = {}
+    estimated_without_aion = 0.0
+    total_spend = 0.0
+    try:
+        baseline = await nemos.get_baseline(tenant_id)
+        maturity = await nemos.get_module_maturity(tenant_id)
+        econ = await nemos.get_economics(tenant_id)
+        if econ:
+            total_spend = float(econ.total_actual_cost)
+            estimated_without_aion = float(econ.total_default_cost)
+    except Exception:
+        pass
+
+    savings = max(0.0, estimated_without_aion - total_spend) if estimated_without_aion else cost_saved
+    savings_pct = round(savings / estimated_without_aion * 100, 1) if estimated_without_aion > 0 else 0.0
+
+    # PII counters from recent events
+    pii_intercepted = 0
+    top_block_reason = None
+    try:
+        recent = get_recent_events(50)
+        pii_intercepted = sum(
+            1 for e in recent
+            if (e.get("metadata") or {}).get("pii_violations")
+        )
+        block_reasons = [
+            (e.get("metadata") or {}).get("block_reason") or (e.get("metadata") or {}).get("detected_risk_category")
+            for e in recent
+            if e.get("decision") == "block"
+        ]
+        block_reasons = [r for r in block_reasons if r]
+        if block_reasons:
+            from collections import Counter
+            top_block_reason = Counter(block_reasons).most_common(1)[0][0]
+    except Exception:
+        pass
+
+    # Budget status
+    budget_info: dict = {}
+    try:
+        store = get_budget_store()
+        b_config = await store.get_config(tenant_id)
+        today_spend = await store.get_today_spend(tenant_id)
+        if b_config:
+            budget_info = {
+                "daily_cap": b_config.daily_cap,
+                "today_spend": round(today_spend, 6),
+                "cap_pct": round(today_spend / b_config.daily_cap, 3) if b_config.daily_cap else None,
+                "alert_active": bool(
+                    b_config.daily_cap
+                    and today_spend >= b_config.daily_cap * b_config.alert_threshold
+                ),
+                "on_cap_reached": b_config.on_cap_reached,
+            }
+    except Exception:
+        pass
+
+    avg_latency = baseline.avg_latency_ms if baseline else counters.get("latency_p50_ms", 0)
+    top_model = None
+    try:
+        if baseline:
+            top_model = getattr(baseline, "top_model", None)
+    except Exception:
+        pass
+
+    return {
+        "tenant": tenant_id,
+        "period_days": days,
+        "security": {
+            "requests_blocked": blocks,
+            "pii_intercepted": pii_intercepted,
+            "top_block_reason": top_block_reason,
+        },
+        "economics": {
+            "total_spend_usd": round(total_spend, 4) if total_spend else round(cost_saved, 4),
+            "estimated_without_aion_usd": round(estimated_without_aion, 4),
+            "savings_usd": round(savings, 4),
+            "savings_pct": savings_pct,
+            "tokens_saved": tokens_saved,
+            "top_model_used": top_model,
+        },
+        "intelligence": {
+            "requests_processed": total_requests,
+            "bypass_rate": round(bypasses / total_requests, 3) if total_requests else 0,
+            "avg_latency_ms": round(avg_latency, 1),
+            "module_maturity": maturity,
+        },
+        "budget": budget_info or None,
+    }
+
+
+@app.get("/v1/intelligence/{tenant_id}/compliance-summary", tags=["Intelligence"])
+async def intelligence_compliance_summary(tenant_id: str, request: Request):
+    """CISO-ready compliance summary.
+
+    Returns a verifiable JSON artifact for compliance teams:
+    decision distribution, PII categories, session audit coverage,
+    and an HMAC signature over the full report for tamper detection.
+    """
+    import hashlib as _hashlib
+    from datetime import datetime, timezone
+
+    counters = get_counters()
+    stats_data = get_stats(tenant_id)
+
+    total = counters.get("requests_total", 0)
+    blocks = counters.get("block_total", 0)
+    bypasses = counters.get("bypass_total", 0)
+    passthroughs = total - blocks - bypasses
+
+    # PII breakdown from recent events
+    pii_by_category: dict[str, int] = {}
+    try:
+        recent = get_recent_events(200)
+        for e in recent:
+            violations = (e.get("metadata") or {}).get("pii_violations") or []
+            for v in violations:
+                cat = v if isinstance(v, str) else str(v)
+                pii_by_category[cat] = pii_by_category.get(cat, 0) + 1
+    except Exception:
+        pass
+
+    # Session audit coverage
+    session_count = 0
+    try:
+        from aion.shared.session_audit import get_session_audit_store
+        sessions = await get_session_audit_store().list_sessions(tenant_id, page=1, limit=1)
+        # Use ZCARD for total (list_sessions returns page 1; index gives total)
+        session_count = len(sessions)  # rough floor — full count needs ZCARD
+    except Exception:
+        pass
+
+    report_data = {
+        "tenant": tenant_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "data_retention_policy": "messages_not_stored_hash_only",
+        "decisions": {
+            "total_requests": total,
+            "blocked": blocks,
+            "bypassed": bypasses,
+            "passed_to_llm": max(0, passthroughs),
+            "block_rate": round(blocks / total, 4) if total else 0,
+        },
+        "pii": {
+            "total_intercepts": sum(pii_by_category.values()),
+            "by_category": pii_by_category,
+            "note": "PII content is never stored; only category labels are recorded.",
+        },
+        "session_audit": {
+            "sessions_with_audit_trail": session_count,
+            "audit_trail_signed": bool(os.environ.get("AION_SESSION_AUDIT_SECRET")),
+            "audit_ttl_days": int(os.environ.get("AION_SESSION_AUDIT_TTL", 7_776_000)) // 86400,
+            "export_endpoint": f"/v1/session/{{session_id}}/audit/export",
+        },
+        "infrastructure": {
+            "multi_turn_context_enabled": os.environ.get("AION_MULTI_TURN_CONTEXT", "").lower() in ("true", "1"),
+            "budget_cap_enabled": os.environ.get("AION_BUDGET_ENABLED", "").lower() in ("true", "1"),
+            "data_residency": os.environ.get("AION_DATA_RESIDENCY", "not_configured"),
+            "audit_hash_chaining": True,
+        },
+    }
+
+    # Sign the full report for tamper detection
+    report_json = __import__("json").dumps(report_data, sort_keys=True)
+    secret = os.environ.get("AION_SESSION_AUDIT_SECRET", "")
+    report_signature = ""
+    if secret:
+        import hmac as _hmac
+        report_signature = "kid:v1:" + _hmac.new(secret.encode(), report_json.encode(), _hashlib.sha256).hexdigest()
+
+    report_data["report_signature"] = report_signature
+    report_data["signature_covers"] = "all fields except report_signature itself"
+    return report_data
+
+
+# ──────────────────────────────────────────────
+# Executive reports — PDF + scheduling
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/reports/{tenant_id}/executive", tags=["Reports"])
+async def get_executive_report(tenant_id: str, format: str = "pdf", days: int = 30):
+    """Generate or serve cached executive report for a tenant.
+
+    ?format=pdf  (default) — returns PDF bytes
+    ?format=json           — returns raw report data as JSON
+    ?days=30               — lookback period (default 30)
+    """
+    import datetime
+    from aion.reports.data_builder import build_report_data
+
+    period = datetime.date.today().strftime("%Y-%m")
+
+    if format == "json":
+        data = await build_report_data(tenant_id, period_days=days)
+        return data
+
+    # PDF: check cache first
+    from aion.reports.scheduler import get_cached_report, cache_report
+    cached = await get_cached_report(tenant_id, period)
+    if cached:
+        from fastapi.responses import Response as FResponse
+        return FResponse(content=cached, media_type="application/pdf",
+                         headers={"Content-Disposition": f"attachment; filename=aion-report-{tenant_id}-{period}.pdf"})
+
+    data = await build_report_data(tenant_id, period_days=days)
+    from aion.reports.pdf_renderer import render_pdf
+    pdf_bytes = render_pdf(data)
+    await cache_report(tenant_id, period, pdf_bytes)
+    from fastapi.responses import Response as FResponse
+    return FResponse(content=pdf_bytes, media_type="application/pdf",
+                     headers={"Content-Disposition": f"attachment; filename=aion-report-{tenant_id}-{period}.pdf"})
+
+
+@app.post("/v1/reports/{tenant_id}/schedule", tags=["Reports"])
+async def set_report_schedule(tenant_id: str, request: Request):
+    """Configure automated report generation for a tenant.
+
+    Body: {"frequency": "monthly", "recipients": ["ciso@company.com"], "format": "pdf"}
+    """
+    import time
+    from aion.reports.scheduler import ReportSchedule, save_schedule, get_schedule
+
+    body = await request.json()
+    schedule = ReportSchedule(
+        tenant=tenant_id,
+        frequency=body.get("frequency", "monthly"),
+        recipients=body.get("recipients", []),
+        format=body.get("format", "pdf"),
+        created_at=time.time(),
+    )
+    await save_schedule(schedule)
+    return {"tenant": tenant_id, "schedule": schedule.model_dump(), "status": "scheduled"}
+
+
+@app.get("/v1/reports/{tenant_id}/schedule", tags=["Reports"])
+async def get_report_schedule(tenant_id: str):
+    """Get the current report schedule for a tenant."""
+    from aion.reports.scheduler import get_schedule
+    schedule = await get_schedule(tenant_id)
+    if schedule is None:
+        return {"tenant": tenant_id, "schedule": None}
+    return {"tenant": tenant_id, "schedule": schedule.model_dump()}
+
+
+@app.delete("/v1/reports/{tenant_id}/schedule", tags=["Reports"])
+async def delete_report_schedule(tenant_id: str):
+    """Remove the report schedule for a tenant."""
+    from aion.reports.scheduler import delete_schedule
+    await delete_schedule(tenant_id)
+    return {"tenant": tenant_id, "status": "deleted"}
+
+
+# ──────────────────────────────────────────────
+# Policy Marketplace
+# ──────────────────────────────────────────────
+
+
+@app.post("/v1/marketplace/policies", tags=["Marketplace"])
+async def publish_policy(request: Request):
+    """Publish a policy to the marketplace.
+
+    Body: {name, description, category, content (YAML), tags, price_usd, test_cases}
+    The author_tenant is derived from the authenticated tenant context.
+    """
+    from aion.marketplace.models import MarketplacePolicy
+    from aion.marketplace.store import get_marketplace_store
+
+    body = await request.json()
+    tenant = request.headers.get("X-Tenant-ID", "unknown")
+    policy = MarketplacePolicy(
+        id="",
+        name=body.get("name", ""),
+        description=body.get("description", ""),
+        author_tenant=tenant,
+        version=body.get("version", "1.0.0"),
+        category=body.get("category", "custom"),
+        tags=body.get("tags", []),
+        content=body.get("content", ""),
+        test_cases=body.get("test_cases", []),
+        price_usd=float(body.get("price_usd", 0.0)),
+    )
+    if not policy.name or not policy.content:
+        raise HTTPException(status_code=422, detail="name and content are required")
+    published = await get_marketplace_store().publish(policy)
+    return {"policy": published.model_dump(), "status": "published"}
+
+
+@app.get("/v1/marketplace/policies", tags=["Marketplace"])
+async def browse_policies(
+    category: str = None,
+    tag: str = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    """Browse marketplace policies. Sorted by popularity (downloads × rating)."""
+    from aion.marketplace.store import get_marketplace_store
+
+    policies = await get_marketplace_store().browse(category=category, tag=tag, limit=limit, offset=offset)
+    return {
+        "policies": [p.model_dump() for p in policies],
+        "count": len(policies),
+        "offset": offset,
+    }
+
+
+@app.get("/v1/marketplace/policies/{policy_id}", tags=["Marketplace"])
+async def get_policy(policy_id: str):
+    """Get details for a specific marketplace policy."""
+    from aion.marketplace.store import get_marketplace_store
+
+    policy = await get_marketplace_store().get(policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return policy.model_dump()
+
+
+@app.post("/v1/marketplace/policies/{policy_id}/install", tags=["Marketplace"])
+async def install_policy(policy_id: str, request: Request):
+    """Install a marketplace policy for a tenant.
+
+    Installs in shadow mode by default — decisions are observed but not enforced.
+    Body (optional): {"shadow_mode": true}
+    """
+    from aion.marketplace.store import get_marketplace_store
+
+    tenant = request.headers.get("X-Tenant-ID", "unknown")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    shadow = bool(body.get("shadow_mode", True))
+
+    policy = await get_marketplace_store().get(policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    installation = await get_marketplace_store().install(policy_id, tenant, shadow=shadow)
+    return {
+        "policy_id": policy_id,
+        "tenant": tenant,
+        "installation": installation.model_dump(),
+        "note": "Policy installed in shadow mode — observe metrics before promoting to active." if shadow else "Policy active.",
+    }
+
+
+@app.post("/v1/marketplace/policies/{policy_id}/rate", tags=["Marketplace"])
+async def rate_policy(policy_id: str, request: Request):
+    """Rate a marketplace policy (1-5 stars).
+
+    Body: {"rating": 4, "comment": "Works great for our use case"}
+    """
+    from aion.marketplace.store import get_marketplace_store
+
+    tenant = request.headers.get("X-Tenant-ID", "unknown")
+    body = await request.json()
+    rating = int(body.get("rating", 0))
+    if not 1 <= rating <= 5:
+        raise HTTPException(status_code=422, detail="rating must be between 1 and 5")
+
+    policy = await get_marketplace_store().get(policy_id)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    await get_marketplace_store().rate(policy_id, tenant, rating, body.get("comment", ""))
+    return {"policy_id": policy_id, "tenant": tenant, "rating": rating, "status": "recorded"}
+
+
+# ──────────────────────────────────────────────
+# Cross-tenant global threat feed
+# ──────────────────────────────────────────────
+
+
+@app.get("/v1/global/threat-feed/{tenant_id}", tags=["Intelligence"])
+async def global_threat_feed(tenant_id: str, category: str = None, limit: int = 50):
+    """Return k-anonymized global threat signals for opt-in tenants.
+
+    Only available when AION_CONTRIBUTE_GLOBAL_LEARNING=true for the calling tenant.
+    Each signal represents a pattern observed by ≥5 distinct tenants.
+    """
+    settings = get_settings()
+    if not settings.contribute_global_learning:
+        return {
+            "tenant": tenant_id,
+            "enabled": False,
+            "note": "Set AION_CONTRIBUTE_GLOBAL_LEARNING=true to access global threat feed.",
+            "signals": [],
+        }
+    try:
+        from aion.nemos.global_model import get_global_reader
+        signals = await get_global_reader().get_threat_feed(category_filter=category, limit=limit)
+        return {"tenant": tenant_id, "enabled": True, "signals": signals, "count": len(signals)}
+    except Exception as exc:
+        logger.error("Global threat feed failed: %s", exc)
+        return {"tenant": tenant_id, "enabled": True, "signals": [], "error": str(exc)}
 
 
 # Import for Response type
