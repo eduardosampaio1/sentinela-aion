@@ -161,6 +161,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "stats:read",
         "events:read",
         "models:read",
+        "budget:write",
+        "budget:read",
     },
     Role.OPERATOR: {
         "overrides:write",
@@ -175,6 +177,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "stats:read",
         "events:read",
         "models:read",
+        "budget:write",
+        "budget:read",
     },
     Role.VIEWER: {
         "overrides:read",
@@ -184,6 +188,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "stats:read",
         "events:read",
         "models:read",
+        "budget:read",
     },
 }
 
