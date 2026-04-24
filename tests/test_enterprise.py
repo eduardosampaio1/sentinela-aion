@@ -46,6 +46,7 @@ class TestAdminPathMatching:
     def test_estixe_reload(self):
         assert _is_admin_path("/v1/estixe/intents/reload") is True
         assert _is_admin_path("/v1/estixe/policies/reload") is True
+        assert _is_admin_path("/v1/estixe/guardrails/reload") is True
 
     def test_data_deletion(self):
         assert _is_admin_path("/v1/data/some-tenant") is True
@@ -212,3 +213,110 @@ class TestMiddlewareAuth:
         )
         assert resp.status_code == 400
         assert "invalid_tenant" in resp.json()["error"]["code"]
+
+
+# ══════════════════════════════════════════════
+# Hot Reload: functional endpoint tests
+# ══════════════════════════════════════════════
+
+class TestHotReloadEndpoints:
+    """Prove that each hot-reload endpoint calls the correct real method.
+
+    These tests MUST fail if:
+    - The endpoint is changed to call a non-existent method (wrong symbol)
+    - The reload logic is silently removed or bypassed
+
+    Correct call chain:
+      POST /v1/estixe/intents/reload   → EstixeModule.reload()
+      POST /v1/estixe/policies/reload  → PolicyEngine.reload() via module._policy
+      POST /v1/estixe/guardrails/reload → Guardrails.reload() via module._guardrails
+    """
+
+    @pytest.fixture
+    async def client(self):
+        import os
+        os.environ["AION_ADMIN_KEY"] = "reload-test-key:admin"
+        import aion.config
+        aion.config._settings = None
+        import aion.middleware
+        aion.middleware._redis_client = None
+        aion.middleware._redis_available = False
+
+        from aion.main import app
+        import aion.main as main_mod
+        if main_mod._pipeline is None:
+            main_mod._pipeline = build_pipeline()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+
+        os.environ.pop("AION_ADMIN_KEY", None)
+        aion.config._settings = None
+
+    @pytest.mark.asyncio
+    async def test_intents_reload_calls_estixe_module_reload(self, client):
+        """POST /v1/estixe/intents/reload must call EstixeModule.reload() — not a non-existent method."""
+        from aion.estixe import EstixeModule
+        mock_summary = {
+            "intents": 3, "examples": 15,
+            "risk_categories": 2, "risk_seeds": 10, "risk_shadow_categories": 0,
+        }
+        with patch.object(EstixeModule, "reload", new_callable=AsyncMock) as mock_reload:
+            mock_reload.return_value = mock_summary
+            resp = await client.post(
+                "/v1/estixe/intents/reload",
+                headers={"Authorization": "Bearer reload-test-key"},
+            )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        mock_reload.assert_called_once()
+        body = resp.json()
+        assert body["status"] == "reloaded"
+        assert "intents" in body
+        assert "risk_categories" in body
+
+    @pytest.mark.asyncio
+    async def test_policies_reload_calls_policy_engine_reload(self, client):
+        """POST /v1/estixe/policies/reload must call PolicyEngine.reload() on the live instance."""
+        from aion.estixe.policy import PolicyEngine
+        with patch.object(PolicyEngine, "reload", new_callable=AsyncMock) as mock_reload:
+            resp = await client.post(
+                "/v1/estixe/policies/reload",
+                headers={"Authorization": "Bearer reload-test-key"},
+            )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        mock_reload.assert_called_once()
+        body = resp.json()
+        assert body["status"] == "reloaded"
+        assert "rules" in body
+
+    @pytest.mark.asyncio
+    async def test_guardrails_reload_calls_guardrails_reload(self, client):
+        """POST /v1/estixe/guardrails/reload must call Guardrails.reload() on the live instance."""
+        from aion.estixe.guardrails import Guardrails
+        reload_return = {"status": "reloaded", "pattern_count": 8, "pattern_types": ["email", "phone_number"]}
+        with patch.object(Guardrails, "reload", return_value=reload_return) as mock_reload:
+            resp = await client.post(
+                "/v1/estixe/guardrails/reload",
+                headers={"Authorization": "Bearer reload-test-key"},
+            )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+        mock_reload.assert_called_once()
+        body = resp.json()
+        assert body["status"] == "reloaded"
+        assert "pattern_count" in body
+
+    @pytest.mark.asyncio
+    async def test_reload_requires_auth(self, client):
+        """All reload endpoints require valid auth — rejected without Authorization header."""
+        resp = await client.post("/v1/estixe/intents/reload")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_reload_wrong_key_rejected(self, client):
+        """Reload endpoints reject invalid bearer token."""
+        resp = await client.post(
+            "/v1/estixe/intents/reload",
+            headers={"Authorization": "Bearer totally-wrong"},
+        )
+        assert resp.status_code == 401

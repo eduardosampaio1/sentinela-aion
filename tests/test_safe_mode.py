@@ -339,23 +339,35 @@ class TestKillswitchAPI:
 
     @pytest.fixture
     async def client(self):
+        import os
+        os.environ["AION_ADMIN_KEY"] = "test-admin-key:admin"
+        import aion.config
+        aion.config._settings = None
+        import aion.middleware
+        aion.middleware._redis_client = None
+        aion.middleware._redis_available = False
+
         from aion.main import app
         import aion.main as main_mod
-        # Ensure pipeline is built for test
         if main_mod._pipeline is None:
             main_mod._pipeline = build_pipeline()
+        main_mod._pipeline.deactivate_safe_mode()  # ensure clean state
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
-        # Cleanup: deactivate safe mode after test
+        # Cleanup: deactivate safe mode and reset env/config
         if main_mod._pipeline:
             main_mod._pipeline.deactivate_safe_mode()
+        os.environ.pop("AION_ADMIN_KEY", None)
+        aion.config._settings = None
 
     @pytest.mark.asyncio
     async def test_killswitch_activate_and_request(self, client):
         """Activate killswitch via API, then verify request goes through as passthrough."""
+        admin_headers = {"Authorization": "Bearer test-admin-key"}
+
         # Activate
-        resp = await client.put("/v1/killswitch", json={"reason": "llm_instability"})
+        resp = await client.put("/v1/killswitch", json={"reason": "llm_instability"}, headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["status"] == "safe_mode_active"
 
@@ -386,7 +398,7 @@ class TestKillswitchAPI:
             mock_fwd.assert_called_once()
 
         # Deactivate
-        resp = await client.delete("/v1/killswitch")
+        resp = await client.delete("/v1/killswitch", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["status"] == "normal_mode_restored"
 

@@ -32,6 +32,8 @@ _PII_PATTERNS = [
     (r"\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{8,12}\b", "credit_card"),
     # Phone (international formats)
     (r"\b\+?\d{1,3}[-.\s]?\(?\d{2,3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}\b", "phone_number"),
+    # Brazilian phone — DDD in parentheses, 8-digit landline or 9-digit mobile
+    (r"\(\d{2}\)\s*\d{4,5}-\d{4}", "phone_number"),
     # SSN (US)
     (r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b", "ssn"),
     # Email
@@ -178,6 +180,9 @@ class Guardrails:
           BLOCK — reject the entire request
           AUDIT — detect, don't modify, but record in audited list
         """
+        if content is None:
+            return GuardrailResult(safe=True, violations=[], filtered_content="")
+
         result = GuardrailResult(filtered_content=content)
         policy = pii_policy or PiiPolicyConfig()  # default: mask everything
 

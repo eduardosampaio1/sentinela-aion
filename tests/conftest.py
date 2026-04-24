@@ -15,6 +15,42 @@ os.environ.setdefault("AION_METIS_ENABLED", "false")
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-key")
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_state():
+    """Reset in-process global state between tests to prevent test order pollution.
+
+    Resets: rate limiter, behavior store, module consecutive-failure counters,
+    tenant overrides (in-memory only), and config singleton.
+    Does NOT rebuild the pipeline — too slow and tests handle pipeline state locally.
+    """
+    yield
+    # ── middleware state ─────────────────────────────────────────────────────
+    import aion.middleware as mw
+    mw._local_rate_limits.clear()
+    mw._local_overrides.clear()
+    mw._redis_client = None
+    mw._redis_available = False
+
+    # ── metis behavior store ─────────────────────────────────────────────────
+    try:
+        from aion.metis.behavior import _behavior_store
+        _behavior_store.clear()
+    except Exception:
+        pass
+
+    # ── pipeline: reset module failure counters and safe mode ─────────────────
+    import aion.main as main_mod
+    if main_mod._pipeline is not None:
+        main_mod._pipeline.deactivate_safe_mode()
+        for status in main_mod._pipeline._module_status.values():
+            status.consecutive_failures = 0
+            status.healthy = True
+
+    # ── config singleton ─────────────────────────────────────────────────────
+    import aion.config
+    aion.config._settings = None
+
+
 @pytest.fixture
 def chat_request_data():
     """Basic chat completion request payload."""
