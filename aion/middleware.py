@@ -27,7 +27,7 @@ _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 # ── Admin paths ──
 _ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit"}
-_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/")
+_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/")
 
 # ── RBAC: map (method, path_prefix) → required permission ──
 _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
@@ -49,6 +49,17 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
     # Calibration (shadow mode) — read available to operators, mutations require admin
     ("GET", "/v1/calibration/", "overrides:read"),
     ("POST", "/v1/calibration/", "overrides:write"),
+    # Budget cap — write requires admin or operator
+    ("PUT", "/v1/budget/", "budget:write"),
+    ("GET", "/v1/budget/", "budget:read"),
+    # Threat signals — security intel, operator read-only
+    ("GET", "/v1/threats/", "audit:read"),
+    # Executive reports
+    ("GET", "/v1/reports/", "audit:read"),
+    ("POST", "/v1/reports/", "budget:write"),
+    ("DELETE", "/v1/reports/", "budget:write"),
+    # Admin operations (key rotation etc.) — admin only
+    ("POST", "/v1/admin/", "killswitch:write"),
 ]
 
 # ── Permissions that require auth even when AION_ADMIN_KEY is not configured ──
@@ -243,10 +254,26 @@ async def _check_rate_limit(key: str, limit: int) -> bool:
 
 # ════════════════════════════════════════════
 # Audit — Redis list per tenant, local fallback
+# Hash-chaining: each entry carries prev_hash for tamper evidence (SOC 2).
 # ════════════════════════════════════════════
 
+# In-process chain tips per tenant (authoritative within one replica).
+_chain_tips: dict[str, str] = {}
+
+
+def _hash_entry(entry: dict) -> str:
+    import hashlib
+    serialized = json.dumps({k: v for k, v in entry.items() if k != "entry_hash"}, sort_keys=True, default=str)
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
 async def audit(action: str, request: Request, tenant: str, details: str = "") -> None:
-    """Record audit event. Redis + local buffer."""
+    """Record audit event with hash chaining. Redis + local buffer.
+
+    Each entry includes prev_hash (SHA-256 of previous entry) to form a
+    tamper-evident chain. Cross-replica chains merge at the Redis layer.
+    """
+    prev_hash = _chain_tips.get(tenant, "0" * 64)
     entry = {
         "timestamp": time.time(),
         "action": action,
@@ -255,7 +282,10 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         "ip": request.client.host if request.client else "unknown",
         "tenant": tenant,
         "details": details,
+        "prev_hash": prev_hash,
     }
+    entry["entry_hash"] = _hash_entry(entry)
+    _chain_tips[tenant] = entry["entry_hash"]
 
     # Always write to local buffer (fallback + fast read)
     _local_audit_log.append(entry)
