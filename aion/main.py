@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -370,6 +371,15 @@ if _settings_cors.cors_origins:
 
 
 # ──────────────────────────────────────────────
+# Global exception handlers
+# ──────────────────────────────────────────────
+
+@app.exception_handler(RequestValidationError)
+async def _handle_request_validation_error(request: Request, exc: RequestValidationError):
+    return _error_response(422, f"Request validation error: {exc}", "validation_error", "invalid_request_error")
+
+
+# ──────────────────────────────────────────────
 # OpenAI-compatible endpoints
 # ──────────────────────────────────────────────
 
@@ -461,7 +471,7 @@ async def decide(request: Request):
     try:
         chat_request = ChatCompletionRequest(**body)
     except Exception as e:
-        return _error_response(400, f"Invalid request format: {e}", "invalid_request")
+        return _error_response(422, f"Invalid request format: {e}", "validation_error", "invalid_request_error")
 
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     context = PipelineContext(
@@ -536,7 +546,10 @@ async def chat_completions(request: Request):
     if len(messages) > 100:
         return _error_response(400, "Too many messages (max 100)", "too_many_messages", "invalid_request")
 
-    chat_request = ChatCompletionRequest(**body)
+    try:
+        chat_request = ChatCompletionRequest(**body)
+    except Exception as e:
+        return _error_response(422, f"Invalid request format: {e}", "validation_error", "invalid_request_error")
 
     # Resolve tenant
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
@@ -893,7 +906,7 @@ async def chat_assisted(request: Request):
     try:
         chat_request = ChatCompletionRequest(**body)
     except Exception as exc:
-        return _error_response(400, f"Invalid request: {exc}", "invalid_request")
+        return _error_response(422, f"Invalid request: {exc}", "validation_error", "invalid_request_error")
 
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
 
@@ -987,7 +1000,7 @@ async def decisions(request: Request):
     try:
         chat_request = ChatCompletionRequest(**body)
     except Exception as exc:
-        return _error_response(400, f"Invalid request: {exc}", "invalid_request")
+        return _error_response(422, f"Invalid request: {exc}", "validation_error", "invalid_request_error")
 
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
 
@@ -1124,7 +1137,9 @@ async def health():
 
     if degraded_components:
         health_data["degraded_components"] = degraded_components
-        health_data["mode"] = "degraded"
+        # Safe mode takes priority — don't downgrade "safe" to "degraded".
+        if health_data.get("mode") == "normal":
+            health_data["mode"] = "degraded"
 
     mode = health_data.get("mode", "unknown")
     status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503

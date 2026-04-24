@@ -125,6 +125,28 @@ class TestE2EAPI:
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
 
+    @pytest.fixture
+    async def admin_client(self):
+        """Client with AION_ADMIN_KEY configured for tests that hit destructive admin endpoints."""
+        import os
+        os.environ["AION_ADMIN_KEY"] = "test-e2e-admin:admin"
+        import aion.config
+        aion.config._settings = None
+        import aion.middleware
+        aion.middleware._redis_client = None
+        aion.middleware._redis_available = False
+
+        from aion.main import app
+        import aion.main as main_mod
+        if main_mod._pipeline is None:
+            main_mod._pipeline = build_pipeline()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+
+        os.environ.pop("AION_ADMIN_KEY", None)
+        aion.config._settings = None
+
     @pytest.mark.asyncio
     async def test_full_request_response_cycle(self, client):
         """Complete request → pipeline → LLM mock → response."""
@@ -189,9 +211,12 @@ class TestE2EAPI:
         assert resp.json()["enabled"] is True
 
     @pytest.mark.asyncio
-    async def test_data_deletion(self, client):
-        """LGPD: delete tenant data."""
-        resp = await client.delete("/v1/data/test-tenant")
+    async def test_data_deletion(self, admin_client):
+        """LGPD: delete tenant data requires admin auth."""
+        resp = await admin_client.delete(
+            "/v1/data/test-tenant",
+            headers={"Authorization": "Bearer test-e2e-admin"},
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
 

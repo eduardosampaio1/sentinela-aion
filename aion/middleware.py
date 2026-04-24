@@ -51,6 +51,10 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
     ("POST", "/v1/calibration/", "overrides:write"),
 ]
 
+# ── Permissions that require auth even when AION_ADMIN_KEY is not configured ──
+# Fail-secure: destructive operations block unless a key is explicitly set.
+_CRITICAL_PERMISSIONS = {"killswitch:write", "data:delete"}
+
 # ── API key → role mapping (loaded from config) ──
 # Format in env: AION_ADMIN_KEY=key1:admin,key2:operator,key3:viewer
 def _parse_key_roles(admin_key_str: str) -> dict[str, str]:
@@ -445,6 +449,20 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                             "message": f"Forbidden: role '{role}' lacks '{required_perm}'",
                             "type": "auth_error",
                             "code": "forbidden",
+                        }},
+                    )
+            else:
+                # No key configured — block destructive operations (fail-secure).
+                # Non-destructive admin ops (audit reads, module toggles) still pass through
+                # so development environments without AION_ADMIN_KEY are not blocked entirely.
+                required_perm = _resolve_permission(request.method, path)
+                if required_perm in _CRITICAL_PERMISSIONS:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {
+                            "message": "This operation requires authentication. Set AION_ADMIN_KEY.",
+                            "type": "auth_error",
+                            "code": "auth_not_configured",
                         }},
                     )
 
