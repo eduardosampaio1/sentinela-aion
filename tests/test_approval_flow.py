@@ -10,11 +10,16 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    from unittest.mock import MagicMock
+    from aion.license import LicenseState
+    mock_lic = MagicMock()
+    mock_lic.state = LicenseState.ACTIVE
+    monkeypatch.setattr("aion.license.validate_license_or_abort", lambda: mock_lic)
     from aion import config as cfg
     cfg._settings = None
     from aion.main import app
-    with TestClient(app) as c:
+    with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
