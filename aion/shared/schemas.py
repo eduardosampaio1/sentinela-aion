@@ -114,6 +114,9 @@ class PipelineContext(BaseModel):
     module_latencies: dict[str, float] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # --- Multi-turn session tracking ---
+    session_id: Optional[str] = None  # derived from tenant + first message anchor
+
     # --- Formal module results (populated alongside metadata for backward compat) ---
     # Typed as Any to avoid circular import with aion.shared.contracts. Each module
     # populates its respective result instance; metadata is the legacy/extensibility

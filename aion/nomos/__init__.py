@@ -46,7 +46,13 @@ class NomosModule:
         except Exception:
             pass  # NEMOS unavailable — route with defaults
 
-        route = self._router.route(request, context, performances=performances)
+        # Multi-turn: derive complexity floor from prior turns (prevents downgrade on follow-ups)
+        complexity_floor = 0.0
+        turn_ctx = context.metadata.get("turn_context")
+        if turn_ctx is not None:
+            complexity_floor = turn_ctx.max_complexity * 0.7
+
+        route = self._router.route(request, context, performances=performances, complexity_floor=complexity_floor)
 
         context.selected_model = route.model_name
         context.selected_provider = route.provider

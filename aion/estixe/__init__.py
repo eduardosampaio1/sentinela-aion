@@ -211,6 +211,44 @@ class EstixeModule:
             context, tenant_thresholds, self._risk_classifier._risks
         )
 
+        # ── Multi-turn: risk escalation + intent continuity ──
+        # Multi-turn risk escalation: tighten thresholds when prior turn had high risk.
+        turn_ctx = context.metadata.get("turn_context")
+        prior_intent: str | None = None
+        if turn_ctx is not None:
+            prior_risk = turn_ctx.max_risk_score
+            if prior_risk >= 0.7:
+                delta = min(prior_risk - 0.65, 0.10)
+                threshold_overrides = {
+                    k: max(0.55, v - delta)
+                    for k, v in (threshold_overrides or {}).items()
+                }
+                context.metadata["turn_risk_escalation"] = round(prior_risk, 3)
+                logger.debug(
+                    "Multi-turn risk escalation: prior_risk=%.3f delta=%.3f", prior_risk, delta
+                )
+            # Intent continuity: carry forward the last detected intent as a hint
+            prior_intent = turn_ctx.last_intent
+            if prior_intent:
+                context.metadata["prior_turn_intent"] = prior_intent
+                logger.debug("Multi-turn intent continuity: prior_intent=%s", prior_intent)
+
+            # Threat detection: analyze cross-turn patterns (fire-and-forget)
+            import asyncio as _asyncio
+            if turn_ctx.turns and context.session_id:
+                try:
+                    from aion.estixe.threat_detector import get_threat_detector
+                    _td = _asyncio.create_task(
+                        get_threat_detector().analyze(
+                            context.tenant, context.session_id, turn_ctx.turns
+                        )
+                    )
+                    from aion.pipeline import _BG_TASKS
+                    _BG_TASKS.add(_td)
+                    _td.add_done_callback(_BG_TASKS.discard)
+                except Exception:
+                    pass
+
         # P5: Scan all messages (system + historical user) before the last user message
         scan_block = await self._scan_all_messages(
             request.messages, pii_policy, context, threshold_overrides=threshold_overrides
@@ -343,6 +381,7 @@ class EstixeModule:
             user_message, context,
             block_min_threshold=self._settings.block_min_threshold,
             bypass_threshold=effective_threshold,
+            prior_intent=prior_intent,
         )
 
         if bypass_result.should_block:

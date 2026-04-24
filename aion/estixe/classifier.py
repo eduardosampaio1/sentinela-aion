@@ -114,7 +114,13 @@ class SemanticClassifier:
             total_examples,
         )
 
-    def classify(self, text: str, block_min_threshold: float | None = None, bypass_threshold: float | None = None) -> Optional[IntentMatch]:
+    def classify(
+        self,
+        text: str,
+        block_min_threshold: float | None = None,
+        bypass_threshold: float | None = None,
+        prior_intent: str | None = None,
+    ) -> Optional[IntentMatch]:
         """Classify user input against known intents.
 
         Returns the best match if confidence >= bypass_threshold, else None.
@@ -124,6 +130,9 @@ class SemanticClassifier:
             block_min_threshold: If set, action=block intents require confidence >= this value
                 (separate from bypass_threshold to prevent dynamic relaxation from lowering
                 the bar for blocking decisions). If None, no extra floor is applied.
+            prior_intent: Intent name from the previous turn. When the best match is the
+                same non-block intent, applies a small continuity boost (+0.04) to help
+                follow-up questions that are slightly below threshold.
         """
         model = get_embedding_model()
         if not model.loaded or not self._intents:
@@ -147,6 +156,11 @@ class SemanticClassifier:
             similarities = intent.embeddings @ input_embedding
             max_idx = int(np.argmax(similarities))
             max_sim = float(similarities[max_idx])
+
+            # Intent continuity: small boost for same non-block intent from prior turn.
+            # Only applied to non-block intents to avoid lowering the security bar.
+            if prior_intent and intent.name == prior_intent and intent.action != "block":
+                max_sim = min(1.0, max_sim + 0.04)
 
             if max_sim > best_confidence:
                 best_confidence = max_sim

@@ -8,6 +8,7 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Protocol, runtime_checkable
@@ -22,6 +23,9 @@ from aion.shared.schemas import (
 from aion.shared.telemetry import TelemetryEvent, emit
 
 logger = logging.getLogger("aion.pipeline")
+
+# Strong references to fire-and-forget background tasks — prevents GC before completion.
+_BG_TASKS: set[asyncio.Task] = set()
 
 
 @runtime_checkable
@@ -229,6 +233,17 @@ class Pipeline:
             context.metadata["safe_mode"] = True
             return context
 
+        # ── Multi-turn context: load last 3 turns (fail-open) ──
+        settings = get_settings()
+        if settings.multi_turn_context and context.session_id:
+            try:
+                from aion.shared.turn_context import get_turn_context_store
+                turn_ctx = await get_turn_context_store().load(context.tenant, context.session_id)
+                if turn_ctx:
+                    context.metadata["turn_context"] = turn_ctx
+            except Exception:
+                logger.debug("Multi-turn context load failed (non-critical)", exc_info=True)
+
         # ── Semantic Cache: early exit (before any module) ──
         try:
             from aion.cache import get_cache
@@ -250,8 +265,6 @@ class Pipeline:
         except Exception:
             logger.warning("Cache lookup failed — continuing pipeline", exc_info=True)
             context.metadata["cache_hit"] = False
-
-        settings = get_settings()
 
         for module in self._pre_modules:
             if context.decision != Decision.CONTINUE:
@@ -292,6 +305,90 @@ class Pipeline:
                 _tenant_for_run, context.tenant,
             )
             context.tenant = _tenant_for_run
+
+        # ── Multi-turn context + session audit: save current turn (fire-and-forget) ──
+        if settings.multi_turn_context and context.session_id:
+            try:
+                from aion.shared.turn_context import TurnSummary, TurnContext, get_turn_context_store
+                from aion.shared.session_audit import TurnAuditEntry, _hash_message, get_session_audit_store
+
+                now = time.time()
+                intent = context.metadata.get("detected_intent")
+                complexity = float(context.metadata.get("complexity_score", 0.0))
+                pii_types = list(context.metadata.get("pii_violations", []))
+                risk_score = float(context.metadata.get("risk_confidence", 0.0))
+                decision_val = context.decision.value
+                policies = []
+                if context.estixe_result:
+                    policies = list(getattr(context.estixe_result, "policy_matched", []))
+
+                # TurnContext (session state for pipeline decisions)
+                turn = TurnSummary(
+                    intent=intent,
+                    complexity=complexity,
+                    model_used=context.selected_model or "",
+                    pii_types=pii_types,
+                    risk_score=risk_score,
+                    decision=decision_val,
+                    timestamp=now,
+                )
+                turn_ctx = context.metadata.get("turn_context") or TurnContext(
+                    session_id=context.session_id, tenant=context.tenant
+                )
+                turn_ctx.add_turn(turn)
+                _t1 = asyncio.create_task(get_turn_context_store().save(context.tenant, turn_ctx))
+                _BG_TASKS.add(_t1)
+                _t1.add_done_callback(_BG_TASKS.discard)
+
+                # TurnAuditEntry (session audit trail for compliance)
+                req = context.original_request
+                last_user_content = None
+                if req and req.messages:
+                    for m in reversed(req.messages):
+                        if getattr(m, "role", "") == "user":
+                            last_user_content = getattr(m, "content", None)
+                            break
+                audit_entry = TurnAuditEntry(
+                    request_id=context.request_id,
+                    timestamp=now,
+                    user_message_hash=_hash_message(last_user_content),
+                    decision=decision_val,
+                    model_used=context.selected_model,
+                    pii_types_detected=pii_types,
+                    risk_score=risk_score,
+                    intent_detected=intent,
+                    policies_matched=policies,
+                    tokens_sent=context.tokens_after,
+                    tokens_received=0,  # populated post-LLM if available
+                    latency_ms=sum(context.module_latencies.values()),
+                )
+                _t2 = asyncio.create_task(
+                    get_session_audit_store().append_turn(context.tenant, context.session_id, audit_entry)
+                )
+                _BG_TASKS.add(_t2)
+                _t2.add_done_callback(_BG_TASKS.discard)
+            except Exception:
+                logger.debug("Multi-turn context/audit save failed (non-critical)", exc_info=True)
+
+        # ── Cross-tenant learning (opt-in) ──
+        if settings.contribute_global_learning:
+            try:
+                estixe_result = context.estixe_result
+                intent_cat = getattr(estixe_result, "intent_detected", None) if estixe_result else None
+                risk_score = context.metadata.get("risk_confidence", 0.0)
+                risk_tier = context.metadata.get("risk_level", "none") or "none"
+                complexity = context.nomos_result.complexity_score if context.nomos_result else 0.0
+                decision = context.decision.value if context.decision else "continue"
+                from aion.nemos.global_model import get_global_contributor
+                _t3 = asyncio.create_task(
+                    get_global_contributor().record(
+                        context.tenant, intent_cat, risk_tier, complexity, decision
+                    )
+                )
+                _BG_TASKS.add(_t3)
+                _t3.add_done_callback(_BG_TASKS.discard)
+            except Exception:
+                logger.debug("Global learning contribution failed (non-critical)", exc_info=True)
 
         return context
 
