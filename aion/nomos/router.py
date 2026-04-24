@@ -80,14 +80,22 @@ class Router:
         request: ChatCompletionRequest,
         context: PipelineContext,
         performances: dict[str, ModelPerformance] | None = None,
+        complexity_floor: float = 0.0,
     ) -> RouteDecision:
         """Route request to the best model."""
         # Classify complexity
         messages = [m.model_dump() for m in request.messages]
         complexity = self._classifier.classify(messages)
 
+        # Multi-turn: don't downgrade model for follow-ups to complex turns
+        effective_complexity = max(complexity.score, complexity_floor)
+        if effective_complexity > complexity.score:
+            logger.debug(
+                "Complexity floor applied: %.3f → %.3f (multi-turn)", complexity.score, effective_complexity
+            )
+
         # Find models that match this complexity
-        candidates = self._registry.get_models_for_complexity(complexity.score)
+        candidates = self._registry.get_models_for_complexity(effective_complexity)
 
         if not candidates:
             candidates = self._registry.get_available_models()
@@ -98,13 +106,13 @@ class Router:
                 model_name=request.model,
                 provider="openai",
                 base_url=None,
-                complexity_score=complexity.score,
+                complexity_score=effective_complexity,
                 reason="no_models_available_fallback",
             )
 
         # Pick the best model
         selected, breakdown, pii_influenced, is_exploration = self._select_best(
-            candidates, complexity.score, context, performances,
+            candidates, effective_complexity, context, performances,
         )
 
         # Compute decision confidence
@@ -116,8 +124,8 @@ class Router:
             model_name=selected.name,
             provider=selected.provider,
             base_url=selected.base_url,
-            complexity_score=complexity.score,
-            reason=self._explain(selected, complexity.score, candidates),
+            complexity_score=effective_complexity,
+            reason=self._explain(selected, effective_complexity, candidates),
             estimated_cost=selected.estimated_cost_per_request,
             score_breakdown=breakdown,
             candidates_evaluated=len(candidates),

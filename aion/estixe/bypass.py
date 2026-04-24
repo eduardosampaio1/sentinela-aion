@@ -47,6 +47,7 @@ class BypassEngine:
         context: PipelineContext,
         block_min_threshold: float | None = None,
         bypass_threshold: float | None = None,
+        prior_intent: str | None = None,
     ) -> BypassResult:
         """Check if the user message can be bypassed.
 
@@ -55,11 +56,13 @@ class BypassEngine:
             bypass_threshold: Override for bypass threshold — passed directly to classify()
                 instead of mutating the shared settings object (prevents race conditions
                 under concurrent load).
+            prior_intent: Intent from the previous turn (intent continuity hint).
         """
         match = self._classifier.classify(
             user_message,
             block_min_threshold=block_min_threshold,
             bypass_threshold=bypass_threshold,
+            prior_intent=prior_intent,
         )
 
         if match is None:

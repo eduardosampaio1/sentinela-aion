@@ -70,6 +70,15 @@ class AionSettings(BaseSettings):
     chat_rate_limit: int = 100  # Requests/min per tenant+IP for chat endpoint
     admin_rate_limit: int = 10  # Requests/min per tenant+IP for admin endpoints
 
+    # --- Multi-turn context ---
+    multi_turn_context: bool = False  # opt-in: AION_MULTI_TURN_CONTEXT=true
+
+    # --- Cross-tenant learning ---
+    contribute_global_learning: bool = False  # AION_CONTRIBUTE_GLOBAL_LEARNING=true
+
+    # --- Data residency ---
+    data_residency: str = ""  # e.g. "BR" (Brazil), "EU", "US" — informational for compliance
+
     # --- Data retention ---
     telemetry_retention_hours: int = 168  # 7 days default
 
