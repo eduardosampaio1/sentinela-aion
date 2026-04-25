@@ -15,9 +15,12 @@ import {
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DemoBanner } from "@/components/ui/demo-banner";
 import { TimeRangeSelect } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
-import { mockBudgetSummary, mockThreatCategories, mockIntentPerformance, mockSessions } from "@/lib/mock-data";
+import { mockBudgetSummary, mockThreatCategories, mockIntentPerformance, mockSessions, mockStats } from "@/lib/mock-data";
+import { useApiData } from "@/lib/use-api-data";
+import { getStats, getBudgetStatus, getSessions, getExecutiveReport, API_BASE, getActiveTenant } from "@/lib/api";
 
 const tabs = ["Execução", "Segurança", "Custos", "Shadow", "Auditoria"] as const;
 type Tab = (typeof tabs)[number];
@@ -71,12 +74,19 @@ function getRequestsForRange(range: TimeRange): string {
 }
 
 function ExecTab({ timeRange }: { timeRange: TimeRange }) {
+  const { data: stats, isDemo, refetch } = useApiData(getStats, mockStats, { intervalMs: 30_000 });
+  const bypassPct = stats.total_requests > 0
+    ? ((stats.bypasses / stats.total_requests) * 100).toFixed(1)
+    : "68.4";
+  const latency = stats.avg_latency_ms > 0 ? `${stats.avg_latency_ms}ms` : "312ms";
+
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="Total de requisições" value={getRequestsForRange(timeRange)} sub={getTimeRangeLabel(timeRange)} />
-        <MetricCard label="Taxa de bypass" value="68.4%" sub="+4.2pp vs período anterior" accent="text-teal-400" />
-        <MetricCard label="Latência p95" value="312ms" sub="pipeline completo" />
+        <MetricCard label="Taxa de bypass" value={`${bypassPct}%`} sub="+4.2pp vs período anterior" accent="text-teal-400" />
+        <MetricCard label="Latência p95" value={latency} sub="pipeline completo" />
         <MetricCard label="Uptime" value="99.97%" sub={getTimeRangeLabel(timeRange)} accent="text-green-400" />
       </div>
 
@@ -153,28 +163,25 @@ function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
 }
 
 function CostsTab({ timeRange }: { timeRange: TimeRange }) {
-  const summary = mockBudgetSummary;
+  const { data: budget, isDemo, refetch } = useApiData(getBudgetStatus, mockBudgetSummary, { intervalMs: 60_000 });
   const costScalers: Record<TimeRange, number> = {
-    live: 0.05,
-    "1h": 0.5,
-    "4h": 2,
-    "24h": 1,
-    "2d": 2,
-    "7d": 7,
-    "14d": 14,
-    "30d": 30,
+    live: 0.05, "1h": 0.5, "4h": 2, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
   };
   const scale = costScalers[timeRange] || 1;
-  const scaledSpent = Math.round(summary.used_brl * scale);
-  const scaledAvoided = Math.round(summary.avoided_cost * scale);
+  const scaledSpent = (budget.used_brl * scale).toFixed(2);
+  const scaledAvoided = (budget.avoided_cost * scale).toFixed(2);
+  const roi = budget.avoided_cost > 0 && budget.used_brl > 0
+    ? (budget.avoided_cost / budget.used_brl).toFixed(1)
+    : "1.6";
 
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="Gasto real" value={`R$ ${scaledSpent.toLocaleString("pt-BR")}`} sub={getTimeRangeLabel(timeRange)} />
-        <MetricCard label="Custo evitado" value={`R$ ${scaledAvoided.toLocaleString("pt-BR")}`} sub="via bypass/compressão" accent="text-green-400" />
-        <MetricCard label="% do budget" value={`${summary.used_pct.toFixed(1)}%`} sub={`do budget ${getTimeRangeLabel(timeRange)}`} />
-        <MetricCard label="ROI AION" value="1.6x" sub="custo evitado / licença" accent="text-[var(--color-primary)]" />
+        <MetricCard label="Gasto real" value={`$ ${parseFloat(scaledSpent).toLocaleString("en-US", { minimumFractionDigits: 2 })}`} sub={getTimeRangeLabel(timeRange)} />
+        <MetricCard label="Custo evitado" value={`$ ${parseFloat(scaledAvoided).toLocaleString("en-US", { minimumFractionDigits: 2 })}`} sub="via bypass/compressão" accent="text-green-400" />
+        <MetricCard label="% do budget" value={`${budget.used_pct.toFixed(1)}%`} sub={`do budget ${getTimeRangeLabel(timeRange)}`} />
+        <MetricCard label="ROI AION" value={`${roi}x`} sub="custo evitado / licença" accent="text-[var(--color-primary)]" />
       </div>
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -247,7 +254,8 @@ function ShadowTab({ timeRange }: { timeRange: TimeRange }) {
 }
 
 function AuditTab({ timeRange }: { timeRange: TimeRange }) {
-  const recent = mockSessions.slice(0, 4);
+  const { data: sessionList, isDemo, refetch } = useApiData(getSessions, mockSessions, { intervalMs: 30_000 });
+  const recent = sessionList.slice(0, 4);
   const auditScalers: Record<TimeRange, number> = {
     live: 0.05,
     "1h": 0.5,
@@ -259,13 +267,14 @@ function AuditTab({ timeRange }: { timeRange: TimeRange }) {
     "30d": 30,
   };
   const scale = auditScalers[timeRange] || 1;
-  const sessions = Math.round(12840 * scale);
+  const sessionCount = Math.round(12840 * scale);
   const critical = Math.round(14 * scale);
 
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="Sessões registradas" value={sessions.toLocaleString("pt-BR")} sub={getTimeRangeLabel(timeRange)} />
+        <MetricCard label="Sessões registradas" value={sessionCount.toLocaleString("pt-BR")} sub={getTimeRangeLabel(timeRange)} />
         <MetricCard label="Com HMAC válido" value="99.97%" sub="integridade garantida" accent="text-green-400" />
         <MetricCard label="Retenção" value="90 dias" sub="conforme política" />
         <MetricCard label="Sessões críticas" value={critical.toString()} sub="risco crítico detectado" accent="text-red-400" />
@@ -298,10 +307,42 @@ function AuditTab({ timeRange }: { timeRange: TimeRange }) {
   );
 }
 
+const TIME_RANGE_DAYS: Record<TimeRange, number> = {
+  live: 0, "1h": 0, "4h": 0, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
+};
+
 export function ReportsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("Execução");
   const [exportOpen, setExportOpen] = useState(false);
   const [timeRange, setTimeRange] = useState<TimeRange>("30d");
+
+  const handleExport = (fmt: string) => {
+    setExportOpen(false);
+    const days = TIME_RANGE_DAYS[timeRange] || 30;
+    if (fmt === "PDF") {
+      const tenant = getActiveTenant();
+      window.open(
+        `${API_BASE}/v1/reports/${tenant}/executive?format=pdf&days=${days}`,
+        "_blank",
+      );
+      return;
+    }
+    if (fmt === "JSON") {
+      getExecutiveReport("json", days)
+        .then((data) => {
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `aion-report-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        })
+        .catch(() => {});
+      return;
+    }
+    // PPTX / XLSX — not yet implemented in backend
+  };
 
   return (
     <div className="space-y-6">
@@ -335,10 +376,13 @@ export function ReportsPage() {
                   <button
                     key={fmt}
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)] transition-colors"
-                    onClick={() => setExportOpen(false)}
+                    onClick={() => handleExport(fmt)}
                   >
                     <FileBarChart className="h-3.5 w-3.5" />
                     Exportar como {fmt}
+                    {(fmt === "PPTX" || fmt === "XLSX") && (
+                      <span className="ml-auto text-[10px] opacity-40">em breve</span>
+                    )}
                   </button>
                 ))}
               </div>

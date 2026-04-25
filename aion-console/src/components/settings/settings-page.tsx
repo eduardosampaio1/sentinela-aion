@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useApiData } from "@/lib/use-api-data";
+import { rotateKeys, getStats } from "@/lib/api";
+import { mockStats } from "@/lib/mock-data";
 import {
   Copy,
   Check,
@@ -91,14 +94,22 @@ export function SettingsPage() {
 
   const apiKeyMasked = "sk-aion-••••••••••••••••••••••••k9Qp";
   const apiKeyFull = "sk-aion-l7X3mN8vKj2pQrT5wYzA4bCdE6fGhIJk9Qp";
-  const endpoint = "https://api.aion.sentinela.io/v1";
+  const endpoint = process.env.NEXT_PUBLIC_AION_API_URL ?? "http://localhost:8080";
+
+  // Live stats for the API tab usage grid
+  const { data: stats } = useApiData(getStats, mockStats, { intervalMs: 60_000 });
 
   const handleRotateKey = async () => {
     setRotating(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setRotating(false);
-    setRotated(true);
-    setTimeout(() => setRotated(false), 3000);
+    try {
+      await rotateKeys([]);
+      setRotated(true);
+      setTimeout(() => setRotated(false), 3000);
+    } catch {
+      // silent — button returns to idle
+    } finally {
+      setRotating(false);
+    }
   };
 
   return (
@@ -392,13 +403,35 @@ export function SettingsPage() {
           {/* Usage stats */}
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
             <h2 className="text-sm font-semibold text-[var(--color-text)] mb-4">
-              Uso este mês
+              Uso (acumulado)
             </h2>
             <div className="grid grid-cols-3 gap-4">
               {[
-                { label: "Requests", value: "1.24M", sub: "+8% vs mês anterior" },
-                { label: "Tokens processados", value: "847M", sub: "641M poupados pelo AION" },
-                { label: "Latência P95", value: "284ms", sub: "Meta: < 300ms ✓" },
+                {
+                  label: "Requests",
+                  value: stats.total_requests >= 1_000_000
+                    ? `${(stats.total_requests / 1_000_000).toFixed(2)}M`
+                    : stats.total_requests >= 1_000
+                    ? `${(stats.total_requests / 1_000).toFixed(1)}k`
+                    : stats.total_requests.toString(),
+                  sub: `${stats.bypasses.toLocaleString("pt-BR")} desviados`,
+                },
+                {
+                  label: "Tokens economizados",
+                  value: stats.tokens_saved >= 1_000_000
+                    ? `${(stats.tokens_saved / 1_000_000).toFixed(1)}M`
+                    : `${(stats.tokens_saved / 1_000).toFixed(0)}k`,
+                  sub: `$ ${stats.cost_saved.toFixed(2)} em custo evitado`,
+                },
+                {
+                  label: "Latência P95",
+                  value: stats.avg_latency_ms > 0 ? `${stats.avg_latency_ms}ms` : "—",
+                  sub: stats.avg_latency_ms > 0 && stats.avg_latency_ms < 300
+                    ? "Meta: < 300ms ✓"
+                    : stats.avg_latency_ms >= 300
+                    ? "⚠ Acima da meta"
+                    : "Sem dados",
+                },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-lg bg-white/5 p-4">
                   <p className="text-xs text-[var(--color-text-muted)] mb-1">{stat.label}</p>

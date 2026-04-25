@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Users, Shield, Key, RefreshCw, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { mockAdminRoles, mockIdentityProviders } from "@/lib/mock-data";
+import { rotateKeys } from "@/lib/api";
 
 const roleColors: Record<string, string> = {
   red: "bg-red-900/30 text-red-400 border-red-800/50",
@@ -32,6 +33,7 @@ export function AdminPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [keysRotatedAt, setKeysRotatedAt] = useState<Date | null>(null);
 
   const handleOpenConfirm = (actionType: AdminActionType, roleName?: string, idpName?: string) => {
     setSelectedAction(actionType);
@@ -45,14 +47,20 @@ export function AdminPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (selectedAction === "rotate-keys") {
+        await rotateKeys([]);
+        setKeysRotatedAt(new Date());
+      } else {
+        // Actions without backend endpoint yet — simulate locally
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
       setShowConfirm(false);
-      setSaving(false);
       setSelectedAction(null);
       setSelectedRoleName(null);
       setSelectedIdPName(null);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Erro ao processar ação");
+    } finally {
       setSaving(false);
     }
   };
@@ -339,7 +347,16 @@ export function AdminPage() {
         <div className="space-y-4">
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-border)]">
             {[
-              { label: "Rotação de chaves HMAC", desc: "Última rotação: 7 dias atrás", action: "Rotacionar agora", icon: RefreshCw, status: "ok", actionType: "rotate-keys" as AdminActionType },
+              {
+                label: "Rotação de chaves HMAC",
+                desc: keysRotatedAt
+                  ? `Última rotação: agora às ${keysRotatedAt.toLocaleTimeString("pt-BR")}`
+                  : "Última rotação: 7 dias atrás",
+                action: "Rotacionar agora",
+                icon: RefreshCw,
+                status: keysRotatedAt ? "ok" : "ok",
+                actionType: "rotate-keys" as AdminActionType,
+              },
               { label: "Tempo de sessão admin", desc: "Expiração automática em 8 horas", action: "Alterar", icon: Clock, status: "ok", actionType: "session-timeout" as AdminActionType },
               { label: "Autenticação multifator", desc: "Obrigatório para Super Admin e Security Analyst", action: "Configurar", icon: Shield, status: "ok", actionType: "configure-mfa" as AdminActionType },
               { label: "IP allowlist", desc: "4 faixas de IP configuradas", action: "Gerenciar", icon: Key, status: "warning", actionType: "manage-allowlist" as AdminActionType },
