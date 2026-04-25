@@ -10,7 +10,6 @@ import {
   Shield,
   Gauge,
   ArrowRight,
-  CheckCircle2,
   AlertTriangle,
   Bell,
   BellOff,
@@ -401,16 +400,14 @@ export function OperationsPage() {
                 <th className="px-4 py-3">Entrada</th>
                 <th className="px-4 py-3">Decisão</th>
                 <th className="px-4 py-3">Modelo</th>
-                <th className="px-4 py-3">HMAC</th>
                 <th className="px-4 py-3 text-right">Tempo</th>
                 <th className="px-4 py-3 text-right">Custo</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((evt, idx) => {
+              {filtered.map((evt) => {
                 const dc = decisionConfig[evt.decision] || decisionConfig.error;
                 const sessionId = `sess_${evt.id.slice(-4)}`;
-                const hmacValid = idx % 7 !== 3;
                 return (
                   <tr
                     key={evt.id}
@@ -439,13 +436,6 @@ export function OperationsPage() {
                     </td>
                     <td className="px-4 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
                       {evt.model_used || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {hmacValid ? (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400" aria-label="HMAC válido" />
-                      ) : (
-                        <AlertTriangle className="h-3.5 w-3.5 text-amber-400" aria-label="HMAC inválido" />
-                      )}
                     </td>
                     <td className={`whitespace-nowrap px-4 py-3 text-right font-[family-name:var(--font-mono)] text-xs font-medium ${latencyColor(evt.response_time_ms)}`}>
                       {evt.response_time_ms}ms

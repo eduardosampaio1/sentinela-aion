@@ -36,7 +36,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useAionData } from "@/lib/use-aion-data";
-import { useRealtimeStats } from "@/lib/use-realtime";
 import { mockSpendTrend, mockModelCostDistribution } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
 
@@ -47,23 +46,16 @@ const fmtInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
 export function StatusPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Real API for connection status and live events only
+  // Single data source: fetches real API, falls back to mocks when offline.
   const liveData = useAionData(3000, autoRefresh);
-  // Mock jitter always runs — drives all animated numbers for demo
-  const mockData = useRealtimeStats(2000, autoRefresh);
 
-  // Always use jittered mockData for display numbers so every metric pulses.
-  // liveData is used only for: connection badge + real event feed (when available).
-  const stats = mockData.stats;
-  const modules = mockData.modules;
-  const dist = mockData.distribution;
-  const opState = mockData.operational;
-  const status: ServiceStatus = liveData.connected ? "online" : "online";
+  const stats = liveData.stats;
+  const modules = liveData.modules;
+  const dist = liveData.distribution;
+  const opState = liveData.operational;
+  const status: ServiceStatus = liveData.connected ? "online" : "offline";
 
-  // Live feed: real API events when connected, otherwise realtime mock feed
-  const recentEvents = liveData.connected && liveData.events.length > 0
-    ? liveData.events.slice(0, 5)
-    : mockData.events.slice(0, 5);
+  const recentEvents = liveData.events.slice(0, 5);
 
   const totalEconomy = modules.nomos.cost_optimized + modules.estixe.cost_avoided + modules.metis.cost_saved;
 

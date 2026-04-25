@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Save,
   RotateCcw,
@@ -71,6 +71,13 @@ function riskLabel(risk: string) {
 export function PoliciesPage() {
   const [dial, setDial] = useState<BehaviorDial>({ ...mockBehavior });
   const [activePreset, setActivePreset] = useState<string | null>(null);
+
+  // Load real behavior from backend on mount; silently keep mock defaults on failure.
+  useEffect(() => {
+    getBehavior()
+      .then((raw) => setDial((prev) => ({ ...prev, ...raw })))
+      .catch(() => { /* backend unavailable — mock defaults remain */ });
+  }, []);
   const [hasChanges, setHasChanges] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [saving, setSaving] = useState(false);

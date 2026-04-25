@@ -18,7 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { RoutingTopologyMap } from "./routing-topology";
 import { useApiData } from "@/lib/use-api-data";
-import { getModels } from "@/lib/api";
+import { getModels, setBehavior } from "@/lib/api";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockModels, mockModuleStats, mockDistribution, mockIntentPerformance } from "@/lib/mock-data";
 
@@ -67,12 +67,11 @@ export function RoutingPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      // Aqui entraria a chamada de API
-      // await setRoutingPriority(priority);
+      await setBehavior({ economy: priority });
       setShowConfirm(false);
-      setSaving(false);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
       setSaving(false);
     }
   };
@@ -83,17 +82,9 @@ export function RoutingPage() {
     setSaveError(null);
   };
 
-  const handleSaveLatency = async () => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      // await setMaxLatency(maxLatency);
-      setShowLatencyConfirm(false);
-      setSaving(false);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
-      setSaving(false);
-    }
+  // Latency cap endpoint not yet implemented in backend.
+  const handleSaveLatency = () => {
+    setShowLatencyConfirm(false);
   };
 
   const handleCancelLatency = () => {
@@ -547,10 +538,11 @@ export function RoutingPage() {
               Cancelar
             </button>
             <button
-              onClick={() => setShowLatencyConfirm(true)}
-              className="cursor-pointer rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+              disabled
+              title="Configuração de SLA de latência disponível em breve"
+              className="cursor-not-allowed rounded-lg bg-sky-700/40 px-3 py-1.5 text-xs font-semibold text-white/50"
             >
-              Salvar latência
+              Em breve
             </button>
           </div>
         )}
@@ -609,11 +601,11 @@ export function RoutingPage() {
                 Cancelar
               </button>
               <button
-                onClick={handleSaveLatency}
-                disabled={saving}
-                className="cursor-pointer rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                disabled
+                title="Configuração de SLA de latência disponível em breve"
+                className="cursor-not-allowed rounded-lg bg-sky-700/40 px-4 py-2 text-sm font-semibold text-white/50"
               >
-                {saving ? "Salvando..." : "Aplicar agora"}
+                Em breve
               </button>
             </div>
           </div>
