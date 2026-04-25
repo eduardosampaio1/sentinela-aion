@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
-import { getCalibration, promoteCalibration } from "@/lib/api";
+import { getCalibration, promoteCalibration, rollbackCalibration } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -176,6 +176,9 @@ function TabShadow() {
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
+  const [showRollbackModal, setShowRollbackModal] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
+  const [rollbackError, setRollbackError] = useState<string | null>(null);
 
   // Real calibration data — fallback to static mock if backend unreachable
   const { data: calibrationRaw, isDemo, refetch } = useApiData(
@@ -208,6 +211,20 @@ function TabShadow() {
     } finally {
       setPromoting(false);
       refetch();
+    }
+  };
+
+  const handleRollback = async () => {
+    setRollingBack(true);
+    setRollbackError(null);
+    try {
+      await rollbackCalibration(config.policy_candidate);
+      setShowRollbackModal(false);
+      refetch();
+    } catch (err) {
+      setRollbackError(err instanceof Error ? err.message : "Erro ao reverter");
+    } finally {
+      setRollingBack(false);
     }
   };
 
@@ -272,20 +289,29 @@ function TabShadow() {
           </div>
         </div>
 
-        {parseFloat(matchRate) >= 90 && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-green-800/40 bg-green-900/20 px-4 py-3">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-400" />
-            <p className="text-sm text-green-300">
-              Taxa de concordância acima de 90% — política pronta para promoção.
-            </p>
-            <button
-              onClick={() => setShowPromoteModal(true)}
-              className="ml-auto rounded-md bg-green-800/40 px-3 py-1 text-xs font-medium text-green-300 transition-colors hover:bg-green-800/60"
-            >
-              Promover para live
-            </button>
-          </div>
-        )}
+        <div className="mt-4 flex items-center gap-2">
+          {parseFloat(matchRate) >= 90 && (
+            <div className="flex flex-1 items-center gap-2 rounded-lg border border-green-800/40 bg-green-900/20 px-4 py-3">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-400" />
+              <p className="text-sm text-green-300">
+                Taxa de concordância acima de 90% — política pronta para promoção.
+              </p>
+              <button
+                onClick={() => setShowPromoteModal(true)}
+                className="ml-auto rounded-md bg-green-800/40 px-3 py-1 text-xs font-medium text-green-300 transition-colors hover:bg-green-800/60"
+              >
+                Promover para live
+              </button>
+            </div>
+          )}
+          <button
+            onClick={() => setShowRollbackModal(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-red-800/40 bg-red-900/10 px-3 py-2 text-xs font-medium text-red-400 transition-colors hover:bg-red-900/25 shrink-0"
+          >
+            <XCircle className="h-3.5 w-3.5" />
+            Reverter política
+          </button>
+        </div>
       </div>
 
       {/* Results table */}
@@ -339,6 +365,50 @@ function TabShadow() {
           <div className="text-sm text-amber-300">
             <span className="font-semibold">{mismatches} divergências</span> detectadas.
             Revise as entradas com decisões discordantes antes de promover a política.
+          </div>
+        </div>
+      )}
+
+      {/* Rollback Policy Modal */}
+      {showRollbackModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Reverter política?</h3>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              Esta ação irá reverter{" "}
+              <code className="rounded bg-white/5 px-1 py-0.5 text-xs">
+                {config.policy_candidate}
+              </code>{" "}
+              para a versão anterior e desativar o shadow mode.
+            </p>
+
+            <div className="mt-4 rounded-lg border border-red-800/40 bg-red-900/10 px-4 py-3 text-sm text-red-300 space-y-1">
+              <p>• O tráfego voltará 100% para a política anterior</p>
+              <p>• Dados coletados no shadow mode serão preservados</p>
+              <p>• Esta ação não pode ser desfeita automaticamente</p>
+            </div>
+
+            {rollbackError && (
+              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                {rollbackError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowRollbackModal(false); setRollbackError(null); }}
+                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleRollback}
+                disabled={rollingBack}
+                className="cursor-pointer rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {rollingBack ? "Revertendo..." : "Confirmar reversão"}
+              </button>
+            </div>
           </div>
         </div>
       )}

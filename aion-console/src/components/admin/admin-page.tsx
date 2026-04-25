@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Users, Shield, Key, RefreshCw, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { Users, Shield, Key, RefreshCw, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DemoBanner } from "@/components/ui/demo-banner";
+import { useApiData } from "@/lib/use-api-data";
 import { mockAdminRoles, mockIdentityProviders } from "@/lib/mock-data";
-import { rotateKeys } from "@/lib/api";
+import { rotateKeys, getAudit } from "@/lib/api";
 
 const roleColors: Record<string, string> = {
   red: "bg-red-900/30 text-red-400 border-red-800/50",
@@ -20,7 +22,7 @@ const idpStatusConfig: Record<string, { icon: React.ReactNode; badge: "success" 
   error: { icon: <AlertCircle className="h-4 w-4 text-red-400" />, badge: "error" },
 };
 
-const tabs = ["Papéis & Permissões", "Provedores de Identidade", "Segurança de Acesso"] as const;
+const tabs = ["Papéis & Permissões", "Provedores de Identidade", "Segurança de Acesso", "Audit Log"] as const;
 type Tab = (typeof tabs)[number];
 
 type AdminActionType = "create-role" | "edit-role" | "connect-idp" | "configure-idp" | "rotate-keys" | "session-timeout" | "configure-mfa" | "manage-allowlist";
@@ -173,6 +175,13 @@ export function AdminPage() {
         return [];
     }
   };
+
+  // ─── Audit Log ────────────────────────────────────────────────────────────
+  const { data: auditRaw, isDemo: auditIsDemo, refetch: refetchAudit } = useApiData(
+    () => getAudit(100),
+    [] as Record<string, unknown>[],
+    { intervalMs: activeTab === "Audit Log" ? 30_000 : undefined },
+  );
 
   const getActionButtonLabel = (): string => {
     switch (selectedAction) {
@@ -385,6 +394,100 @@ export function AdminPage() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Audit Log tab */}
+      {activeTab === "Audit Log" && (
+        <div className="space-y-4">
+          {auditIsDemo && <DemoBanner onRetry={refetchAudit} />}
+
+          <div className="flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+              <FileText className="h-4 w-4" />
+              Registro imutável de todas as ações administrativas
+            </p>
+            <button
+              onClick={refetchAudit}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Atualizar
+            </button>
+          </div>
+
+          {auditRaw.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-16 text-center">
+              <FileText className="h-8 w-8 text-[var(--color-text-muted)] mb-3 opacity-40" />
+              <p className="text-sm font-medium text-[var(--color-text)]">Nenhum evento de auditoria</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Ações administrativas aparecerão aqui
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--color-border)]">
+                      {["Timestamp", "Ação", "Operador", "IP", "Status"].map((h) => (
+                        <th key={h} className="px-5 py-3 text-left text-xs font-medium text-[var(--color-text-muted)]">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(auditRaw as Record<string, unknown>[]).map((entry, idx) => {
+                      const ts = entry.timestamp
+                        ? new Date(
+                            typeof entry.timestamp === "number"
+                              ? entry.timestamp * 1000
+                              : String(entry.timestamp),
+                          ).toLocaleString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })
+                        : "—";
+                      const action = String(entry.action ?? entry.event ?? entry.type ?? "—");
+                      const operator = String(entry.admin ?? entry.user ?? entry.operator ?? "sistema");
+                      const ip = String(entry.ip ?? entry.source_ip ?? "—");
+                      const status = String(entry.result ?? entry.status ?? "ok");
+                      const isOk = status === "ok" || status === "success";
+
+                      return (
+                        <tr
+                          key={idx}
+                          className="border-b border-[var(--color-border)]/50 hover:bg-white/5 transition-colors"
+                        >
+                          <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                            {ts}
+                          </td>
+                          <td className="px-5 py-3">
+                            <code className="rounded bg-white/5 px-1.5 py-0.5 text-xs text-[var(--color-text)]">
+                              {action}
+                            </code>
+                          </td>
+                          <td className="px-5 py-3 text-xs text-[var(--color-text)]">{operator}</td>
+                          <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                            {ip}
+                          </td>
+                          <td className="px-5 py-3">
+                            <Badge variant={isOk ? "success" : "error"}>
+                              {isOk ? "OK" : status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
