@@ -36,12 +36,14 @@ export function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [keysRotatedAt, setKeysRotatedAt] = useState<Date | null>(null);
+  const [rotateReason, setRotateReason] = useState("");
 
   const handleOpenConfirm = (actionType: AdminActionType, roleName?: string, idpName?: string) => {
     setSelectedAction(actionType);
     if (roleName) setSelectedRoleName(roleName);
     if (idpName) setSelectedIdPName(idpName);
     setSaveError(null);
+    setRotateReason("");
     setShowConfirm(true);
   };
 
@@ -50,7 +52,7 @@ export function AdminPage() {
     setSaveError(null);
     try {
       if (selectedAction === "rotate-keys") {
-        await rotateKeys([]);
+        await rotateKeys([], rotateReason.trim() || undefined);
         setKeysRotatedAt(new Date());
       } else {
         // Actions without backend endpoint yet — simulate locally
@@ -73,6 +75,7 @@ export function AdminPage() {
     setSelectedAction(null);
     setSelectedRoleName(null);
     setSelectedIdPName(null);
+    setRotateReason("");
   };
 
   const getConfirmTitle = (): string => {
@@ -198,6 +201,7 @@ export function AdminPage() {
   );
   const [showLgpdModal, setShowLgpdModal] = useState(false);
   const [lgpdConfirmText, setLgpdConfirmText] = useState("");
+  const [lgpdReason, setLgpdReason] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteSuccess, setDeleteSuccess] = useState(false);
@@ -206,10 +210,11 @@ export function AdminPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteTenantData(getActiveTenant());
+      await deleteTenantData(getActiveTenant(), lgpdReason.trim() || undefined);
       setDeleteSuccess(true);
       setShowLgpdModal(false);
       setLgpdConfirmText("");
+      setLgpdReason("");
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Erro ao excluir dados");
     } finally {
@@ -707,7 +712,7 @@ export function AdminPage() {
                 </p>
               </div>
               <button
-                onClick={() => { setShowLgpdModal(true); setDeleteError(null); setLgpdConfirmText(""); }}
+                onClick={() => { setShowLgpdModal(true); setDeleteError(null); setLgpdConfirmText(""); setLgpdReason(""); }}
                 className="flex-shrink-0 ml-4 flex items-center gap-1.5 rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-900/30 transition-colors"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -750,6 +755,30 @@ export function AdminPage() {
               className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-red-500 focus:outline-none"
             />
 
+            <div className="mt-4 space-y-1.5">
+              <label
+                htmlFor="lgpd-reason"
+                className="block text-xs text-[var(--color-text-muted)]"
+              >
+                Motivo da exclusão{" "}
+                <span className="opacity-60">(mín. 10 caracteres — obrigatório)</span>
+              </label>
+              <textarea
+                id="lgpd-reason"
+                value={lgpdReason}
+                onChange={(e) => setLgpdReason(e.target.value)}
+                rows={3}
+                disabled={deleting}
+                placeholder="Ex: Solicitação formal do titular de dados — protocolo #12345..."
+                className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/50 focus:border-red-500 focus:outline-none disabled:opacity-50"
+              />
+              {lgpdReason.trim().length > 0 && lgpdReason.trim().length < 10 && (
+                <p className="text-[10px] text-amber-400">
+                  {lgpdReason.trim().length}/10 caracteres mínimos
+                </p>
+              )}
+            </div>
+
             {deleteError && (
               <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
                 {deleteError}
@@ -758,7 +787,7 @@ export function AdminPage() {
 
             <div className="mt-6 flex justify-end gap-3">
               <button
-                onClick={() => { setShowLgpdModal(false); setLgpdConfirmText(""); setDeleteError(null); }}
+                onClick={() => { setShowLgpdModal(false); setLgpdConfirmText(""); setLgpdReason(""); setDeleteError(null); }}
                 disabled={deleting}
                 className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
               >
@@ -766,7 +795,7 @@ export function AdminPage() {
               </button>
               <button
                 onClick={handleLgpdDelete}
-                disabled={deleting || lgpdConfirmText.trim().toLowerCase() !== "excluir"}
+                disabled={deleting || lgpdConfirmText.trim().toLowerCase() !== "excluir" || lgpdReason.trim().length < 10}
                 className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {deleting ? "Excluindo..." : "Excluir todos os dados"}
@@ -797,6 +826,32 @@ export function AdminPage() {
               ))}
             </div>
 
+            {selectedAction === "rotate-keys" && (
+              <div className="mt-4 space-y-1.5">
+                <label
+                  htmlFor="admin-rotate-reason"
+                  className="block text-xs font-medium text-[var(--color-text-muted)]"
+                >
+                  Motivo da rotação{" "}
+                  <span className="opacity-60">(mín. 10 caracteres — obrigatório)</span>
+                </label>
+                <textarea
+                  id="admin-rotate-reason"
+                  value={rotateReason}
+                  onChange={(e) => setRotateReason(e.target.value)}
+                  rows={3}
+                  disabled={saving}
+                  placeholder="Descreva o motivo da rotação para o audit log..."
+                  className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]/40 focus:border-[var(--color-primary)]/60 focus:outline-none transition-colors disabled:opacity-50"
+                />
+                {rotateReason.trim().length > 0 && rotateReason.trim().length < 10 && (
+                  <p className="text-[10px] text-amber-400">
+                    {rotateReason.trim().length}/10 caracteres mínimos
+                  </p>
+                )}
+              </div>
+            )}
+
             {saveError && (
               <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
                 {saveError}
@@ -813,7 +868,7 @@ export function AdminPage() {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={saving}
+                disabled={saving || (selectedAction === "rotate-keys" && rotateReason.trim().length < 10)}
                 className="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
                 {saving ? "Processando..." : getActionButtonLabel()}

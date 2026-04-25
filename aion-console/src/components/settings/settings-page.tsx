@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useApiData } from "@/lib/use-api-data";
 import { rotateKeys, getStats } from "@/lib/api";
 import { mockStats } from "@/lib/mock-data";
+import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import {
   Copy,
   Check,
@@ -83,6 +84,8 @@ export function SettingsPage() {
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [rotated, setRotated] = useState(false);
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [rotateConfirmError, setRotateConfirmError] = useState<string | null>(null);
 
   // Notification toggles
   const [notifSecurity, setNotifSecurity] = useState(true);
@@ -99,14 +102,16 @@ export function SettingsPage() {
   // Live stats for the API tab usage grid
   const { data: stats } = useApiData(getStats, mockStats, { intervalMs: 60_000 });
 
-  const handleRotateKey = async () => {
+  const handleRotateConfirm = async (reason: string) => {
     setRotating(true);
+    setRotateConfirmError(null);
     try {
-      await rotateKeys([]);
+      await rotateKeys([], reason);
       setRotated(true);
+      setShowRotateConfirm(false);
       setTimeout(() => setRotated(false), 3000);
-    } catch {
-      // silent — button returns to idle
+    } catch (err) {
+      setRotateConfirmError(err instanceof Error ? err.message : "Erro ao rotacionar chave");
     } finally {
       setRotating(false);
     }
@@ -377,7 +382,7 @@ export function SettingsPage() {
                 Criada em 12/01/2026 · Nunca expirada
               </p>
               <button
-                onClick={handleRotateKey}
+                onClick={() => { setRotateConfirmError(null); setShowRotateConfirm(true); }}
                 disabled={rotating}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                   rotated
@@ -485,6 +490,23 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmActionModal
+        open={showRotateConfirm}
+        severity="critical"
+        title="Rotacionar chaves de API?"
+        description="Todas as chaves ativas serão revogadas e substituídas por novas chaves geradas."
+        impact={[
+          "• Integrações existentes perderão acesso imediatamente após a rotação",
+          "• O AION_ADMIN_KEY no backend deve ser atualizado com a nova chave",
+          "• Coordene com os times que usam a API antes de rotacionar",
+        ]}
+        actionLabel="Rotacionar chaves"
+        loading={rotating}
+        error={rotateConfirmError}
+        onConfirm={handleRotateConfirm}
+        onCancel={() => setShowRotateConfirm(false)}
+      />
     </div>
   );
 }

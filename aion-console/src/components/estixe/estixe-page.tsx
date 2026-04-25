@@ -20,6 +20,7 @@ import {
   Copy,
   Power,
 } from "lucide-react";
+import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import { Toggle } from "@/components/ui/toggle";
 import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
@@ -107,7 +108,10 @@ export function EstixePage() {
   const [ksReasonInput, setKsReasonInput] = useState("");
   const [ksActivating, setKsActivating] = useState(false);
   const [ksDeactivating, setKsDeactivating] = useState(false);
+  const [ksDeactivateError, setKsDeactivateError] = useState<string | null>(null);
   const [showKsDeactivateConfirm, setShowKsDeactivateConfirm] = useState(false);
+  const [bypassConfirmLoading, setBypassConfirmLoading] = useState(false);
+  const [bypassConfirmError, setBypassConfirmError] = useState<string | null>(null);
 
   useEffect(() => {
     getKillswitch()
@@ -137,16 +141,17 @@ export function EstixePage() {
     }
   };
 
-  const handleDeactivateKs = async () => {
+  const handleDeactivateKs = async (reason: string) => {
     setKsDeactivating(true);
+    setKsDeactivateError(null);
     try {
-      await deactivateKillswitch();
+      await deactivateKillswitch(reason);
       setKsActive(false);
       setKsReason(null);
       setKsExpires(null);
       setShowKsDeactivateConfirm(false);
-    } catch {
-      // silent
+    } catch (err) {
+      setKsDeactivateError(err instanceof Error ? err.message : "Erro ao desativar Kill Switch");
     } finally {
       setKsDeactivating(false);
     }
@@ -248,10 +253,18 @@ export function EstixePage() {
     }
   };
 
-  const confirmDisableBypass = () => {
-    setBypassEnabled(false);
-    setShowBypassWarning(false);
-    toggleModule("estixe", false).catch(() => {});
+  const confirmDisableBypass = async (reason: string) => {
+    setBypassConfirmLoading(true);
+    setBypassConfirmError(null);
+    try {
+      await toggleModule("estixe", false, reason);
+      setBypassEnabled(false);
+      setShowBypassWarning(false);
+    } catch (err) {
+      setBypassConfirmError(err instanceof Error ? err.message : "Erro ao desativar bypass");
+    } finally {
+      setBypassConfirmLoading(false);
+    }
   };
 
   const toggleIntent = (id: string) => {
@@ -1316,37 +1329,22 @@ export function EstixePage() {
       </div>
 
       {/* Bypass Warning Modal */}
-      {showBypassWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
-            <div className="mb-4 flex items-center gap-3">
-              <AlertTriangle className="h-6 w-6 text-amber-500" />
-              <h3 className="text-lg font-semibold text-[var(--color-text)]">Desativar desvio?</h3>
-            </div>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Todas as mensagens serão enviadas para a IA. Estimativa de impacto:
-            </p>
-            <div className="mt-3 space-y-2 rounded-lg bg-amber-950/50 p-4 text-sm">
-              <div className="flex justify-between">
-                <span className="text-amber-400">Custo adicional estimado</span>
-                <strong className="font-[family-name:var(--font-mono)] text-amber-200">+$ {stats.cost_saved.toFixed(2)}/dia</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-400">Chamadas extras à IA</span>
-                <strong className="font-[family-name:var(--font-mono)] text-amber-200">+{stats.bypasses.toLocaleString("pt-BR")}/dia</strong>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button onClick={() => setShowBypassWarning(false)} className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)]">
-                Cancelar
-              </button>
-              <button onClick={confirmDisableBypass} className="cursor-pointer rounded-lg bg-amber-950/500 px-4 py-2 text-sm font-semibold text-white">
-                Desativar mesmo assim
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmActionModal
+        open={showBypassWarning}
+        severity="warning"
+        title="Desativar bypass do ESTIXE?"
+        description="Todas as requisições passarão pelo pipeline completo e serão enviadas para a IA."
+        impact={[
+          `• Custo adicional estimado: +$${stats.cost_saved.toFixed(2)}/dia`,
+          `• Chamadas extras à IA: +${stats.bypasses.toLocaleString("pt-BR")}/dia`,
+          "• A mudança tem efeito imediato em produção",
+        ]}
+        actionLabel="Desativar mesmo assim"
+        loading={bypassConfirmLoading}
+        error={bypassConfirmError}
+        onConfirm={confirmDisableBypass}
+        onCancel={() => setShowBypassWarning(false)}
+      />
 
       {/* Kill Switch — Activate Modal */}
       {showKsModal && (
@@ -1394,31 +1392,22 @@ export function EstixePage() {
       )}
 
       {/* Kill Switch — Deactivate Confirm */}
-      {showKsDeactivateConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface)] p-8 shadow-2xl">
-            <h3 className="text-lg font-bold text-[var(--color-text)]">Desativar Kill Switch?</h3>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              O AION voltará a processar requests normalmente. Confirme que a situação de emergência foi resolvida.
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setShowKsDeactivateConfirm(false)}
-                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleDeactivateKs}
-                disabled={ksDeactivating}
-                className="cursor-pointer rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-500 disabled:opacity-50"
-              >
-                {ksDeactivating ? "Desativando…" : "Retomar operação"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmActionModal
+        open={showKsDeactivateConfirm}
+        severity="critical"
+        title="Desativar Kill Switch?"
+        description="O AION voltará a processar requisições normalmente. Confirme que a situação de emergência foi resolvida."
+        impact={[
+          "• Todo tráfego voltará a fluir pelo pipeline imediatamente",
+          "• As proteções de emergência do Kill Switch serão removidas",
+          "• Registre no motivo a confirmação de que o incidente foi resolvido",
+        ]}
+        actionLabel="Retomar operação"
+        loading={ksDeactivating}
+        error={ksDeactivateError}
+        onConfirm={handleDeactivateKs}
+        onCancel={() => setShowKsDeactivateConfirm(false)}
+      />
 
       {/* Threshold Confirmation Modal */}
       {showConfirmThreshold && (
