@@ -138,58 +138,72 @@ class DecisionRecord(BaseModel):
 # ══════════════════════════════════════════════
 
 class Role(str, Enum):
-    ADMIN = "admin"       # full access: killswitch, config, data deletion
-    OPERATOR = "operator"  # operational: overrides, behavior, module toggle
-    VIEWER = "viewer"     # read-only: stats, events, audit, health, models
+    ADMIN = "admin"             # full access: killswitch, config, data deletion, key rotation
+    OPERATOR = "operator"       # operational: overrides, behavior, module toggle, calibration
+    ANALYST = "analyst"         # read + analytics: sessions, budget, compliance
+    VIEWER = "viewer"           # read-only: stats, events, audit, health, models
+    AUDITOR = "auditor"         # compliance-focused read: audit trail, sessions, reports
+    SECURITY = "security"       # security ops: killswitch, policies, threat intel, approvals
+    CONSOLE_PROXY = "console_proxy"  # trusted service identity — no own permissions;
+                                     # RBAC is enforced via X-Aion-Actor-Role (SSO actor)
 
 
 # What each role can do
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     Role.ADMIN: {
-        "killswitch:write",
-        "killswitch:read",
-        "overrides:write",
-        "overrides:read",
-        "behavior:write",
-        "behavior:read",
-        "modules:write",
-        "modules:read",
-        "estixe:reload",
-        "policies:reload",
+        "killswitch:write", "killswitch:read",
+        "overrides:write", "overrides:read",
+        "behavior:write", "behavior:read",
+        "modules:write", "modules:read",
+        "estixe:reload", "policies:reload", "policies:write",
         "data:delete",
         "audit:read",
-        "stats:read",
-        "events:read",
-        "models:read",
-        "budget:write",
-        "budget:read",
+        "stats:read", "events:read", "models:read",
+        "budget:write", "budget:read",
+        "calibration:promote", "calibration:rollback",
+        "approvals:resolve",
+        "keys:rotate",
     },
     Role.OPERATOR: {
-        "overrides:write",
-        "overrides:read",
-        "behavior:write",
-        "behavior:read",
-        "modules:write",
-        "modules:read",
-        "estixe:reload",
-        "policies:reload",
+        "overrides:write", "overrides:read",
+        "behavior:write", "behavior:read",
+        "modules:write", "modules:read",
+        "estixe:reload", "policies:reload",
         "audit:read",
-        "stats:read",
-        "events:read",
-        "models:read",
-        "budget:write",
+        "stats:read", "events:read", "models:read",
+        "budget:write", "budget:read",
+        "calibration:promote", "calibration:rollback",
+        "approvals:resolve",
+    },
+    Role.ANALYST: {
+        "overrides:read", "behavior:read", "modules:read",
+        "audit:read",
+        "stats:read", "events:read", "models:read",
         "budget:read",
     },
     Role.VIEWER: {
-        "overrides:read",
-        "behavior:read",
-        "modules:read",
+        "overrides:read", "behavior:read", "modules:read",
         "audit:read",
-        "stats:read",
-        "events:read",
-        "models:read",
+        "stats:read", "events:read", "models:read",
         "budget:read",
     },
+    Role.AUDITOR: {
+        "audit:read",
+        "stats:read", "events:read", "models:read",
+        "budget:read",
+        "overrides:read", "behavior:read", "modules:read",
+    },
+    Role.SECURITY: {
+        "killswitch:write", "killswitch:read",
+        "audit:read",
+        "stats:read", "events:read", "models:read",
+        "overrides:read", "modules:read", "budget:read",
+        "approvals:resolve",
+        "policies:write",
+    },
+    # console_proxy has NO own permissions — it is a trusted transport, not a human actor.
+    # All RBAC enforcement uses the SSO actor role from X-Aion-Actor-Role header.
+    Role.CONSOLE_PROXY: set(),
 }
 
 

@@ -26,8 +26,27 @@ logger = logging.getLogger("aion.middleware")
 _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 # ── Admin paths ──
-_ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit"}
-_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/")
+_ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit", "/v1/approvals"}
+_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/", "/v1/approvals/")
+
+# ── Roles whose service key is trusted to forward actor identity headers ──
+# Only these roles can set X-Aion-Actor-* headers that drive RBAC.
+# Any other caller's actor headers are ignored for authorization purposes.
+_TRUSTED_PROXY_ROLES: frozenset[str] = frozenset({"console_proxy"})
+
+# ── Endpoints that require X-Aion-Actor-Reason header ──
+# Dangerous mutations must include a human-readable justification for the audit trail.
+_REASON_REQUIRED: list[tuple[str, str]] = [
+    ("PUT", "/v1/killswitch"),
+    ("DELETE", "/v1/killswitch"),
+    ("POST", "/v1/calibration/"),   # promote and rollback
+    ("PUT", "/v1/modules/"),        # module toggle
+    ("PUT", "/v1/budget/"),         # budget cap change
+    ("POST", "/v1/approvals/"),     # approval resolution
+    ("DELETE", "/v1/data/"),        # LGPD deletion
+    ("POST", "/v1/admin/"),         # key rotation and admin ops
+    ("DELETE", "/v1/overrides"),    # override removal
+]
 
 # ── RBAC: map (method, path_prefix) → required permission ──
 _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
@@ -46,20 +65,23 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
     ("POST", "/v1/estixe/", "estixe:reload"),
     ("DELETE", "/v1/data/", "data:delete"),
     ("GET", "/v1/audit", "audit:read"),
-    # Calibration (shadow mode) — read available to operators, mutations require admin
+    # Calibration (shadow mode) — promote/rollback have dedicated permissions (resolved by path suffix)
     ("GET", "/v1/calibration/", "overrides:read"),
-    ("POST", "/v1/calibration/", "overrides:write"),
-    # Budget cap — write requires admin or operator
+    ("POST", "/v1/calibration/", "calibration:promote"),  # fallback; path suffix overrides below
+    # Budget cap
     ("PUT", "/v1/budget/", "budget:write"),
     ("GET", "/v1/budget/", "budget:read"),
-    # Threat signals — security intel, operator read-only
+    # Threat signals
     ("GET", "/v1/threats/", "audit:read"),
     # Executive reports
     ("GET", "/v1/reports/", "audit:read"),
     ("POST", "/v1/reports/", "budget:write"),
     ("DELETE", "/v1/reports/", "budget:write"),
-    # Admin operations (key rotation etc.) — admin only
-    ("POST", "/v1/admin/", "killswitch:write"),
+    # Approvals
+    ("POST", "/v1/approvals/", "approvals:resolve"),
+    ("GET", "/v1/approvals", "audit:read"),
+    # Admin operations (key rotation) — admin only
+    ("POST", "/v1/admin/", "keys:rotate"),
 ]
 
 # ── Permissions that require auth even when AION_ADMIN_KEY is not configured ──
@@ -273,15 +295,20 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
     Each entry includes prev_hash (SHA-256 of previous entry) to form a
     tamper-evident chain. Cross-replica chains merge at the Redis layer.
 
-    Actor identity is read from X-Aion-Actor-* headers injected by the
-    Next.js proxy after SSO authentication — never trust these from untrusted clients.
+    Actor identity is read from X-Aion-Actor-* headers ONLY when the request
+    comes from a trusted console proxy (request.state.trusted_proxy = True).
+    Direct API callers cannot spoof these headers.
     """
     prev_hash = _chain_tips.get(tenant, "0" * 64)
 
-    # Actor identity forwarded by the Console proxy after SSO validation
+    # Actor headers are only trusted from console_proxy sources.
+    # The middleware sets request.state.trusted_proxy before calling audit().
+    trusted_source: bool = getattr(request.state, "trusted_proxy", False)
+
     actor_id = request.headers.get("X-Aion-Actor-Id", "")
     actor_role = request.headers.get("X-Aion-Actor-Role", "")
     auth_source = request.headers.get("X-Aion-Auth-Source", "")
+    actor_reason = request.headers.get("X-Aion-Actor-Reason", "")
 
     entry = {
         "timestamp": time.time(),
@@ -292,10 +319,12 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         "tenant": tenant,
         "details": details,
         "prev_hash": prev_hash,
-        # Actor context — populated only when Console SSO is active
-        "actor_id": actor_id or None,
-        "actor_role": actor_role or None,
-        "auth_source": auth_source or None,
+        # Actor identity — only recorded when from a trusted console proxy source
+        "actor_id": actor_id if (trusted_source and actor_id) else None,
+        "actor_role": actor_role if (trusted_source and actor_role) else None,
+        "auth_source": auth_source if (trusted_source and auth_source) else None,
+        "actor_reason": actor_reason if actor_reason else None,
+        "actor_headers_trusted": trusted_source,
     }
     entry["entry_hash"] = _hash_entry(entry)
     _chain_tips[tenant] = entry["entry_hash"]
@@ -439,8 +468,30 @@ def _extract_path_tenant(path: str) -> Optional[str]:
     return None
 
 
+def _requires_reason(method: str, path: str) -> bool:
+    """Return True if this endpoint requires X-Aion-Actor-Reason header."""
+    for m, p in _REASON_REQUIRED:
+        if method == m and path.startswith(p):
+            return True
+    return False
+
+
 def _resolve_permission(method: str, path: str) -> Optional[str]:
-    """Resolve required permission for a method+path combination."""
+    """Resolve required permission for a method+path combination.
+
+    Specific calibration actions (promote/rollback) are resolved by path suffix
+    before falling through to the general prefix table.
+    """
+    # Calibration actions: distinguish promote from rollback by path suffix
+    if method == "POST" and path.startswith("/v1/calibration/"):
+        if path.endswith("/promote"):
+            return "calibration:promote"
+        if path.endswith("/rollback"):
+            return "calibration:rollback"
+    # Approval resolution
+    if method == "POST" and path.startswith("/v1/approvals/") and path.endswith("/resolve"):
+        return "approvals:resolve"
+
     for pmethod, ppath, perm in _PATH_PERMISSIONS:
         if method == pmethod and path.startswith(ppath):
             return perm
@@ -517,6 +568,10 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
         # Auth + RBAC for admin endpoints
         if _is_admin_path(path):
             admin_key_str = getattr(settings, "admin_key", "") or ""
+            # Default: not a trusted proxy source
+            request.state.trusted_proxy = False
+            effective_role = "no_auth"
+
             if admin_key_str:
                 auth_header = request.headers.get("Authorization", "")
                 provided_key = auth_header.removeprefix("Bearer ").strip()
@@ -528,22 +583,56 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                         content={"error": {"message": "Unauthorized", "type": "auth_error", "code": "unauthorized"}},
                     )
 
-                # RBAC: check if this key's role has permission for this endpoint
-                role = key_roles[provided_key]
+                service_role = key_roles[provided_key]
                 required_perm = _resolve_permission(request.method, path)
-                if required_perm and not check_permission(role, required_perm):
+
+                # ── Trusted proxy (Gap 1+2): console_proxy keys defer RBAC to actor role ──
+                # Only requests from console_proxy can provide trusted X-Aion-Actor-* headers.
+                # Direct API callers with any other key role cannot inject actor headers.
+                if service_role in _TRUSTED_PROXY_ROLES:
+                    request.state.trusted_proxy = True
+                    actor_role_hdr = request.headers.get("X-Aion-Actor-Role", "").strip()
+                    if actor_role_hdr:
+                        effective_role = actor_role_hdr
+                    else:
+                        # Console proxy without SSO context — safe default for reads
+                        effective_role = Role.VIEWER
+                else:
+                    # Traditional service key: use key's own role for RBAC
+                    effective_role = service_role
+
+                # ── Gap 3: RBAC enforcement via effective (actor) role ──
+                if required_perm and not check_permission(effective_role, required_perm):
                     return JSONResponse(
                         status_code=403,
                         content={"error": {
-                            "message": f"Forbidden: role '{role}' lacks '{required_perm}'",
+                            "message": (
+                                f"Forbidden: role '{effective_role}' lacks permission '{required_perm}'. "
+                                f"Contact your AION administrator to request elevated access."
+                            ),
                             "type": "auth_error",
                             "code": "forbidden",
                         }},
                     )
+
+                # ── Gap 4: Reason required for dangerous mutations ──
+                if _requires_reason(request.method, path):
+                    reason = request.headers.get("X-Aion-Actor-Reason", "").strip()
+                    if not reason:
+                        return JSONResponse(
+                            status_code=400,
+                            content={"error": {
+                                "message": (
+                                    "Header 'X-Aion-Actor-Reason' is required for this operation. "
+                                    "Provide a human-readable justification for the audit trail."
+                                ),
+                                "type": "invalid_request",
+                                "code": "reason_required",
+                            }},
+                        )
+
             else:
                 # No key configured — block destructive operations (fail-secure).
-                # Non-destructive admin ops (audit reads, module toggles) still pass through
-                # so development environments without AION_ADMIN_KEY are not blocked entirely.
                 required_perm = _resolve_permission(request.method, path)
                 if required_perm in _CRITICAL_PERMISSIONS:
                     return JSONResponse(
@@ -564,7 +653,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                     headers={"Retry-After": "60"},
                 )
 
-            await audit(f"{request.method} {path}", request, tenant, details=f"role={key_roles.get(provided_key, 'unknown') if admin_key_str else 'no_auth'}")
+            await audit(f"{request.method} {path}", request, tenant, details=f"effective_role={effective_role}")
 
         # Auth + rate limit for chat endpoint
         if path == "/v1/chat/completions":

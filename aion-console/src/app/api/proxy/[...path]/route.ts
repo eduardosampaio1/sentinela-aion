@@ -22,9 +22,13 @@ const BACKEND_URL = process.env.AION_API_URL ?? "http://localhost:8080";
 const API_KEY = process.env.AION_API_KEY ?? "";
 
 // Headers from the client that should be forwarded to the backend.
+// x-aion-actor-reason: human justification required for dangerous mutations
+//   (killswitch, promote, rollback, module toggle, LGPD deletion, key rotation).
+//   The backend rejects these operations if the header is absent.
 const FORWARD_HEADERS = new Set([
   "content-type",
   "x-aion-tenant",
+  "x-aion-actor-reason",
   "accept",
   "accept-encoding",
 ]);
