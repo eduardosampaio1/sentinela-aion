@@ -23,6 +23,7 @@ import {
   X,
   CheckCircle2,
   ChevronDown,
+  Brain,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { mockAdminRoles } from "@/lib/mock-data";
@@ -38,6 +39,7 @@ const navGroups = [
   {
     label: "Inteligência",
     items: [
+      { href: "/intelligence", label: "Inteligência NEMOS", icon: Brain },
       { href: "/policies", label: "Comportamento", icon: SlidersHorizontal },
       { href: "/routing", label: "Roteamento", icon: GitBranch },
       { href: "/estixe", label: "Proteção", icon: Shield },

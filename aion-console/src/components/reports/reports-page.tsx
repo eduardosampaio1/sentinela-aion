@@ -20,9 +20,9 @@ import { TimeRangeSelect } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
 import { mockBudgetSummary, mockThreatCategories, mockIntentPerformance, mockSessions, mockStats } from "@/lib/mock-data";
 import { useApiData } from "@/lib/use-api-data";
-import { getStats, getBudgetStatus, getSessions, getExecutiveReport, API_BASE, getActiveTenant } from "@/lib/api";
+import { getStats, getBudgetStatus, getSessions, getExecutiveReport, API_BASE, getActiveTenant, getThreats, getReportSchedule, scheduleReport, deleteReportSchedule } from "@/lib/api";
 
-const tabs = ["Execução", "Segurança", "Custos", "Shadow", "Auditoria"] as const;
+const tabs = ["Execução", "Segurança", "Custos", "Shadow", "Auditoria", "Agendamento"] as const;
 type Tab = (typeof tabs)[number];
 
 const tabIcons: Record<Tab, React.ReactNode> = {
@@ -31,6 +31,7 @@ const tabIcons: Record<Tab, React.ReactNode> = {
   "Custos": <Wallet className="h-3.5 w-3.5" />,
   "Shadow": <FlaskConical className="h-3.5 w-3.5" />,
   "Auditoria": <ScrollText className="h-3.5 w-3.5" />,
+  "Agendamento": <Clock className="h-3.5 w-3.5" />,
 };
 
 const exportFormats = ["PDF", "PPTX", "CSV", "XLSX"] as const;
@@ -114,32 +115,76 @@ function ExecTab({ timeRange }: { timeRange: TimeRange }) {
   );
 }
 
+const PATTERN_REPORT_LABELS: Record<string, string> = {
+  progressive_bypass: "Bypass Progressivo",
+  intent_mutation: "Mutação de Intent",
+  authority_escalation: "Escalada de Autoridade",
+  threshold_probing: "Sondagem de Limiar",
+};
+
 function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
-  const totalThreats = mockThreatCategories.reduce((s, t) => s + t.count, 0);
+  const { data: threats, isDemo: threatsIsDemo, refetch: refetchThreats } = useApiData(
+    getThreats,
+    [] as Record<string, unknown>[],
+    { intervalMs: 60_000 },
+  );
+
+  const mockTotal = mockThreatCategories.reduce((s, t) => s + t.count, 0);
   const threatScalers: Record<TimeRange, number> = {
-    live: 0.05,
-    "1h": 0.5,
-    "4h": 2,
-    "24h": 1,
-    "2d": 2,
-    "7d": 7,
-    "14d": 14,
-    "30d": 30,
+    live: 0.05, "1h": 0.5, "4h": 2, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
   };
-  const scaledThreats = Math.round(totalThreats * (threatScalers[timeRange] || 1));
+  const scale = threatScalers[timeRange] || 1;
+  const scaledThreats = Math.round(mockTotal * scale);
+
+  // Group real threats by pattern
+  const patternCounts: Record<string, number> = {};
+  for (const t of threats) {
+    const p = (t.pattern as string) ?? "unknown";
+    patternCounts[p] = (patternCounts[p] ?? 0) + 1;
+  }
+  const totalRealThreats = threats.length;
 
   return (
     <div className="space-y-6">
+      {threatsIsDemo && <DemoBanner onRetry={refetchThreats} />}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="Ameaças bloqueadas" value={scaledThreats.toLocaleString("pt-BR")} sub={getTimeRangeLabel(timeRange)} accent="text-red-400" />
-        <MetricCard label="PIIs interceptadas" value={Math.round(1204 * (threatScalers[timeRange] || 1)).toString()} sub="antes do LLM" accent="text-amber-400" />
-        <MetricCard label="Sessões suspeitas" value={Math.round(37 * (threatScalers[timeRange] || 1)).toString()} sub="threat score > 0.8" />
-        <MetricCard label="HMAC inválidos" value={Math.max(0, Math.round(3 * (threatScalers[timeRange] || 1))).toString()} sub="possível tampering" accent="text-red-400" />
+        <MetricCard label="Ameaças ativas agora" value={totalRealThreats.toString()} sub="detector multi-turn" accent="text-red-400" />
+        <MetricCard label="Ameaças bloqueadas" value={scaledThreats.toLocaleString("pt-BR")} sub={getTimeRangeLabel(timeRange)} accent="text-orange-400" />
+        <MetricCard label="PIIs interceptadas" value={Math.round(1204 * scale).toString()} sub="antes do LLM" accent="text-amber-400" />
+        <MetricCard label="Sessões suspeitas" value={Math.round(37 * scale).toString()} sub="threat score > 0.8" />
       </div>
 
+      {/* Real active threats */}
+      {totalRealThreats > 0 && (
+        <div className="rounded-xl border border-red-800/40 bg-[var(--color-surface)]">
+          <div className="border-b border-[var(--color-border)] px-5 py-4">
+            <h3 className="text-sm font-semibold text-red-400">Ameaças ativas — detectadas em tempo real</h3>
+          </div>
+          <div className="divide-y divide-[var(--color-border)]/50">
+            {Object.entries(patternCounts).map(([pattern, count]) => (
+              <div key={pattern} className="flex items-center gap-4 px-5 py-3">
+                <div className="w-48 shrink-0 text-sm text-[var(--color-text)]">
+                  {PATTERN_REPORT_LABELS[pattern] ?? pattern.replace(/_/g, " ")}
+                </div>
+                <div className="flex-1">
+                  <div className="h-1.5 w-full rounded-full bg-white/10">
+                    <div
+                      className="h-1.5 rounded-full bg-red-500/70"
+                      style={{ width: `${(count / totalRealThreats) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="w-8 text-right text-xs font-medium text-red-400">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mock historical categories */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="border-b border-[var(--color-border)] px-5 py-4">
-          <h3 className="text-sm font-semibold text-[var(--color-text)]">Categorias de ameaça</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">Categorias históricas de ameaça</h3>
         </div>
         <div className="divide-y divide-[var(--color-border)]/50">
           {mockThreatCategories.map((t) => (
@@ -307,6 +352,176 @@ function AuditTab({ timeRange }: { timeRange: TimeRange }) {
   );
 }
 
+function ScheduleTab() {
+  const mockScheduleFallback: Record<string, unknown> = { schedule: null };
+  const { data: scheduleData, isDemo: schedIsDemo, refetch: refetchSched } = useApiData(
+    getReportSchedule,
+    mockScheduleFallback,
+    {},
+  );
+
+  const existing = scheduleData.schedule as Record<string, unknown> | null | undefined;
+
+  const [frequency, setFrequency] = useState<"daily" | "weekly" | "monthly">(
+    (existing?.frequency as "daily" | "weekly" | "monthly") ?? "monthly",
+  );
+  const [recipientsRaw, setRecipientsRaw] = useState<string>(
+    Array.isArray(existing?.recipients) ? (existing.recipients as string[]).join(", ") : "",
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const recipients = recipientsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await scheduleReport({ frequency, recipients });
+      setSaved(true);
+      refetchSched();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setSaveError(null);
+    try {
+      await deleteReportSchedule();
+      setRecipientsRaw("");
+      setSaved(false);
+      refetchSched();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao remover");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {schedIsDemo && <DemoBanner onRetry={refetchSched} />}
+      {saved && (
+        <div className="flex items-center gap-2 rounded-xl border border-green-800/50 bg-green-900/20 px-4 py-3 text-sm text-green-400">
+          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+          Agendamento salvo com sucesso.
+        </div>
+      )}
+
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 space-y-5">
+        <div>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Agendamento de relatório executivo</h2>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Configure quando e para quem o relatório é enviado automaticamente
+          </p>
+        </div>
+
+        {/* Current schedule */}
+        {existing && (
+          <div className="flex items-start justify-between rounded-lg bg-teal-900/20 border border-teal-800/40 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-teal-400">Agendamento ativo</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                Frequência: <strong className="text-teal-300">{existing.frequency as string}</strong>
+                {Array.isArray(existing.recipients) && (existing.recipients as string[]).length > 0 && (
+                  <> · Destinatários: {(existing.recipients as string[]).join(", ")}</>
+                )}
+              </p>
+            </div>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="ml-3 flex-shrink-0 rounded-lg border border-red-800/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-900/20 transition-colors disabled:opacity-50"
+            >
+              {deleting ? "Removendo..." : "Remover"}
+            </button>
+          </div>
+        )}
+
+        {/* Frequency selector */}
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">
+            Frequência de envio
+          </label>
+          <div className="flex gap-2">
+            {(["daily", "weekly", "monthly"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFrequency(f)}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  frequency === f
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                    : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                {f === "daily" ? "Diário" : f === "weekly" ? "Semanal" : "Mensal"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Recipients */}
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">
+            Destinatários (separados por vírgula)
+          </label>
+          <input
+            type="text"
+            value={recipientsRaw}
+            onChange={(e) => setRecipientsRaw(e.target.value)}
+            placeholder="ciso@empresa.com, cto@empresa.com"
+            className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none"
+          />
+        </div>
+
+        {saveError && (
+          <div className="rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+            {saveError}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            onClick={handleSave}
+            disabled={saving || !recipientsRaw.trim()}
+            className="rounded-lg bg-[var(--color-primary)] px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+          >
+            {saving ? "Salvando..." : "Salvar agendamento"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          O que inclui o relatório executivo
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {[
+            "Capa com resumo executivo (3 bullet points)",
+            "Segurança: bloqueios, PIIs, ameaças, top políticas",
+            "Economia: custo vs. baseline, savings, distribuição de modelos",
+            "Aprendizado: maturidade dos módulos, recomendações ativas",
+          ].map((item, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className="mt-1 text-[var(--color-primary)]">→</span>
+              <span className="text-[var(--color-text-muted)]">{item}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TIME_RANGE_DAYS: Record<TimeRange, number> = {
   live: 0, "1h": 0, "4h": 0, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
 };
@@ -415,6 +630,7 @@ export function ReportsPage() {
       {activeTab === "Custos" && <CostsTab timeRange={timeRange} />}
       {activeTab === "Shadow" && <ShadowTab timeRange={timeRange} />}
       {activeTab === "Auditoria" && <AuditTab timeRange={timeRange} />}
+      {activeTab === "Agendamento" && <ScheduleTab />}
     </div>
   );
 }

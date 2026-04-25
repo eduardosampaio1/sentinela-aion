@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Users, Shield, Key, RefreshCw, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
+import { Users, Shield, Key, RefreshCw, CheckCircle2, AlertCircle, Clock, FileText, Trash2, Lock, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
 import { mockAdminRoles, mockIdentityProviders } from "@/lib/mock-data";
-import { rotateKeys, getAudit } from "@/lib/api";
+import { rotateKeys, getAudit, getComplianceSummary, deleteTenantData, getActiveTenant } from "@/lib/api";
 
 const roleColors: Record<string, string> = {
   red: "bg-red-900/30 text-red-400 border-red-800/50",
@@ -22,7 +22,7 @@ const idpStatusConfig: Record<string, { icon: React.ReactNode; badge: "success" 
   error: { icon: <AlertCircle className="h-4 w-4 text-red-400" />, badge: "error" },
 };
 
-const tabs = ["Papéis & Permissões", "Provedores de Identidade", "Segurança de Acesso", "Audit Log"] as const;
+const tabs = ["Papéis & Permissões", "Provedores de Identidade", "Segurança de Acesso", "Audit Log", "Compliance & LGPD"] as const;
 type Tab = (typeof tabs)[number];
 
 type AdminActionType = "create-role" | "edit-role" | "connect-idp" | "configure-idp" | "rotate-keys" | "session-timeout" | "configure-mfa" | "manage-allowlist";
@@ -182,6 +182,40 @@ export function AdminPage() {
     [] as Record<string, unknown>[],
     { intervalMs: activeTab === "Audit Log" ? 30_000 : undefined },
   );
+
+  // ─── Compliance & LGPD ────────────────────────────────────────────────────
+  const mockComplianceFallback: Record<string, unknown> = {
+    decisions: { total_requests: 0, blocked: 0, bypassed: 0, passed_to_llm: 0, block_rate: 0 },
+    pii: { total_intercepts: 0, by_category: {}, note: "" },
+    session_audit: { sessions_with_audit_trail: 0, audit_trail_signed: false, audit_ttl_days: 90 },
+    infrastructure: { multi_turn_context_enabled: false, budget_cap_enabled: false, data_residency: "not_configured", audit_hash_chaining: false },
+    report_signature: "",
+  };
+  const { data: compliance, isDemo: complianceIsDemo, refetch: refetchCompliance } = useApiData(
+    getComplianceSummary,
+    mockComplianceFallback,
+    { intervalMs: activeTab === "Compliance & LGPD" ? 120_000 : undefined },
+  );
+  const [showLgpdModal, setShowLgpdModal] = useState(false);
+  const [lgpdConfirmText, setLgpdConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState(false);
+
+  const handleLgpdDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteTenantData(getActiveTenant());
+      setDeleteSuccess(true);
+      setShowLgpdModal(false);
+      setLgpdConfirmText("");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Erro ao excluir dados");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const getActionButtonLabel = (): string => {
     switch (selectedAction) {
@@ -488,6 +522,257 @@ export function AdminPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Compliance & LGPD tab */}
+      {activeTab === "Compliance & LGPD" && (
+        <div className="space-y-6">
+          {complianceIsDemo && <DemoBanner onRetry={refetchCompliance} />}
+
+          {deleteSuccess && (
+            <div className="flex items-center gap-2 rounded-xl border border-green-800/50 bg-green-900/20 px-4 py-3 text-sm text-green-400">
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+              Dados do tenant excluídos com sucesso (LGPD Art. 18).
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--color-text)]">Relatório de Compliance</h2>
+              <p className="text-xs text-[var(--color-text-muted)]">Artefato verificável para equipes de compliance e CISO</p>
+            </div>
+            <button
+              onClick={refetchCompliance}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Atualizar
+            </button>
+          </div>
+
+          {/* Decisions */}
+          {(() => {
+            const dec = (compliance.decisions ?? {}) as Record<string, unknown>;
+            const pii = (compliance.pii ?? {}) as Record<string, unknown>;
+            const audit = (compliance.session_audit ?? {}) as Record<string, unknown>;
+            const infra = (compliance.infrastructure ?? {}) as Record<string, unknown>;
+            const total = (dec.total_requests as number) ?? 0;
+            const blocked = (dec.blocked as number) ?? 0;
+            const bypassed = (dec.bypassed as number) ?? 0;
+            const passed = (dec.passed_to_llm as number) ?? 0;
+            const blockRate = (dec.block_rate as number) ?? 0;
+            const piiTotal = (pii.total_intercepts as number) ?? 0;
+            const piiByCategory = (pii.by_category ?? {}) as Record<string, number>;
+            const signed = (audit.audit_trail_signed as boolean) ?? false;
+            const ttlDays = (audit.audit_ttl_days as number) ?? 90;
+            const multiTurn = (infra.multi_turn_context_enabled as boolean) ?? false;
+            const budgetCap = (infra.budget_cap_enabled as boolean) ?? false;
+            const dataResidency = (infra.data_residency as string) ?? "—";
+            const chainEnabled = (infra.audit_hash_chaining as boolean) ?? false;
+            const sig = (compliance.report_signature as string) ?? "";
+
+            return (
+              <div className="space-y-4">
+                {/* Metrics grid */}
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    { label: "Total de requests", value: total.toLocaleString("pt-BR"), icon: <Database className="h-4 w-4" />, color: "text-[var(--color-text)]" },
+                    { label: "Bloqueados", value: blocked.toLocaleString("pt-BR"), icon: <Shield className="h-4 w-4" />, color: "text-red-400" },
+                    { label: "Taxa de bloqueio", value: `${(blockRate * 100).toFixed(2)}%`, icon: <Lock className="h-4 w-4" />, color: "text-orange-400" },
+                    { label: "PIIs interceptados", value: piiTotal.toLocaleString("pt-BR"), icon: <Users className="h-4 w-4" />, color: "text-amber-400" },
+                  ].map((m) => (
+                    <div key={m.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-[var(--color-text-muted)]">{m.label}</p>
+                        <span className="text-[var(--color-text-muted)] opacity-40">{m.icon}</span>
+                      </div>
+                      <p className={`text-xl font-bold ${m.color}`}>{m.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Decision distribution bar */}
+                {total > 0 && (
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Distribuição de decisões
+                    </p>
+                    <div className="flex h-3 w-full overflow-hidden rounded-full">
+                      <div className="bg-red-500" style={{ width: `${(blocked / total) * 100}%` }} title={`Bloqueados: ${blocked}`} />
+                      <div className="bg-teal-500" style={{ width: `${(bypassed / total) * 100}%` }} title={`Bypass: ${bypassed}`} />
+                      <div className="bg-sky-500" style={{ width: `${(passed / total) * 100}%` }} title={`Roteados: ${passed}`} />
+                    </div>
+                    <div className="mt-2 flex gap-4 text-xs text-[var(--color-text-muted)]">
+                      <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-500" /> Bloqueado ({((blocked / total) * 100).toFixed(1)}%)</span>
+                      <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-teal-500" /> Bypass ({((bypassed / total) * 100).toFixed(1)}%)</span>
+                      <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-sky-500" /> Roteado ({((passed / total) * 100).toFixed(1)}%)</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* PII + Infra side by side */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Categorias de PII interceptadas
+                    </p>
+                    {Object.keys(piiByCategory).length === 0 ? (
+                      <p className="text-xs text-[var(--color-text-muted)] italic">Nenhuma categoria registrada</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {Object.entries(piiByCategory).map(([cat, count]) => (
+                          <div key={cat} className="flex items-center justify-between text-sm">
+                            <span className="text-[var(--color-text-muted)]">{cat}</span>
+                            <span className="font-semibold text-amber-400">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)] italic">
+                      Conteúdo PII nunca é armazenado — apenas rótulos de categoria.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                    <p className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Infraestrutura de compliance
+                    </p>
+                    <div className="space-y-2">
+                      {[
+                        { label: "Audit trail assinado (HMAC)", ok: signed },
+                        { label: "Hash chaining no audit log", ok: chainEnabled },
+                        { label: "Multi-turn context ativo", ok: multiTurn },
+                        { label: "Budget cap configurado", ok: budgetCap },
+                        { label: `Retenção de dados (${ttlDays}d)`, ok: ttlDays >= 365 },
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center justify-between text-sm">
+                          <span className="text-[var(--color-text-muted)]">{item.label}</span>
+                          <span className={`text-xs font-medium ${item.ok ? "text-green-400" : "text-amber-400"}`}>
+                            {item.ok ? "✓ ativo" : "⚠ inativo"}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--color-text-muted)]">Residência de dados</span>
+                        <span className="text-xs font-medium text-[var(--color-text)]">{dataResidency}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Report signature */}
+                {sig && (
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                    <p className="mb-1.5 text-xs font-medium text-[var(--color-text-muted)]">
+                      Assinatura HMAC deste relatório
+                    </p>
+                    <code className="block break-all text-xs text-teal-400">{sig}</code>
+                    <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
+                      Verifique com HMAC-SHA256 usando <code>AION_SESSION_AUDIT_SECRET</code>
+                    </p>
+                  </div>
+                )}
+
+                {/* Sessions audit info */}
+                <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+                  <p className="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    Cobertura de audit trail
+                  </p>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-[var(--color-text-muted)]">Sessões com trilha de auditoria</span>
+                    <span className="font-semibold text-[var(--color-text)]">
+                      {((audit.sessions_with_audit_trail as number) ?? 0).toLocaleString("pt-BR")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    Cada sessão inclui: hash da mensagem (LGPD), decisão tomada, modelo usado, PIIs detectados, políticas aplicadas.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* LGPD Danger Zone */}
+          <div className="rounded-xl border border-red-800/50 bg-red-950/20 p-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-red-400">
+                  <Trash2 className="h-4 w-4" />
+                  Exclusão de dados — LGPD Art. 18
+                </h3>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Remove todos os dados deste tenant: sessões, audit trail, memória NEMOS, budget.
+                  Ação irreversível. Use apenas em atendimento a solicitação formal de titular de dados.
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowLgpdModal(true); setDeleteError(null); setLgpdConfirmText(""); }}
+                className="flex-shrink-0 ml-4 flex items-center gap-1.5 rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-900/30 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Excluir dados
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LGPD Deletion Modal */}
+      {showLgpdModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-red-800/50 bg-[var(--color-surface)] p-8 shadow-xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-900/30 text-red-400">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-red-400">Exclusão irreversível de dados</h3>
+                <p className="text-xs text-[var(--color-text-muted)]">LGPD Art. 18 — Direito à exclusão</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-lg bg-red-950/30 p-4 text-xs text-[var(--color-text-muted)] mb-4">
+              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Todas as sessões e audit trail serão excluídos</p>
+              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Memória NEMOS (modelos aprendidos) será zerada</p>
+              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Configurações de budget e calibração serão removidas</p>
+              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Esta ação <strong className="text-red-400">não pode ser desfeita</strong></p>
+            </div>
+
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">
+              Digite <code className="text-red-400">excluir</code> para confirmar
+            </label>
+            <input
+              type="text"
+              value={lgpdConfirmText}
+              onChange={(e) => setLgpdConfirmText(e.target.value)}
+              placeholder="excluir"
+              className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-red-500 focus:outline-none"
+            />
+
+            {deleteError && (
+              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowLgpdModal(false); setLgpdConfirmText(""); setDeleteError(null); }}
+                disabled={deleting}
+                className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleLgpdDelete}
+                disabled={deleting || lgpdConfirmText.trim().toLowerCase() !== "excluir"}
+                className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? "Excluindo..." : "Excluir todos os dados"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

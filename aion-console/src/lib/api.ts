@@ -524,3 +524,9 @@ export async function deleteReportSchedule(): Promise<void> {
 export async function explainRequest(requestId: string): Promise<Record<string, unknown>> {
   return fetchApi(`/v1/explain/${requestId}`);
 }
+
+// ─── LGPD / Data Deletion ─────────────────────────────────────────────────────
+
+export async function deleteTenantData(tenant: string): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/data/${tenant}`, { method: "DELETE" });
+}
