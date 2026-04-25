@@ -108,6 +108,26 @@ async def lifespan(app: FastAPI):
         settings.metis_enabled,
     )
 
+    # ── Fail-fast: warn loudly on missing critical secrets ─────────────────────
+    _env_problems: list[str] = []
+    if not settings.admin_key:
+        _env_problems.append(
+            "AION_ADMIN_KEY is not set — all admin/control-plane endpoints are "
+            "unauthenticated. Set AION_ADMIN_KEY=yourkey:admin before production."
+        )
+    if not os.environ.get("AION_SESSION_AUDIT_SECRET"):
+        _env_problems.append(
+            "AION_SESSION_AUDIT_SECRET is not set — audit trail HMAC signatures are "
+            "disabled (tamper evidence theater). Set a 32+ char random secret."
+        )
+    if _env_problems:
+        logger.warning("=" * 72)
+        logger.warning("AION SECURITY WARNINGS — resolve before production:")
+        for _p in _env_problems:
+            logger.warning("  ⚠  %s", _p)
+        logger.warning("=" * 72)
+    # ───────────────────────────────────────────────────────────────────────────
+
     from aion.license import validate_license_or_abort, LicenseState
     lic = validate_license_or_abort()
 

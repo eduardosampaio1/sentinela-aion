@@ -396,6 +396,35 @@ def _is_admin_path(path: str) -> bool:
     return False
 
 
+# ── URL tenant extraction ──
+# Paths where the tenant is embedded as the first path segment after the prefix.
+# Used to prevent cross-tenant access by mutating the URL while keeping a valid
+# X-Aion-Tenant header for a different tenant.
+_TENANT_EMBEDDED_PREFIXES: tuple[str, ...] = (
+    "/v1/sessions/",
+    "/v1/budget/",
+    "/v1/intelligence/",
+    "/v1/threats/",
+    "/v1/benchmark/",
+    "/v1/recommendations/",
+    "/v1/reports/",
+    "/v1/calibration/",
+    "/v1/data/",
+    "/v1/global/threat-feed/",
+)
+
+
+def _extract_path_tenant(path: str) -> Optional[str]:
+    """Return the tenant segment embedded in path, or None if not applicable."""
+    for prefix in _TENANT_EMBEDDED_PREFIXES:
+        if path.startswith(prefix):
+            remainder = path[len(prefix):]
+            segment = remainder.split("/")[0]
+            if segment and _TENANT_PATTERN.match(segment):
+                return segment
+    return None
+
+
 def _resolve_permission(method: str, path: str) -> Optional[str]:
     """Resolve required permission for a method+path combination."""
     for pmethod, ppath, perm in _PATH_PERMISSIONS:
@@ -453,6 +482,22 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=400,
                 content={"error": {"message": "Invalid tenant format", "type": "invalid_request", "code": "invalid_tenant"}},
+            )
+
+        # Cross-context protection: tenant embedded in URL must match header tenant.
+        # Prevents accessing /v1/sessions/other-tenant while sending X-Aion-Tenant: my-tenant.
+        path_tenant = _extract_path_tenant(path)
+        if path_tenant is not None and path_tenant != tenant:
+            return JSONResponse(
+                status_code=403,
+                content={"error": {
+                    "message": (
+                        f"Tenant mismatch: URL references tenant '{path_tenant}' "
+                        f"but request header identifies tenant '{tenant}'."
+                    ),
+                    "type": "auth_error",
+                    "code": "tenant_mismatch",
+                }},
             )
 
         # Auth + RBAC for admin endpoints

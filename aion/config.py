@@ -35,8 +35,8 @@ class AionSettings(BaseSettings):
 
     # --- Module toggles ---
     estixe_enabled: bool = True
-    nomos_enabled: bool = False
-    metis_enabled: bool = False
+    nomos_enabled: bool = True
+    metis_enabled: bool = True
 
     # --- Default LLM (used when NOMOS is off) ---
     default_provider: str = "openai"
@@ -65,7 +65,7 @@ class AionSettings(BaseSettings):
 
     # --- Security (POC/enterprise) ---
     cors_origins: str = ""  # Comma-separated origins, e.g. "http://localhost:3000,https://console.aion.io"
-    require_chat_auth: bool = False  # Require API key for /v1/chat/completions
+    require_chat_auth: bool = True   # Require API key for /v1/chat/completions
     require_tenant: bool = False  # Require explicit X-Aion-Tenant header (no fallback to "default")
     chat_rate_limit: int = 100  # Requests/min per tenant+IP for chat endpoint
     admin_rate_limit: int = 10  # Requests/min per tenant+IP for admin endpoints

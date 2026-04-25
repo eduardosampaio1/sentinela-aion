@@ -334,14 +334,18 @@ function AuditTab({ timeRange }: { timeRange: TimeRange }) {
             <div key={s.id} className="flex items-center gap-4 px-5 py-3">
               <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--color-primary)]">{s.id}</span>
               <span className="text-xs text-[var(--color-text-muted)]">{s.turns} turnos</span>
-              <Badge variant={s.risk === "critical" ? "error" : s.risk === "high" ? "error" : s.risk === "medium" ? "warning" : "success"}>
-                {s.risk}
-              </Badge>
+              {s.risk && (
+                <Badge variant={s.risk === "critical" || s.risk === "high" ? "error" : s.risk === "medium" ? "warning" : "success"}>
+                  {s.risk}
+                </Badge>
+              )}
               <div className="ml-auto flex items-center gap-1 text-xs">
-                {s.hmac_valid ? (
+                {s.hmac_valid === true ? (
                   <><CheckCircle2 className="h-3.5 w-3.5 text-green-400" /><span className="text-green-400">válido</span></>
-                ) : (
+                ) : s.hmac_valid === false ? (
                   <><AlertTriangle className="h-3.5 w-3.5 text-red-400" /><span className="text-red-400">inválido</span></>
+                ) : (
+                  <span className="text-[var(--color-text-muted)]">—</span>
                 )}
               </div>
             </div>

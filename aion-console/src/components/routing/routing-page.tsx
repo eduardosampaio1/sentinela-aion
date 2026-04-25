@@ -18,9 +18,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { RoutingTopologyMap } from "./routing-topology";
 import { useApiData } from "@/lib/use-api-data";
-import { getModels, setBehavior } from "@/lib/api";
+import { useAionData } from "@/lib/use-aion-data";
+import { getModels, setBehavior, getIntelligenceIntents } from "@/lib/api";
 import { DemoBanner } from "@/components/ui/demo-banner";
-import { mockModels, mockModuleStats, mockDistribution, mockIntentPerformance } from "@/lib/mock-data";
+import { mockModels, mockIntentPerformance } from "@/lib/mock-data";
+import type { IntentPerformance } from "@/lib/types";
 
 const defaultRules = [
   { id: "r1", prompt_type: "Simples", model_id: "gpt-4o-mini", condition: "< 50 tokens" },
@@ -38,6 +40,33 @@ const modelDistribution = [
 
 export function RoutingPage() {
   const { data: models, isDemo, refetch } = useApiData(getModels, mockModels);
+  const liveData = useAionData(5000);
+  const { data: rawIntents, isDemo: intentsDemo } = useApiData(
+    getIntelligenceIntents,
+    mockIntentPerformance as unknown as Record<string, unknown>[],
+  );
+
+  // Normalise intents into IntentPerformance — backend may return different shape or mock fallback
+  const rawIntentsTyped = rawIntents as unknown as IntentPerformance[];
+  const intents: IntentPerformance[] = rawIntentsTyped.every((i) => typeof i.name === "string")
+    ? rawIntentsTyped
+    : mockIntentPerformance;
+
+  // Hero metrics from real stats — fall back to mock values when demo
+  const stats = liveData.stats;
+  const nomosStats = liveData.connected
+    ? {
+        decisions_today: stats.total_requests,
+        cost_optimized: stats.cost_saved,
+        routes_to_light: stats.routes,
+        avg_decision_ms: Math.round(stats.avg_latency_ms),
+      }
+    : {
+        decisions_today: 4_821,
+        cost_optimized: 148.32,
+        routes_to_light: 3_759,
+        avg_decision_ms: 12,
+      };
 
   const [priority, setPriority] = useState(50);
   const [maxLatency, setMaxLatency] = useState(3000);
@@ -61,7 +90,6 @@ export function RoutingPage() {
     : 0;
 
   // `models` comes from useApiData above (real API or mock fallback)
-  const nomosStats = mockModuleStats.nomos;
 
   const handleSave = async () => {
     setSaving(true);
@@ -375,7 +403,7 @@ export function RoutingPage() {
           <div>
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Cadeia de fallback</h2>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Se o modelo principal falhar, o NOMOS tenta o próximo. Hoje: {mockDistribution.fallback_pct}% das chamadas usaram fallback.
+              Se o modelo principal falhar, o NOMOS tenta o próximo automaticamente.
             </p>
           </div>
           <button
@@ -426,7 +454,7 @@ export function RoutingPage() {
               </tr>
             </thead>
             <tbody>
-              {mockIntentPerformance.map((intent) => {
+              {intents.map((intent) => {
                 const hasSavings = intent.savings_day > 0;
                 return (
                   <tr
@@ -485,10 +513,12 @@ export function RoutingPage() {
         </div>
         <div className="border-t border-[var(--color-border)] px-5 py-3">
           <p className="text-xs text-[var(--color-text-muted)]">
-            Economia total potencial:{" "}
-            <strong className="text-green-400">
-              R$ {mockIntentPerformance.reduce((s, i) => s + i.savings_day, 0).toFixed(2)}/dia
-            </strong>
+            {intentsDemo ? "Dados de demonstração" : "Economia total potencial:"}{" "}
+            {!intentsDemo && (
+              <strong className="text-green-400">
+                R$ {intents.reduce((s, i) => s + i.savings_day, 0).toFixed(2)}/dia
+              </strong>
+            )}
           </p>
         </div>
       </div>

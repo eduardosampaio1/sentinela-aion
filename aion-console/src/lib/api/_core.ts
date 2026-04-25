@@ -4,7 +4,15 @@
  */
 import type { Stats, AionEvent, BudgetSummary } from "@/lib/types";
 
-export const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL ?? "http://localhost:8080";
+/**
+ * All requests from client components go through the Next.js server-side proxy
+ * at /api/proxy, which adds Authorization: Bearer <AION_API_KEY> securely.
+ * AION_API_KEY never appears in the browser bundle.
+ *
+ * For server-side rendering (rare in this SPA), the proxy path also works
+ * because Next.js resolves absolute URLs using the deploy origin.
+ */
+export const API_BASE = "/api/proxy";
 
 let _activeTenant = process.env.NEXT_PUBLIC_AION_TENANT ?? "default";
 
@@ -19,10 +27,11 @@ export function getActiveTenant(): string {
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    // Tenant header is forwarded by the proxy to the backend
     "X-Aion-Tenant": _activeTenant,
   };
-  const apiKey = process.env.NEXT_PUBLIC_AION_API_KEY;
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  // Authorization is NOT added here — it is injected server-side in /api/proxy/[...path]/route.ts
+  // so AION_API_KEY never leaks into the browser bundle.
 
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { ...headers, ...(options?.headers as Record<string, string> | undefined) },

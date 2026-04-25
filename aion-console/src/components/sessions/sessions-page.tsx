@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Shield,
   GitBranch,
@@ -27,7 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { TimeRangeSelect } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
 import { useApiData } from "@/lib/use-api-data";
-import { getSessions, getApprovals, resolveApproval } from "@/lib/api";
+import { getSessions, getSessionAudit, getApprovals, resolveApproval } from "@/lib/api";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockSessions, mockAnnotations } from "@/lib/mock-data";
 import type { Session, SessionTurn, AnnotationItem } from "@/lib/types";
@@ -120,7 +120,14 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
           <User className="h-3.5 w-3.5 text-[var(--color-text-muted)]" />
         </div>
         <div className="flex-1 rounded-xl rounded-tl-none bg-white/5 px-3 py-2">
-          <p className="text-sm text-[var(--color-text)] leading-relaxed">{turn.input}</p>
+          <p className="text-sm text-[var(--color-text)] leading-relaxed font-[family-name:var(--font-mono)]">
+            {turn.input}
+          </p>
+          {turn.input.startsWith("[") && (
+            <p className="mt-1 text-[10px] text-[var(--color-text-muted)] italic">
+              Conteúdo anonimizado (LGPD) — hash SHA-256 da mensagem original
+            </p>
+          )}
         </div>
       </div>
 
@@ -142,8 +149,8 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
           </span>
         )}
         <span className="text-[var(--color-text-muted)]">{turn.latency_ms}ms</span>
-        {turn.cost > 0 && (
-          <span className="text-[var(--color-text-muted)]">${turn.cost.toFixed(4)}</span>
+        {(turn.cost ?? 0) > 0 && (
+          <span className="text-[var(--color-text-muted)]">${(turn.cost as number).toFixed(4)}</span>
         )}
         {riskBar(turn.risk_score)}
       </div>
@@ -193,8 +200,27 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
 }
 
 function SessionDrawer({ session, onClose }: { session: Session; onClose: () => void }) {
-  const risk = riskConfig[session.risk];
-  const outcome = outcomeConfig[session.outcome];
+  // Fetch full audit trail when drawer opens — derives risk, outcome, hmac_valid, turn_history
+  const [audit, setAudit] = useState<Session | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAuditLoading(true);
+    setAudit(null);
+    getSessionAudit(session.id)
+      .then((data) => { if (!cancelled) setAudit(data); })
+      .catch(() => { /* fail silently — fall back to session list data */ })
+      .finally(() => { if (!cancelled) setAuditLoading(false); });
+    return () => { cancelled = true; };
+  }, [session.id]);
+
+  // Use audit data once loaded; fall back to whatever came from the sessions list
+  const effective = audit ?? session;
+  const riskEntry = effective.risk ? riskConfig[effective.risk] : null;
+  const outcomeEntry = effective.outcome ? outcomeConfig[effective.outcome] : null;
+  const turnHistory = effective.turn_history ?? [];
+  const spendStr = effective.spend !== undefined ? `$${effective.spend.toFixed(4)}` : "—";
 
   return (
     <>
@@ -224,15 +250,25 @@ function SessionDrawer({ session, onClose }: { session: Session; onClose: () => 
         </div>
 
         {/* Status row */}
-        <div className="flex items-center gap-4 border-b border-[var(--color-border)] px-5 py-3">
-          <Badge variant={risk.badge}>{risk.label}</Badge>
-          <span className={`text-sm font-medium ${outcome.color}`}>{outcome.label}</span>
+        <div className="flex items-center gap-4 border-b border-[var(--color-border)] px-5 py-3 min-h-[44px]">
+          {riskEntry && <Badge variant={riskEntry.badge}>{riskEntry.label}</Badge>}
+          {outcomeEntry && (
+            <span className={`text-sm font-medium ${outcomeEntry.color}`}>{outcomeEntry.label}</span>
+          )}
+          {auditLoading && (
+            <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+              carregando auditoria…
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1.5 text-xs">
-            {session.hmac_valid ? (
+            {effective.hmac_valid === true ? (
               <><CheckCircle2 className="h-3.5 w-3.5 text-green-400" /><span className="text-green-400">HMAC válido</span></>
-            ) : (
+            ) : effective.hmac_valid === false ? (
               <><AlertTriangle className="h-3.5 w-3.5 text-red-400" /><span className="text-red-400">HMAC inválido</span></>
-            )}
+            ) : !auditLoading ? (
+              <span className="text-[var(--color-text-muted)]">HMAC —</span>
+            ) : null}
           </div>
         </div>
 
@@ -240,22 +276,27 @@ function SessionDrawer({ session, onClose }: { session: Session; onClose: () => 
         <div className="grid grid-cols-3 divide-x divide-[var(--color-border)] border-b border-[var(--color-border)]">
           <div className="px-5 py-3">
             <p className="text-xs text-[var(--color-text-muted)]">Turnos</p>
-            <p className="mt-0.5 text-xl font-bold text-[var(--color-text)]">{session.turns}</p>
+            <p className="mt-0.5 text-xl font-bold text-[var(--color-text)]">{effective.turns}</p>
           </div>
           <div className="px-5 py-3">
             <p className="text-xs text-[var(--color-text-muted)]">Gasto</p>
-            <p className="mt-0.5 text-xl font-bold text-[var(--color-text)]">${session.spend.toFixed(4)}</p>
+            <p className="mt-0.5 text-xl font-bold text-[var(--color-text)]">{spendStr}</p>
           </div>
           <div className="px-5 py-3">
             <p className="text-xs text-[var(--color-text-muted)]">Tenant</p>
-            <p className="mt-0.5 text-sm font-bold text-[var(--color-text)]">{session.tenant}</p>
+            <p className="mt-0.5 text-sm font-bold text-[var(--color-text)]">{effective.tenant}</p>
           </div>
         </div>
 
         {/* Turn history */}
         <div className="flex-1 overflow-y-auto px-5 py-2">
-          {session.turn_history.length > 0 ? (
-            session.turn_history.map((t) => <TurnDetail key={t.turn} turn={t} />)
+          {auditLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+              <span className="text-sm text-[var(--color-text-muted)]">Carregando auditoria…</span>
+            </div>
+          ) : turnHistory.length > 0 ? (
+            turnHistory.map((t) => <TurnDetail key={t.turn} turn={t} />)
           ) : (
             <p className="py-10 text-center text-sm text-[var(--color-text-muted)]">
               Histórico não disponível para esta sessão
@@ -270,7 +311,8 @@ function SessionDrawer({ session, onClose }: { session: Session; onClose: () => 
 function getQualityBadge(s: Session): { variant: "error" | "warning" | "muted" | "success"; label: string } {
   if (s.hmac_valid === false) return { variant: "error", label: "Revisar" };
   if (s.risk === "critical") return { variant: "warning", label: "Pendente" };
-  if (s.outcome === "blocked" && s.hmac_valid) return { variant: "muted", label: "Bloqueada" };
+  if (s.outcome === "blocked" && s.hmac_valid === true) return { variant: "muted", label: "Bloqueada" };
+  if (s.risk === undefined) return { variant: "muted", label: "—" };
   return { variant: "success", label: "OK" };
 }
 
@@ -653,8 +695,8 @@ export function SessionsPage() {
                 </thead>
                 <tbody>
                   {filtered.map((s) => {
-                    const risk = riskConfig[s.risk];
-                    const outcome = outcomeConfig[s.outcome];
+                    const riskEntry = s.risk ? riskConfig[s.risk] : null;
+                    const outcomeEntry = s.outcome ? outcomeConfig[s.outcome] : null;
                     const quality = getQualityBadge(s);
                     const isActive = selected?.id === s.id;
                     return (
@@ -673,21 +715,27 @@ export function SessionsPage() {
                         <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
                           {s.user_hash}
                         </td>
-                        <td className="px-5 py-3 text-center text-[var(--color-text)]">{s.turns}</td>
+                        <td className="px-5 py-3 text-center text-[var(--color-text)]">{s.turns || "—"}</td>
                         <td className="px-5 py-3">
-                          <Badge variant={risk.badge}>{risk.label}</Badge>
+                          {riskEntry ? (
+                            <Badge variant={riskEntry.badge}>{riskEntry.label}</Badge>
+                          ) : (
+                            <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                          )}
                         </td>
-                        <td className={`px-5 py-3 text-sm font-medium ${outcome.color}`}>
-                          {outcome.label}
+                        <td className={`px-5 py-3 text-sm font-medium ${outcomeEntry?.color ?? "text-[var(--color-text-muted)]"}`}>
+                          {outcomeEntry?.label ?? "—"}
                         </td>
                         <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
-                          ${s.spend.toFixed(4)}
+                          {s.spend !== undefined ? `$${s.spend.toFixed(4)}` : "—"}
                         </td>
                         <td className="px-5 py-3">
-                          {s.hmac_valid ? (
+                          {s.hmac_valid === true ? (
                             <CheckCircle2 className="h-4 w-4 text-green-400" />
-                          ) : (
+                          ) : s.hmac_valid === false ? (
                             <AlertTriangle className="h-4 w-4 text-amber-400" />
+                          ) : (
+                            <span className="text-xs text-[var(--color-text-muted)]">—</span>
                           )}
                         </td>
                         <td className="px-5 py-3">

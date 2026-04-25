@@ -276,6 +276,17 @@ export function OperationsPage() {
           </div>
         </div>
 
+        {/* When connected to backend, monitors require GET /v1/monitors/{tenant} (roadmap T1.x).
+            Show a placeholder rather than fake data. In demo mode, display mock monitors. */}
+        {liveData.connected ? (
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-8 text-center">
+            <p className="text-sm font-medium text-[var(--color-text-muted)]">
+              Monitores em tempo real requerem o endpoint{" "}
+              <code className="rounded bg-white/5 px-1 py-0.5 text-xs">GET /v1/monitors/{"{tenant}"}</code>
+              {" "}(em desenvolvimento — roadmap T1.x).
+            </p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {mockMonitors.map((monitor: Monitor) => {
             const isOk = monitor.status === "ok";
@@ -378,6 +389,7 @@ export function OperationsPage() {
             );
           })}
         </div>
+        )}
       </section>
 
       {/* Events Table */}

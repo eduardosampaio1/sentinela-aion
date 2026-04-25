@@ -149,12 +149,12 @@ export interface SessionTurn {
   module: "ESTIXE" | "NOMOS" | "METIS" | null;
   model_used: string | null;
   latency_ms: number;
-  cost: number;
+  cost?: number;             // not available from real TurnAuditEntry — LGPD constraint
   risk_score: number;
-  // Response fields
-  aion_response?: string;    // bypass ou block: resposta do AION sem LLM
-  llm_response?: string;     // route: resposta do LLM
-  block_reason?: string;     // block: motivo do bloqueio
+  // Response fields — only in mock/demo; backend does not store LLM responses
+  aion_response?: string;
+  llm_response?: string;
+  block_reason?: string;
   pii_detected?: string[];   // PII encontrado neste turno
   metis_compressed?: boolean; // METIS comprimiu o contexto
 }
@@ -164,13 +164,14 @@ export interface Session {
   user_hash: string;
   tenant: string;
   turns: number;
-  risk: "low" | "medium" | "high" | "critical";
-  spend: number;
-  outcome: "bypassed" | "routed" | "blocked" | "optimized";
-  hmac_valid: boolean;
   started_at: string;
   last_activity: string;
-  turn_history: SessionTurn[];
+  // Derived from audit trail — undefined until getSessionAudit() is called
+  risk?: "low" | "medium" | "high" | "critical";
+  spend?: number;
+  outcome?: "bypassed" | "routed" | "blocked" | "optimized";
+  hmac_valid?: boolean;
+  turn_history?: SessionTurn[];
 }
 
 // ─── Budget ─────────────────────────────────────────────────────────────────
