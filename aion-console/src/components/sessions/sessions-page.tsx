@@ -23,6 +23,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { TimeRangeSelect } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
+import { useApiData } from "@/lib/use-api-data";
+import { getSessions } from "@/lib/api";
+import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockSessions, mockAnnotations } from "@/lib/mock-data";
 import type { Session, SessionTurn, AnnotationItem } from "@/lib/types";
 
@@ -484,20 +487,30 @@ export function SessionsPage() {
     submitted: boolean;
   }>>({});
 
-  const filtered = mockSessions.filter((s) => {
+  const { data: sessions, isDemo, refetch } = useApiData(getSessions, mockSessions, {
+    intervalMs: 30_000,
+  });
+
+  const filtered = sessions.filter((s) => {
     if (filter === "all") return true;
     if (filter === "blocked") return s.outcome === "blocked";
     return s.risk === filter;
   });
 
-  const pendingCount = mockAnnotations.filter((a) => !a.annotated && !annotationState[a.id]?.submitted).length;
-  const annotatedCount = mockAnnotations.filter((a) => a.annotated || annotationState[a.id]?.submitted).length;
+  const pendingCount = mockAnnotations.filter(
+    (a) => !a.annotated && !annotationState[a.id]?.submitted,
+  ).length;
+  const annotatedCount = mockAnnotations.filter(
+    (a) => a.annotated || annotationState[a.id]?.submitted,
+  ).length;
 
   const getAnnState = (id: string) =>
     annotationState[id] ?? { comment: "", submitted: false };
 
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

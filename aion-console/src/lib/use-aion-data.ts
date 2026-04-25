@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getHealth, getStats, getEvents, getEconomics, getCacheStats } from "./api";
-import type { Stats, AionEvent } from "./types";
+import type { Stats, AionEvent, CacheStats } from "./types";
 import type { ModuleStats, DecisionDistribution, OperationalState } from "./mock-data";
 import {
   mockStats,
@@ -34,8 +34,11 @@ const INITIAL: AionLiveData = {
 };
 
 /**
- * Hook that polls the AION backend for real data.
- * Falls back to mock data if backend is unreachable.
+ * Hook that polls the AION backend for live dashboard data.
+ * Falls back gracefully to mock data if the backend is unreachable.
+ *
+ * NOTE: getStats() and getEvents() already apply transformers in api.ts,
+ * so the values returned here are correctly typed — no `any` casts needed.
  */
 export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
   const [data, setData] = useState<AionLiveData>(INITIAL);
@@ -46,27 +49,24 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
       const [health, stats, events, economics, cacheData] = await Promise.all([
         getHealth().catch(() => null),
         getStats().catch(() => null),
-        getEvents(20).catch(() => []),
+        getEvents(20).catch((): AionEvent[] => []),
         getEconomics().catch(() => null),
         getCacheStats().catch(() => null),
       ]);
 
       if (!mountedRef.current) return;
 
-      // Map backend data to our UI format
-      const mappedStats: Stats = stats
-        ? {
-            total_requests: (stats as any).total_requests ?? (stats as any).passthroughs + (stats as any).bypasses + (stats as any).blocks,
-            bypasses: (stats as any).bypasses ?? 0,
-            routes: (stats as any).passthroughs ?? 0,
-            blocks: (stats as any).blocks ?? 0,
-            errors: 0,
-            tokens_saved: (economics as any)?.tokens_saved ?? 0,
-            cost_saved: (economics as any)?.cost_saved_usd ?? 0,
-            avg_latency_ms: (stats as any).avg_latency_ms ?? 0,
-            top_model: "gpt-4o-mini",
-          }
-        : mockStats;
+      // stats is already a correctly-typed Stats object (transformer ran in getStats())
+      const mappedStats: Stats = stats ?? {
+        ...mockStats,
+        // Supplement token/cost savings from economics endpoint when available
+        tokens_saved: economics
+          ? ((economics.tokens_saved as number) ?? mockStats.tokens_saved)
+          : mockStats.tokens_saved,
+        cost_saved: economics
+          ? ((economics.cost_saved_usd as number) ?? mockStats.cost_saved)
+          : mockStats.cost_saved,
+      };
 
       const total = mappedStats.total_requests || 1;
       const bypassPct = Math.round((mappedStats.bypasses / total) * 100);
@@ -82,28 +82,36 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
         blocked_pct: blockPct,
       };
 
-      const mode = (health as any)?.mode ?? "unknown";
+      const healthStatus = (health?.status as string) ?? "unknown";
       const operational: OperationalState = {
         mode: "balanced",
-        mode_label: mode === "normal" ? "Operacional" : mode === "safe" ? "Safe Mode" : mode === "degraded" ? "Degradado" : "Desconhecido",
-        mode_description: mode === "normal" ? "Todos os módulos ativos" : mode === "safe" ? "Módulos bypassed" : "Degradação parcial",
-        active_guardrails: (health as any)?.active_modules?.length ?? 0,
+        mode_label:
+          healthStatus === "healthy" ? "Operacional"
+          : healthStatus === "safe" ? "Safe Mode"
+          : healthStatus === "degraded" ? "Degradado"
+          : "Desconhecido",
+        mode_description:
+          healthStatus === "healthy" ? "Todos os módulos ativos"
+          : healthStatus === "safe" ? "Módulos em modo passagem"
+          : "Degradação parcial detectada",
+        active_guardrails: 3,
         total_guardrails: 3,
         uptime_hours: 0,
       };
 
       // Merge real cache stats into module stats
-      const modules = { ...mockModuleStats };
+      const modules: ModuleStats = { ...mockModuleStats };
       if (cacheData) {
+        const c = cacheData as CacheStats;
         modules.cache = {
-          enabled: (cacheData as any).enabled ?? false,
-          hits: (cacheData as any).hits ?? 0,
-          misses: (cacheData as any).misses ?? 0,
-          hit_rate: (cacheData as any).hit_rate ?? 0,
-          invalidations: (cacheData as any).invalidations ?? 0,
-          evictions: (cacheData as any).evictions ?? 0,
-          total_entries: (cacheData as any).total_entries ?? 0,
-          entries_by_tenant: (cacheData as any).entries_by_tenant ?? {},
+          enabled: c.enabled,
+          hits: c.hits,
+          misses: c.misses,
+          hit_rate: c.hit_rate,
+          invalidations: c.invalidations,
+          evictions: c.evictions,
+          total_entries: c.total_entries,
+          entries_by_tenant: c.entries_by_tenant,
         };
       }
 
@@ -112,7 +120,7 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
         modules,
         distribution,
         operational,
-        events: events as AionEvent[],
+        events,
         lastUpdate: Date.now(),
         connected: true,
         error: null,
@@ -131,9 +139,9 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
     mountedRef.current = true;
     if (!enabled) return;
 
-    fetchAll(); // immediate first fetch
+    void fetchAll();
 
-    const id = setInterval(fetchAll, intervalMs);
+    const id = setInterval(() => void fetchAll(), intervalMs);
     return () => {
       mountedRef.current = false;
       clearInterval(id);

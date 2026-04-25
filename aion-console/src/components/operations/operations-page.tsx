@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { TimeRangeSelect, timeRangeMs } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
 import { useAionData } from "@/lib/use-aion-data";
+import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockEvents, mockMonitors } from "@/lib/mock-data";
 import type { AionEvent, Monitor } from "@/lib/types";
 
@@ -92,6 +93,11 @@ export function OperationsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Demo banner when backend is unreachable */}
+      {!liveData.connected && (
+        <DemoBanner onRetry={() => setAutoRefresh(true)} />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

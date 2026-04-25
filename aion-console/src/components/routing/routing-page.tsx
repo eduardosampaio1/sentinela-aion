@@ -17,6 +17,9 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RoutingTopologyMap } from "./routing-topology";
+import { useApiData } from "@/lib/use-api-data";
+import { getModels } from "@/lib/api";
+import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockModels, mockModuleStats, mockDistribution, mockIntentPerformance } from "@/lib/mock-data";
 
 const defaultRules = [
@@ -34,6 +37,8 @@ const modelDistribution = [
 ];
 
 export function RoutingPage() {
+  const { data: models, isDemo, refetch } = useApiData(getModels, mockModels);
+
   const [priority, setPriority] = useState(50);
   const [maxLatency, setMaxLatency] = useState(3000);
   const [rules] = useState(defaultRules);
@@ -55,7 +60,7 @@ export function RoutingPage() {
     ? ((priority - 50) * 0.5)    // Qualidade melhora até 25%
     : 0;
 
-  const models = mockModels;
+  // `models` comes from useApiData above (real API or mock fallback)
   const nomosStats = mockModuleStats.nomos;
 
   const handleSave = async () => {
@@ -108,6 +113,8 @@ export function RoutingPage() {
 
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
+
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">

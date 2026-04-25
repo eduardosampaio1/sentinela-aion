@@ -2,11 +2,10 @@
 
 import { TrendingDown, Zap, BarChart3, Cpu, ArrowRight, Sparkles, DollarSign } from "lucide-react";
 import { AnimatedNumber } from "@/components/ui/animated-number";
+import { useApiData } from "@/lib/use-api-data";
+import { getBudgetStatus } from "@/lib/api";
+import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockBudgetSummary, mockIntentPerformance } from "@/lib/mock-data";
-
-const totalWithoutAion = mockBudgetSummary.used_brl + mockBudgetSummary.avoided_cost;
-const savingsPct = Math.round((mockBudgetSummary.avoided_cost / totalWithoutAion) * 100);
-const usedPct = Math.round((mockBudgetSummary.used_brl / totalWithoutAion) * 100);
 
 const modelBreakdown = [
   { model: "gpt-4o", provider: "OpenAI", requests: 2840, cost_brl: 18400, pct: 58.9, color: "bg-sky-500" },
@@ -27,11 +26,25 @@ const totalNomosSavedMonth = nomosOptimizations.reduce((s, o) => s + o.saved_day
 
 const bypassCount = 12840;
 const daysInPeriod = 24;
-const projectedMonthly = Math.round((mockBudgetSummary.used_brl / daysInPeriod) * 30);
 
 export function BudgetPage() {
+  const { data: budget, isDemo, refetch } = useApiData(getBudgetStatus, mockBudgetSummary, {
+    intervalMs: 60_000,
+  });
+
+  const totalWithoutAion = budget.used_brl + budget.avoided_cost;
+  const savingsPct = totalWithoutAion > 0
+    ? Math.round((budget.avoided_cost / totalWithoutAion) * 100)
+    : 0;
+  const usedPct = totalWithoutAion > 0
+    ? Math.round((budget.used_brl / totalWithoutAion) * 100)
+    : 0;
+  const projectedMonthly = Math.round((budget.used_brl / daysInPeriod) * 30);
+
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
+
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
@@ -51,7 +64,7 @@ export function BudgetPage() {
             Economia gerada
           </div>
           <p className="mt-2 font-[family-name:var(--font-heading)] text-3xl font-bold text-green-400">
-            R$ <AnimatedNumber value={mockBudgetSummary.avoided_cost} />
+            R$ <AnimatedNumber value={budget.avoided_cost} />
           </p>
           <p className="mt-1 text-xs text-green-400/70">
             {savingsPct}% do custo evitado — via bypass e compressão
@@ -64,7 +77,7 @@ export function BudgetPage() {
             Custo real do mês
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
-            R$ <AnimatedNumber value={mockBudgetSummary.used_brl} />
+            R$ <AnimatedNumber value={budget.used_brl} />
           </p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             vs R$ {totalWithoutAion.toLocaleString("pt-BR")} sem AION
@@ -128,12 +141,12 @@ export function BudgetPage() {
               <div className="absolute inset-0 flex items-center">
                 <div className="px-3" style={{ width: `${usedPct}%` }}>
                   <span className="text-xs font-semibold text-green-400">
-                    R$ {mockBudgetSummary.used_brl.toLocaleString("pt-BR")}
+                    R$ {budget.used_brl.toLocaleString("pt-BR")}
                   </span>
                 </div>
                 <div className="flex-1 px-3">
                   <span className="text-xs text-green-400/50">
-                    ← R$ {mockBudgetSummary.avoided_cost.toLocaleString("pt-BR")} economizados
+                    ← R$ {budget.avoided_cost.toLocaleString("pt-BR")} economizados
                   </span>
                 </div>
               </div>
