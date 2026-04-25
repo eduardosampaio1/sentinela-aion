@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
+import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import { useApiData } from "@/lib/use-api-data";
 import { getCalibration, promoteCalibration, rollbackCalibration } from "@/lib/api";
 
@@ -206,15 +207,15 @@ function TabShadow() {
     setActionError(null);
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (reason: string) => {
     if (!actionCategory || !actionType) return;
     setActionLoading(true);
     setActionError(null);
     try {
       if (actionType === "promote") {
-        await promoteCalibration(actionCategory.category, actionCategory.suggested_threshold);
+        await promoteCalibration(actionCategory.category, actionCategory.suggested_threshold, reason);
       } else {
-        await rollbackCalibration(actionCategory.category);
+        await rollbackCalibration(actionCategory.category, reason);
       }
       closeAction();
       refetch();
@@ -396,82 +397,42 @@ function TabShadow() {
       </div>
 
       {/* Action Modal (Promote or Rollback) */}
-      {actionCategory && actionType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
-            <h3 className="text-lg font-semibold text-[var(--color-text)]">
-              {actionType === "promote" ? "Promover categoria para live?" : "Reverter categoria?"}
-            </h3>
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Categoria:{" "}
-              <code className="rounded bg-white/5 px-1 py-0.5 text-xs">{actionCategory.category}</code>
-            </p>
-
-            <div className={`mt-4 space-y-2 rounded-lg border p-4 text-sm ${
-              actionType === "promote"
-                ? "border-green-800/40 bg-green-900/20"
-                : "border-red-800/40 bg-red-900/10"
-            }`}>
-              {actionType === "promote" ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-green-300">Threshold atual</span>
-                    <strong className="font-[family-name:var(--font-mono)] text-green-400">
-                      {actionCategory.current_threshold != null
-                        ? (actionCategory.current_threshold * 100).toFixed(0) + "%"
-                        : "—"}
-                    </strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-green-300">Novo threshold</span>
-                    <strong className="font-[family-name:var(--font-mono)] text-green-400">
-                      {(actionCategory.suggested_threshold * 100).toFixed(0)}%
-                    </strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-green-300">Amostras coletadas</span>
-                    <strong className="font-[family-name:var(--font-mono)] text-green-400">
-                      {actionCategory.total_seen.toLocaleString("pt-BR")}
-                    </strong>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-red-300">• O threshold voltará para o valor anterior</p>
-                  <p className="text-red-300">• Dados coletados serão preservados</p>
-                  <p className="text-red-300">• Esta ação não pode ser desfeita automaticamente</p>
-                </>
-              )}
-            </div>
-
-            {actionError && (
-              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
-                {actionError}
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={closeAction}
-                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={actionLoading}
-                className={`cursor-pointer rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${
-                  actionType === "promote" ? "bg-green-600" : "bg-red-700"
-                }`}
-              >
-                {actionLoading
-                  ? actionType === "promote" ? "Promovendo..." : "Revertendo..."
-                  : actionType === "promote" ? "Confirmar promoção" : "Confirmar reversão"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmActionModal
+        open={!!actionCategory && !!actionType}
+        severity={actionType === "rollback" ? "critical" : "warning"}
+        title={
+          actionType === "promote"
+            ? `Promover "${actionCategory?.category}" para produção?`
+            : `Reverter "${actionCategory?.category}"?`
+        }
+        description={
+          actionType === "promote"
+            ? `O threshold de ${actionCategory?.category} será ajustado de ${
+                actionCategory?.current_threshold != null
+                  ? (actionCategory.current_threshold * 100).toFixed(0) + "%"
+                  : "—"
+              } para ${((actionCategory?.suggested_threshold ?? 0) * 100).toFixed(0)}% em produção.`
+            : `O threshold de ${actionCategory?.category} voltará ao valor anterior ao Shadow Mode.`
+        }
+        impact={
+          actionType === "promote"
+            ? [
+                `• Novo threshold: ${((actionCategory?.suggested_threshold ?? 0) * 100).toFixed(0)}% (baseado em ${actionCategory?.total_seen.toLocaleString("pt-BR")} amostras)`,
+                "• A mudança afeta roteamento em produção imediatamente",
+                "• Um rollback manual estará disponível se necessário",
+              ]
+            : [
+                "• O threshold voltará para o valor anterior ao Shadow Mode",
+                "• Dados coletados durante o shadow serão preservados",
+                "• Esta ação não pode ser desfeita automaticamente",
+              ]
+        }
+        actionLabel={actionType === "promote" ? "Confirmar promoção" : "Confirmar reversão"}
+        loading={actionLoading}
+        error={actionError}
+        onConfirm={handleConfirm}
+        onCancel={closeAction}
+      />
     </div>
   );
 }

@@ -36,17 +36,27 @@ export async function getAudit(limit = 50): Promise<Record<string, unknown>[]> {
 
 export async function rotateKeys(
   newKeys: string[],
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
 ): Promise<{ rotated: boolean; old_keys_revoked_at: number }> {
   return fetchApi("/v1/admin/rotate-keys", {
     method: "POST",
     body: JSON.stringify({ new_keys: newKeys }),
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
   });
 }
 
 // ─── LGPD / Data deletion ─────────────────────────────────────────────────────
 
-export async function deleteTenantData(tenant: string): Promise<Record<string, unknown>> {
-  return fetchApi(`/v1/data/${tenant}`, { method: "DELETE" });
+export async function deleteTenantData(
+  tenant: string,
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
+): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/data/${tenant}`, {
+    method: "DELETE",
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
+  });
 }
 
 // ─── Tenant settings ──────────────────────────────────────────────────────────

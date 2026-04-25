@@ -40,17 +40,25 @@ export async function getCalibrationHistory(): Promise<Record<string, unknown>[]
 export async function promoteCalibration(
   category: string,
   new_threshold: number,
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
 ): Promise<Record<string, unknown>> {
   return fetchApi(`/v1/calibration/${getActiveTenant()}/promote`, {
     method: "POST",
     body: JSON.stringify({ category, new_threshold }),
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
   });
 }
 
-export async function rollbackCalibration(category: string): Promise<Record<string, unknown>> {
+export async function rollbackCalibration(
+  category: string,
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
+): Promise<Record<string, unknown>> {
   return fetchApi(`/v1/calibration/${getActiveTenant()}/rollback`, {
     method: "POST",
     body: JSON.stringify({ category }),
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
   });
 }
 
@@ -71,11 +79,19 @@ export async function activateKillswitch(
   return fetchApi("/v1/killswitch", {
     method: "PUT",
     body: JSON.stringify({ reason, duration_seconds }),
+    // reason goes both in the body (for the killswitch record) and as header (for the audit trail)
+    headers: { "X-Aion-Actor-Reason": reason },
   });
 }
 
-export async function deactivateKillswitch(): Promise<{ killswitch_active: false }> {
-  return fetchApi("/v1/killswitch", { method: "DELETE" });
+export async function deactivateKillswitch(
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
+): Promise<{ killswitch_active: false }> {
+  return fetchApi("/v1/killswitch", {
+    method: "DELETE",
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
+  });
 }
 
 // ─── Threats ──────────────────────────────────────────────────────────────────

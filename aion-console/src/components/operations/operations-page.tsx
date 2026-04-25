@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Toggle } from "@/components/ui/toggle";
 import { TimeRangeSelect, timeRangeMs } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
+import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import { useAionData } from "@/lib/use-aion-data";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockEvents, mockMonitors } from "@/lib/mock-data";
@@ -102,15 +103,33 @@ export function OperationsPage() {
   });
   const [moduleToggling, setModuleToggling] = useState<string | null>(null);
 
-  const handleModuleToggle = async (name: "estixe" | "nomos" | "metis", enabled: boolean) => {
-    const prev = moduleEnabled[name];
-    setModuleEnabled((s) => ({ ...s, [name]: enabled }));
-    setModuleToggling(name);
+  // Confirmation modal for module toggle
+  const [pendingToggle, setPendingToggle] = useState<{
+    name: "estixe" | "nomos" | "metis";
+    enabled: boolean;
+  } | null>(null);
+  const [toggleConfirmLoading, setToggleConfirmLoading] = useState(false);
+  const [toggleConfirmError, setToggleConfirmError] = useState<string | null>(null);
+
+  // Intercept the toggle — open confirmation modal instead of calling API directly
+  const handleModuleToggle = (name: "estixe" | "nomos" | "metis", enabled: boolean) => {
+    setToggleConfirmError(null);
+    setPendingToggle({ name, enabled });
+  };
+
+  const handleToggleConfirm = async (reason: string) => {
+    if (!pendingToggle) return;
+    const { name, enabled } = pendingToggle;
+    setToggleConfirmLoading(true);
+    setToggleConfirmError(null);
     try {
-      await toggleModule(name, enabled);
-    } catch {
-      setModuleEnabled((s) => ({ ...s, [name]: prev })); // rollback
+      await toggleModule(name, enabled, reason);
+      setModuleEnabled((s) => ({ ...s, [name]: enabled }));
+      setPendingToggle(null);
+    } catch (err) {
+      setToggleConfirmError(err instanceof Error ? err.message : "Erro ao alterar módulo");
     } finally {
+      setToggleConfirmLoading(false);
       setModuleToggling(null);
     }
   };
@@ -212,7 +231,7 @@ export function OperationsPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {MODULE_CONFIG.map((mod) => {
             const enabled = moduleEnabled[mod.name];
-            const toggling = moduleToggling === mod.name;
+            const toggling = pendingToggle?.name === mod.name && toggleConfirmLoading;
             const Icon = mod.Icon;
             return (
               <div
@@ -241,9 +260,9 @@ export function OperationsPage() {
                 </div>
                 <Toggle
                   enabled={enabled}
-                  onChange={(v) => { void handleModuleToggle(mod.name, v); }}
+                  onChange={(v) => handleModuleToggle(mod.name, v)}
                   label={mod.label}
-                  disabled={toggling}
+                  disabled={toggling || !!pendingToggle}
                 />
               </div>
             );
@@ -575,6 +594,37 @@ export function OperationsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Confirm modal for module toggle ── */}
+      {pendingToggle && (
+        <ConfirmActionModal
+          open
+          severity="warning"
+          title={`${pendingToggle.enabled ? "Ativar" : "Desativar"} módulo ${pendingToggle.name.toUpperCase()}?`}
+          description={
+            pendingToggle.enabled
+              ? `O módulo ${pendingToggle.name.toUpperCase()} será reativado e voltará a processar requisições em produção.`
+              : `O módulo ${pendingToggle.name.toUpperCase()} será desativado. Requisições continuarão fluindo sem este módulo até que seja reativado.`
+          }
+          impact={
+            pendingToggle.enabled
+              ? [
+                  `• ${pendingToggle.name.toUpperCase()} voltará a processar todo o tráfego imediatamente`,
+                  "• Nenhuma interrupção de tráfego — mudança gradual",
+                ]
+              : [
+                  `• ${pendingToggle.name.toUpperCase()} não processará mais requisições`,
+                  "• Tráfego continuará fluindo, mas sem as proteções/otimizações deste módulo",
+                  "• A mudança tem efeito imediato em produção",
+                ]
+          }
+          actionLabel={pendingToggle.enabled ? "Ativar módulo" : "Desativar módulo"}
+          loading={toggleConfirmLoading}
+          error={toggleConfirmError}
+          onConfirm={handleToggleConfirm}
+          onCancel={() => setPendingToggle(null)}
+        />
       )}
     </div>
   );

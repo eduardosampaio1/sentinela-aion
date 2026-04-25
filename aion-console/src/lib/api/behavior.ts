@@ -32,10 +32,13 @@ export async function getPipelineTopology(): Promise<Record<string, unknown>> {
 export async function toggleModule(
   module: "estixe" | "nomos" | "metis",
   enabled: boolean,
+  /** Required when using console_proxy service key — backend returns 400 if absent. */
+  reason?: string,
 ): Promise<{ module: string; enabled: boolean }> {
   return fetchApi(`/v1/modules/${module}/toggle`, {
     method: "PUT",
     body: JSON.stringify({ enabled }),
+    ...(reason ? { headers: { "X-Aion-Actor-Reason": reason } } : {}),
   });
 }
 
