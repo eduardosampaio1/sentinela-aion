@@ -206,13 +206,20 @@ class ThreatDetector:
     async def analyze(
         self, tenant: str, session_id: str, turns: list
     ) -> Optional[ThreatSignal]:
-        """Analyze turns and persist signal if detected. Returns signal or None."""
+        """Analyze turns and persist signal if detected. Returns signal or None.
+
+        Fail-open: a Redis failure in store.save() is logged but never propagated —
+        the calling pipeline must not be interrupted by observability writes.
+        """
         signal = _analyze(turns)
         if signal is None:
             return None
         signal.session_id = session_id
         signal.tenant = tenant
-        await self._store.save(signal)
+        try:
+            await self._store.save(signal)
+        except Exception:
+            logger.debug("ThreatStore.save failed — signal detected but not persisted", exc_info=True)
         logger.info(
             "Threat detected: tenant=%s session=%s pattern=%s confidence=%.3f action=%s",
             tenant, session_id, signal.pattern, signal.confidence, signal.recommended_action,
