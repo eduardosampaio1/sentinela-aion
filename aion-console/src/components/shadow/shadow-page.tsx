@@ -11,6 +11,9 @@ import {
   FlaskRound,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DemoBanner } from "@/components/ui/demo-banner";
+import { useApiData } from "@/lib/use-api-data";
+import { getCalibration, promoteCalibration } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,24 +177,44 @@ function TabShadow() {
   const [promoting, setPromoting] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
 
+  // Real calibration data — fallback to static mock if backend unreachable
+  const { data: calibrationRaw, isDemo, refetch } = useApiData(
+    getCalibration,
+    shadowConfig as Record<string, unknown>,
+    { intervalMs: autoRefresh ? 10_000 : undefined },
+  );
+
+  // Normalise — backend may use shadow_mode vs enabled
+  const config = {
+    enabled:          (calibrationRaw.shadow_mode   as boolean | undefined) ?? (calibrationRaw.enabled as boolean | undefined) ?? shadowConfig.enabled,
+    traffic_pct:      (calibrationRaw.traffic_pct   as number  | undefined) ?? shadowConfig.traffic_pct,
+    policy_candidate: (calibrationRaw.policy_candidate as string | undefined) ?? shadowConfig.policy_candidate,
+    total_evaluated:  (calibrationRaw.total_evaluated as number | undefined) ?? shadowConfig.total_evaluated,
+    match_rate:       (calibrationRaw.match_rate    as number  | undefined) ?? shadowConfig.match_rate,
+    started_at:       (calibrationRaw.started_at    as string  | undefined) ?? shadowConfig.started_at,
+  };
+
   const mismatches = mockResults.filter((r) => !r.match).length;
-  const matchRate = (shadowConfig.match_rate * 100).toFixed(1);
+  const matchRate = (config.match_rate * 100).toFixed(1);
 
   const handlePromote = async () => {
     setPromoting(true);
     setPromoteError(null);
     try {
-      // await promotePolicy(shadowConfig.policy_candidate);
+      await promoteCalibration(config.policy_candidate, config.match_rate);
       setShowPromoteModal(false);
-      setPromoting(false);
     } catch (err) {
       setPromoteError(err instanceof Error ? err.message : "Erro ao promover");
+    } finally {
       setPromoting(false);
+      refetch();
     }
   };
 
   return (
     <div className="space-y-6">
+      {isDemo && <DemoBanner onRetry={refetch} />}
+
       {/* Controls */}
       <div className="flex justify-end">
         <button
@@ -216,15 +239,15 @@ function TabShadow() {
             </div>
             <div>
               <p className="text-sm font-semibold text-[var(--color-text)]">
-                {shadowConfig.policy_candidate}
+                {config.policy_candidate}
               </p>
               <p className="text-xs text-[var(--color-text-muted)]">
-                {shadowConfig.traffic_pct}% do tráfego · ativo desde 20/04/2025
+                {config.traffic_pct}% do tráfego · ativo desde {new Date(config.started_at).toLocaleDateString("pt-BR")}
               </p>
             </div>
           </div>
-          <Badge variant={shadowConfig.enabled ? "success" : "muted"}>
-            {shadowConfig.enabled ? "Ativo" : "Inativo"}
+          <Badge variant={config.enabled ? "success" : "muted"}>
+            {config.enabled ? "Ativo" : "Inativo"}
           </Badge>
         </div>
 
@@ -232,7 +255,7 @@ function TabShadow() {
           <div className="rounded-lg bg-white/5 px-4 py-3">
             <p className="text-xs text-[var(--color-text-muted)]">Avaliados</p>
             <p className="mt-1 text-xl font-bold text-[var(--color-text)]">
-              {shadowConfig.total_evaluated.toLocaleString("pt-BR")}
+              {config.total_evaluated.toLocaleString("pt-BR")}
             </p>
           </div>
           <div className="rounded-lg bg-white/5 px-4 py-3">
@@ -328,7 +351,7 @@ function TabShadow() {
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
               Esta ação substituirá a política atual com{" "}
               <code className="rounded bg-white/5 px-1 py-0.5 text-xs">
-                {shadowConfig.policy_candidate}
+                {config.policy_candidate}
               </code>{" "}
               para 100% do tráfego.
             </p>
@@ -341,7 +364,7 @@ function TabShadow() {
               <div className="flex items-center justify-between">
                 <span className="text-green-300">Avaliações realizadas</span>
                 <strong className="font-[family-name:var(--font-mono)] text-green-400">
-                  {shadowConfig.total_evaluated.toLocaleString("pt-BR")}
+                  {config.total_evaluated.toLocaleString("pt-BR")}
                 </strong>
               </div>
               <div className="flex items-center justify-between">
