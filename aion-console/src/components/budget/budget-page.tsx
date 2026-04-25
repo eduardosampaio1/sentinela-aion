@@ -272,15 +272,21 @@ export function BudgetPage() {
               <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
                 <th className="px-6 py-3 font-medium">Intent</th>
                 <th className="px-4 py-3 text-right font-medium">Req / dia</th>
-                <th className="px-4 py-3 font-medium">Modelo atual</th>
-                <th className="px-4 py-3 font-medium">Melhor modelo</th>
-                <th className="px-4 py-3 text-right font-medium">Economia / dia</th>
+                <th className="px-4 py-3 font-medium">Taxa bypass</th>
+                <th className="px-4 py-3 text-right font-medium">Custo médio</th>
                 <th className="px-4 py-3 text-right font-medium">Confiança</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
               {mockIntentPerformance.map((intent) => {
-                const hasOpportunity = intent.savings_day > 0;
+                // Intents with low bypass rate are "optimization opportunities"
+                const bypassRate = intent.bypass_success_rate ?? 1;
+                const hasOpportunity = bypassRate < 0.85;
+                const confStr = intent.confidence;
+                const confColor =
+                  confStr === "high" ? "text-green-400"
+                  : confStr === "medium" ? "text-amber-400"
+                  : "text-[var(--color-text-muted)]";
                 return (
                   <tr
                     key={intent.name}
@@ -303,49 +309,18 @@ export function BudgetPage() {
                     <td className="px-4 py-3 text-right text-xs text-[var(--color-text-muted)]">
                       {intent.requests.toLocaleString("pt-BR")}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="rounded bg-white/5 px-2 py-0.5 text-xs text-[var(--color-text-muted)]">
-                        {intent.current_model}
+                    <td className="px-4 py-3 text-right">
+                      <span className={`text-xs font-semibold ${hasOpportunity ? "text-amber-400" : "text-green-400"}`}>
+                        {(bypassRate * 100).toFixed(1)}%
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs font-medium ${
-                          intent.best_model === intent.current_model
-                            ? "bg-white/5 text-[var(--color-text-muted)]"
-                            : intent.best_model === "bypass"
-                            ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
-                            : "bg-amber-500/10 text-amber-400"
-                        }`}
-                      >
-                        {intent.best_model === intent.current_model
-                          ? "otimizado ✓"
-                          : intent.best_model === "bypass"
-                          ? "⚡ bypass"
-                          : intent.best_model}
-                      </span>
+                    <td className="px-4 py-3 text-right font-mono text-xs text-[var(--color-text-muted)]">
+                      {intent.avg_cost_when_forwarded !== undefined && intent.avg_cost_when_forwarded > 0
+                        ? `$${intent.avg_cost_when_forwarded.toFixed(5)}`
+                        : "—"}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {intent.savings_day > 0 ? (
-                        <span className="font-mono text-xs font-bold text-green-400">
-                          +R$ {intent.savings_day.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-[var(--color-text-muted)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span
-                        className={`text-xs font-semibold ${
-                          intent.confidence >= 0.9
-                            ? "text-green-400"
-                            : intent.confidence >= 0.8
-                            ? "text-amber-400"
-                            : "text-[var(--color-text-muted)]"
-                        }`}
-                      >
-                        {(intent.confidence * 100).toFixed(0)}%
-                      </span>
+                      <span className={`text-xs font-semibold ${confColor}`}>{confStr}</span>
                     </td>
                   </tr>
                 );
@@ -356,13 +331,13 @@ export function BudgetPage() {
         <div className="border-t border-[var(--color-border)] px-6 py-3 flex items-center justify-between">
           <p className="text-xs text-[var(--color-text-muted)]">
             <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400 align-middle" />
-            Oportunidade de otimização detectada pelo NOMOS
+            Taxa de bypass abaixo de 85% — oportunidade de otimização
             <span className="mx-3 text-[var(--color-border)]">·</span>
             <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-green-500/40 align-middle" />
-            Modelo já otimizado
+            Intent bem calibrado
           </p>
-          <p className="text-xs text-green-400 font-medium">
-            Potencial: +R$ {mockIntentPerformance.reduce((s, i) => s + i.savings_day, 0).toFixed(2)}/dia
+          <p className="text-xs text-[var(--color-text-muted)]">
+            {mockIntentPerformance.filter((i) => (i.bypass_success_rate ?? 1) >= 0.85).length} intents otimizados
           </p>
         </div>
       </div>

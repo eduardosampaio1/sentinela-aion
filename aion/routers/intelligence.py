@@ -197,6 +197,53 @@ async def intelligence_compliance_summary(tenant_id: str, request: Request):
     return report_data
 
 
+@router.get("/v1/intelligence/{tenant_id}/intents", tags=["Intelligence"])
+async def get_intent_performance(tenant_id: str, limit: int = 50):
+    """Intent-level performance summary from NEMOS IntentMemory.
+
+    Returns what NEMOS actually tracks per-intent:
+      name, requests, bypassed/forwarded counts,
+      bypass_success_rate, avg_cost_when_forwarded, followup_rate, confidence.
+
+    NOTE: current_model / best_model / savings_day are NOT available per-intent
+    in the current NEMOS schema — those are model-level metrics in ModelPerformance.
+    """
+    from aion.nemos import get_nemos
+
+    limit = min(max(1, limit), 200)
+
+    try:
+        intent_memories = await get_nemos().get_intent_memory(tenant_id)
+    except Exception as exc:
+        logger.error("Failed to load intent memory for %s: %s", tenant_id, exc)
+        return {"tenant": tenant_id, "count": 0, "intents": []}
+
+    intents = []
+    for name, mem in intent_memories.items():
+        if mem.total_seen == 0:
+            continue
+        conf = mem.confidence
+        intents.append({
+            "name": name,
+            "requests": mem.total_seen,
+            "bypassed": mem.bypassed_count,
+            "forwarded": mem.forwarded_count,
+            "bypass_success_rate": round(mem.bypass_success_rate.value, 4),
+            "avg_cost_when_forwarded": round(mem.avg_cost_when_forwarded.value, 6),
+            "followup_rate": round(mem.followup_rate.value, 4),
+            "confidence": conf.value if hasattr(conf, "value") else str(conf),
+        })
+
+    # Most frequent intents first
+    intents.sort(key=lambda x: x["requests"], reverse=True)
+
+    return {
+        "tenant": tenant_id,
+        "count": len(intents),
+        "intents": intents[:limit],
+    }
+
+
 @router.get("/v1/threats/{tenant_id}", tags=["Security"])
 async def list_threat_signals(tenant_id: str):
     """List active threat signals for a tenant (multi-turn attack patterns)."""

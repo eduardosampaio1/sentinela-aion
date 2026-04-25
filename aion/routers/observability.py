@@ -74,6 +74,36 @@ async def health():
         if health_data.get("mode") == "normal":
             health_data["mode"] = "degraded"
 
+    # ── Auth pass-through detection ──────────────────────────────────────────
+    # When require_chat_auth=True but AION_ADMIN_KEY is not configured,
+    # AION silently skips auth validation. This is deliberate fail-open
+    # (we never block the client's chat), but it must be visible in health.
+    settings = get_settings()
+    auth_warnings: list[str] = []
+    if settings.require_chat_auth and not (getattr(settings, "admin_key", "") or ""):
+        auth_warnings.append(
+            "AION_ADMIN_KEY not set — chat auth disabled; operating in pass-through for auth"
+        )
+        if "auth" not in degraded_components:
+            degraded_components.append("auth")
+        if health_data.get("mode") == "normal":
+            health_data["mode"] = "degraded"
+
+    if not os.environ.get("AION_SESSION_AUDIT_SECRET"):
+        auth_warnings.append(
+            "AION_SESSION_AUDIT_SECRET not set — audit HMAC signatures are unsigned"
+        )
+
+    if auth_warnings:
+        health_data["auth_warnings"] = auth_warnings
+
+    health_data["auth_mode"] = (
+        "pass_through"
+        if (settings.require_chat_auth and not (getattr(settings, "admin_key", "") or ""))
+        else "active"
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
     mode = health_data.get("mode", "unknown")
     status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503
     return JSONResponse(status_code=status, content=health_data)

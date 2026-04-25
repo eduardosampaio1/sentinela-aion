@@ -436,17 +436,17 @@ export function RoutingPage() {
         <div className="border-b border-[var(--color-border)] px-6 py-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Sparkles className="h-4 w-4 text-amber-400" />
-            Performance por intent — recomendações NEMOS
+            Performance por intent — aprendizado NEMOS
           </h2>
           <p className="text-xs text-[var(--color-text-muted)]">
-            Comparativo entre o modelo atual e o modelo com melhor custo/qualidade detectado
+            Taxa de bypass, custo médio e confiança acumulada por padrão de intenção
           </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)]">
-                {["Intent", "Requests/dia", "Modelo atual", "Modelo ótimo", "Economia/dia", "Confiança"].map((h) => (
+                {["Intent", "Total", "Bypasses", "Encaminhados", "Taxa bypass", "Custo médio", "Confiança"].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-medium text-[var(--color-text-muted)]">
                     {h}
                   </th>
@@ -455,55 +455,58 @@ export function RoutingPage() {
             </thead>
             <tbody>
               {intents.map((intent) => {
-                const hasSavings = intent.savings_day > 0;
+                // confidence: "none"|"low"|"medium"|"high" (string from backend)
+                // or legacy numeric from mock — handle both
+                const confStr = typeof intent.confidence === "string"
+                  ? intent.confidence
+                  : (intent.confidence as number) >= 0.9 ? "high"
+                  : (intent.confidence as number) >= 0.7 ? "medium"
+                  : (intent.confidence as number) >= 0.4 ? "low"
+                  : "none";
+                const confColor =
+                  confStr === "high" ? "text-green-400"
+                  : confStr === "medium" ? "text-amber-400"
+                  : confStr === "low" ? "text-orange-400"
+                  : "text-[var(--color-text-muted)]";
+                const bypassRate = intent.bypass_success_rate ?? (
+                  intent.requests > 0 && intent.bypassed !== undefined
+                    ? intent.bypassed / intent.requests
+                    : undefined
+                );
+
                 return (
                   <tr
                     key={intent.name}
-                    className={`border-b border-[var(--color-border)]/50 transition-colors hover:bg-white/5 ${
-                      hasSavings ? "" : ""
-                    }`}
+                    className="border-b border-[var(--color-border)]/50 transition-colors hover:bg-white/5"
                   >
                     <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text)]">
                       {intent.name}
                     </td>
-                    <td className="px-5 py-3 text-[var(--color-text-muted)]">
+                    <td className="px-5 py-3 text-[var(--color-text-muted)] tabular-nums">
                       {intent.requests.toLocaleString("pt-BR")}
                     </td>
-                    <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
-                      {intent.current_model}
+                    <td className="px-5 py-3 tabular-nums text-teal-400">
+                      {intent.bypassed?.toLocaleString("pt-BR") ?? "—"}
+                    </td>
+                    <td className="px-5 py-3 tabular-nums text-sky-400">
+                      {intent.forwarded?.toLocaleString("pt-BR") ?? "—"}
                     </td>
                     <td className="px-5 py-3">
-                      {hasSavings ? (
-                        <span className="font-[family-name:var(--font-mono)] text-xs font-medium text-[var(--color-primary)]">
-                          {intent.best_model}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-green-400">✓ Ótimo</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3">
-                      {hasSavings ? (
-                        <span className="text-xs font-semibold text-green-400">
-                          R$ {intent.savings_day.toFixed(2)}
+                      {bypassRate !== undefined ? (
+                        <span className="text-xs font-medium text-[var(--color-text)]">
+                          {(bypassRate * 100).toFixed(1)}%
                         </span>
                       ) : (
                         <span className="text-xs text-[var(--color-text-muted)]">—</span>
                       )}
                     </td>
+                    <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                      {intent.avg_cost_when_forwarded !== undefined && intent.avg_cost_when_forwarded > 0
+                        ? `$${intent.avg_cost_when_forwarded.toFixed(5)}`
+                        : "—"}
+                    </td>
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-16 rounded-full bg-white/10">
-                          <div
-                            className={`h-1.5 rounded-full ${
-                              intent.confidence >= 0.9 ? "bg-green-500" : intent.confidence >= 0.8 ? "bg-amber-500" : "bg-red-500"
-                            }`}
-                            style={{ width: `${intent.confidence * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-[var(--color-text-muted)]">
-                          {(intent.confidence * 100).toFixed(0)}%
-                        </span>
-                      </div>
+                      <span className={`text-xs font-medium ${confColor}`}>{confStr}</span>
                     </td>
                   </tr>
                 );
@@ -513,12 +516,9 @@ export function RoutingPage() {
         </div>
         <div className="border-t border-[var(--color-border)] px-5 py-3">
           <p className="text-xs text-[var(--color-text-muted)]">
-            {intentsDemo ? "Dados de demonstração" : "Economia total potencial:"}{" "}
-            {!intentsDemo && (
-              <strong className="text-green-400">
-                R$ {intents.reduce((s, i) => s + i.savings_day, 0).toFixed(2)}/dia
-              </strong>
-            )}
+            {intentsDemo
+              ? "Dados de demonstração — conecte o backend para ver intents reais"
+              : `${intents.length} intents aprendidos · dados acumulados pelo NEMOS`}
           </p>
         </div>
       </div>

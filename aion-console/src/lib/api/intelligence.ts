@@ -16,10 +16,14 @@ export async function getIntelligenceOverview(days = 30): Promise<Record<string,
 }
 
 export async function getIntelligenceIntents(): Promise<Record<string, unknown>[]> {
-  const raw = await fetchApi<Record<string, unknown> | Record<string, unknown>[]>(
+  // Backend returns { tenant, count, intents: [...] }
+  const raw = await fetchApi<Record<string, unknown>>(
     `/v1/intelligence/${getActiveTenant()}/intents`,
   );
-  return Array.isArray(raw) ? raw : [];
+  // Support both array (future) and envelope { intents: [...] } formats
+  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+  if (Array.isArray(raw.intents)) return raw.intents as Record<string, unknown>[];
+  return [];
 }
 
 export async function getComplianceSummary(): Promise<Record<string, unknown>> {

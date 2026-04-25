@@ -230,15 +230,20 @@ export interface ThreatCategory {
   action: "block" | "sanitize" | "warn";
 }
 
-// ─── Intent performance (NOMOS) ──────────────────────────────────────────────
+// ─── Intent performance (NOMOS / NEMOS IntentMemory) ─────────────────────────
+// Schema matches GET /v1/intelligence/{tenant}/intents
+// NOTE: current_model, best_model, savings_day are model-level metrics —
+// they are NOT tracked per-intent in the current NEMOS schema.
 
 export interface IntentPerformance {
   name: string;
-  requests: number;
-  current_model: string;
-  best_model: string;
-  savings_day: number;
-  confidence: number;
+  requests: number;                  // total_seen
+  bypassed?: number;                 // bypassed_count
+  forwarded?: number;                // forwarded_count
+  bypass_success_rate?: number;      // 0.0–1.0
+  avg_cost_when_forwarded?: number;  // USD average
+  followup_rate?: number;            // 0.0–1.0
+  confidence: string;                // "none" | "low" | "medium" | "high"
 }
 
 // ─── Charts ───────────────────────────────────────────────────────────────────

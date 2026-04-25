@@ -769,14 +769,15 @@ export const mockThreatCategories: ThreatCategory[] = [
   { name: "Off-topic Probing", count: 16, pct: 1.9, action: "warn" },
 ];
 
+// Schema matches GET /v1/intelligence/{tenant}/intents — current_model/best_model/savings_day removed
 export const mockIntentPerformance: IntentPerformance[] = [
-  { name: "limite_cartao_faq", requests: 2840, current_model: "gpt-4o", best_model: "gpt-4o-mini", savings_day: 12.40, confidence: 0.97 },
-  { name: "extrato_resumo", requests: 1920, current_model: "gpt-4o-mini", best_model: "gpt-4o-mini", savings_day: 0, confidence: 0.94 },
-  { name: "taxa_juros_explicacao", requests: 1540, current_model: "gpt-4o", best_model: "claude-haiku", savings_day: 9.20, confidence: 0.88 },
-  { name: "bloqueio_cartao", requests: 1210, current_model: "gpt-4o-mini", best_model: "bypass", savings_day: 7.50, confidence: 0.91 },
-  { name: "segunda_via_fatura", requests: 980, current_model: "gpt-4o", best_model: "gpt-4o-mini", savings_day: 5.80, confidence: 0.85 },
-  { name: "parcelamento_divida", requests: 760, current_model: "gpt-4o", best_model: "gpt-4o", savings_day: 0, confidence: 0.79 },
-  { name: "onboarding_conta", requests: 620, current_model: "gpt-4o-mini", best_model: "bypass", savings_day: 3.10, confidence: 0.92 },
+  { name: "limite_cartao_faq",    requests: 2840, bypassed: 2698, forwarded: 142, bypass_success_rate: 0.95, avg_cost_when_forwarded: 0.00210, followup_rate: 0.08, confidence: "high" },
+  { name: "extrato_resumo",       requests: 1920, bypassed: 1824, forwarded:  96, bypass_success_rate: 0.95, avg_cost_when_forwarded: 0.00180, followup_rate: 0.05, confidence: "high" },
+  { name: "taxa_juros_explicacao",requests: 1540, bypassed: 1232, forwarded: 308, bypass_success_rate: 0.80, avg_cost_when_forwarded: 0.00340, followup_rate: 0.18, confidence: "high" },
+  { name: "bloqueio_cartao",      requests: 1210, bypassed: 1089, forwarded: 121, bypass_success_rate: 0.90, avg_cost_when_forwarded: 0.00120, followup_rate: 0.04, confidence: "high" },
+  { name: "segunda_via_fatura",   requests:  980, bypassed:  833, forwarded: 147, bypass_success_rate: 0.85, avg_cost_when_forwarded: 0.00160, followup_rate: 0.12, confidence: "medium" },
+  { name: "parcelamento_divida",  requests:  760, bypassed:  532, forwarded: 228, bypass_success_rate: 0.70, avg_cost_when_forwarded: 0.00290, followup_rate: 0.22, confidence: "medium" },
+  { name: "onboarding_conta",     requests:  620, bypassed:  558, forwarded:  62, bypass_success_rate: 0.90, avg_cost_when_forwarded: 0.00140, followup_rate: 0.06, confidence: "medium" },
 ];
 
 export const mockSpendTrend: SpendTrendPoint[] = [

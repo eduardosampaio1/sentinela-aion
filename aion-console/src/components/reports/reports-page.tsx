@@ -237,18 +237,22 @@ function CostsTab({ timeRange }: { timeRange: TimeRange }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)]">
-                {["Intent", "Modelo atual", "Modelo ótimo", "Economia/dia"].map((h) => (
+                {["Intent", "Total", "Taxa bypass", "Confiança"].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-medium text-[var(--color-text-muted)]">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {mockIntentPerformance.filter((i) => i.savings_day > 0).map((i) => (
+              {mockIntentPerformance
+                .filter((i) => (i.bypass_success_rate ?? 0) < 0.85)
+                .map((i) => (
                 <tr key={i.name} className="border-b border-[var(--color-border)]/50">
                   <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text)]">{i.name}</td>
-                  <td className="px-5 py-3 text-xs text-[var(--color-text-muted)]">{i.current_model}</td>
-                  <td className="px-5 py-3 text-xs text-[var(--color-primary)]">{i.best_model}</td>
-                  <td className="px-5 py-3 text-xs font-medium text-green-400">R$ {i.savings_day.toFixed(2)}</td>
+                  <td className="px-5 py-3 text-xs text-[var(--color-text-muted)]">{i.requests.toLocaleString("pt-BR")}</td>
+                  <td className="px-5 py-3 text-xs font-medium text-amber-400">
+                    {((i.bypass_success_rate ?? 0) * 100).toFixed(1)}%
+                  </td>
+                  <td className="px-5 py-3 text-xs text-[var(--color-text-muted)]">{i.confidence}</td>
                 </tr>
               ))}
             </tbody>
