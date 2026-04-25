@@ -4,11 +4,15 @@
  * All frontend requests go to /api/proxy/<aion-path> instead of the backend
  * directly. This keeps AION_API_KEY out of the browser bundle.
  *
+ * Actor identity is forwarded via X-Aion-Actor-* headers so the backend
+ * can record who performed each action in the audit trail.
+ *
  * Env vars (server-side only, no NEXT_PUBLIC_ prefix):
  *   AION_API_URL   — backend base URL (default: http://localhost:8080)
- *   AION_API_KEY   — admin/operator key sent as Authorization: Bearer <key>
+ *   AION_API_KEY   — service credential sent as Authorization: Bearer <key>
  */
 import type { NextRequest } from "next/server";
+import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +51,21 @@ async function proxyRequest(
   // Inject server-side API key — never exposed to browser bundle
   if (API_KEY) {
     forwardedHeaders["Authorization"] = `Bearer ${API_KEY}`;
+  }
+
+  // Inject actor identity from the authenticated NextAuth session.
+  // These headers let the AION backend record who performed each action.
+  const session = await auth();
+  if (session?.user) {
+    if (session.user.email) {
+      forwardedHeaders["X-Aion-Actor-Id"] = session.user.email;
+    }
+    if (session.user.role) {
+      forwardedHeaders["X-Aion-Actor-Role"] = session.user.role;
+    }
+    if (session.user.provider) {
+      forwardedHeaders["X-Aion-Auth-Source"] = session.user.provider;
+    }
   }
 
   // Forward the request body for mutations

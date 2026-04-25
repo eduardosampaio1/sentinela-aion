@@ -272,8 +272,17 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
 
     Each entry includes prev_hash (SHA-256 of previous entry) to form a
     tamper-evident chain. Cross-replica chains merge at the Redis layer.
+
+    Actor identity is read from X-Aion-Actor-* headers injected by the
+    Next.js proxy after SSO authentication — never trust these from untrusted clients.
     """
     prev_hash = _chain_tips.get(tenant, "0" * 64)
+
+    # Actor identity forwarded by the Console proxy after SSO validation
+    actor_id = request.headers.get("X-Aion-Actor-Id", "")
+    actor_role = request.headers.get("X-Aion-Actor-Role", "")
+    auth_source = request.headers.get("X-Aion-Auth-Source", "")
+
     entry = {
         "timestamp": time.time(),
         "action": action,
@@ -283,6 +292,10 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         "tenant": tenant,
         "details": details,
         "prev_hash": prev_hash,
+        # Actor context — populated only when Console SSO is active
+        "actor_id": actor_id or None,
+        "actor_role": actor_role or None,
+        "auth_source": auth_source or None,
     }
     entry["entry_hash"] = _hash_entry(entry)
     _chain_tips[tenant] = entry["entry_hash"]
@@ -300,9 +313,10 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         except Exception:
             logger.warning("Redis audit write failed")
 
+    actor_info = f",actor={actor_id}" if actor_id else ""
     logger.info(
-        '{"event":"audit","action":"%s %s","ip":"%s","tenant":"%s"}',
-        request.method, request.url.path, entry["ip"], tenant,
+        '{"event":"audit","action":"%s %s","ip":"%s","tenant":"%s"%s}',
+        request.method, request.url.path, entry["ip"], tenant, actor_info,
     )
 
 

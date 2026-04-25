@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AionSessionProvider } from "@/components/auth/session-provider";
 
 export const metadata: Metadata = {
   title: "Sentinela AION",
@@ -14,7 +15,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" className="h-full antialiased">
-      <body className="h-full">{children}</body>
+      <body className="h-full">
+        <AionSessionProvider>{children}</AionSessionProvider>
+      </body>
     </html>
   );
 }
