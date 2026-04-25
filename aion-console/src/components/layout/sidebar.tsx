@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Brain,
+  Store,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { mockAdminRoles } from "@/lib/mock-data";
@@ -51,6 +52,7 @@ const navGroups = [
     items: [
       { href: "/sessions", label: "Sessões", icon: MessagesSquare },
       { href: "/budget", label: "Economia", icon: TrendingDown },
+      { href: "/marketplace", label: "Marketplace", icon: Store },
       { href: "/integrations", label: "Integrações", icon: Plug },
       { href: "/reports", label: "Relatórios", icon: FileBarChart },
     ],

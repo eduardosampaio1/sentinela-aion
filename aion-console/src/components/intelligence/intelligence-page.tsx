@@ -18,7 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
-import { getIntelligenceOverview, getThreats, getIntelligenceIntents } from "@/lib/api";
+import { getIntelligenceOverview, getThreats, getIntelligenceIntents, getGlobalThreatFeed } from "@/lib/api";
 
 // ─── Mock fallbacks ────────────────────────────────────────────────────────────
 
@@ -215,7 +215,7 @@ function ThreatCard({ threat }: { threat: Record<string, unknown> }) {
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function IntelligencePage() {
-  const [activeTab, setActiveTab] = useState<"overview" | "threats" | "intents">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "threats" | "intents" | "global">("overview");
 
   const {
     data: overview,
@@ -243,12 +243,22 @@ export function IntelligencePage() {
     intervalMs: activeTab === "intents" ? 60_000 : undefined,
   });
 
+  const {
+    data: globalFeed,
+    isDemo: globalIsDemo,
+    refetch: refetchGlobal,
+  } = useApiData(
+    () => getGlobalThreatFeed(undefined, 30),
+    [] as Record<string, unknown>[],
+    { intervalMs: activeTab === "global" ? 120_000 : undefined },
+  );
+
   const sec = (overview.security ?? {}) as Record<string, unknown>;
   const econ = (overview.economics ?? {}) as Record<string, unknown>;
   const intel = (overview.intelligence ?? {}) as Record<string, unknown>;
   const maturity = (intel.module_maturity ?? {}) as Record<string, Record<string, unknown>>;
-  const isDemo = overviewIsDemo || threatsIsDemo || intentsIsDemo;
-  const refetch = () => { refetchOverview(); refetchThreats(); refetchIntents(); };
+  const isDemo = overviewIsDemo || threatsIsDemo || intentsIsDemo || globalIsDemo;
+  const refetch = () => { refetchOverview(); refetchThreats(); refetchIntents(); refetchGlobal(); };
 
   return (
     <div className="space-y-6">
@@ -317,6 +327,7 @@ export function IntelligencePage() {
               badge: threats.length > 0 ? threats.length : undefined,
             },
             { id: "intents", label: "Intents Aprendidos", icon: <Target className="h-3.5 w-3.5" /> },
+            { id: "global", label: "Feed Global", icon: <Activity className="h-3.5 w-3.5" /> },
           ] as const
         ).map((tab) => (
           <button
@@ -572,6 +583,86 @@ export function IntelligencePage() {
                 </div>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Global Threat Feed (T3.3) */}
+      {activeTab === "global" && (
+        <div className="space-y-4">
+          {globalIsDemo && <DemoBanner onRetry={refetchGlobal} />}
+
+          <div className="rounded-xl border border-sky-800/40 bg-sky-900/10 p-4">
+            <div className="flex items-start gap-3">
+              <Activity className="h-4 w-4 flex-shrink-0 mt-0.5 text-sky-400" />
+              <div>
+                <p className="text-sm font-medium text-sky-400">Feed de ameaças cross-tenant (k-anônimo)</p>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Sinais agregados de múltiplos tenants com k-anonimidade.
+                  Configure <code className="text-sky-300">AION_CONTRIBUTE_GLOBAL_LEARNING=true</code> para
+                  contribuir e receber sinais globais. Nenhum conteúdo de mensagem é compartilhado — apenas
+                  vetores de features anonimizados.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {globalFeed.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-16">
+              <Activity className="mb-3 h-10 w-10 text-[var(--color-text-muted)] opacity-40" />
+              <p className="text-sm font-medium text-[var(--color-text)]">Feed global indisponível</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Ative <code>AION_CONTRIBUTE_GLOBAL_LEARNING=true</code> para acessar
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--color-border)]">
+                    {["Categoria", "Score de risco", "Tenants observados", "Confiança"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {globalFeed.map((signal, i) => (
+                    <tr key={i} className="border-b border-[var(--color-border)]/50 last:border-0 hover:bg-white/2">
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-[var(--color-text)]">
+                          {(signal.category as string) ?? "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium ${
+                          ((signal.avg_risk as number) ?? 0) > 0.7 ? "text-red-400" : "text-amber-400"
+                        }`}>
+                          {(((signal.avg_risk as number) ?? 0) * 100).toFixed(0)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                        {(signal.tenant_count as number) ?? "≥5"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-16 rounded-full bg-white/10">
+                            <div
+                              className="h-1.5 rounded-full bg-sky-500"
+                              style={{ width: `${(((signal.confidence as number) ?? 0.5) * 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-sky-400">
+                            {((((signal.confidence as number) ?? 0.5) * 100).toFixed(0))}%
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

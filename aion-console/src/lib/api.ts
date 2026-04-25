@@ -530,3 +530,60 @@ export async function explainRequest(requestId: string): Promise<Record<string, 
 export async function deleteTenantData(tenant: string): Promise<Record<string, unknown>> {
   return fetchApi(`/v1/data/${tenant}`, { method: "DELETE" });
 }
+
+// ─── Marketplace ──────────────────────────────────────────────────────────────
+
+export async function browseMarketplace(
+  params: { category?: string; tag?: string; limit?: number } = {},
+): Promise<Record<string, unknown>[]> {
+  const qs = new URLSearchParams();
+  if (params.category) qs.set("category", params.category);
+  if (params.tag) qs.set("tag", params.tag);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const raw = await fetchApi<Record<string, unknown> | Record<string, unknown>[]>(
+    `/v1/marketplace/policies${qs.toString() ? `?${qs}` : ""}`,
+  );
+  if (Array.isArray(raw)) return raw;
+  const arr = (raw as Record<string, unknown>).policies;
+  return Array.isArray(arr) ? (arr as Record<string, unknown>[]) : [];
+}
+
+export async function getMarketplacePolicy(policyId: string): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/marketplace/policies/${policyId}`);
+}
+
+export async function installMarketplacePolicy(
+  policyId: string,
+  shadow = true,
+): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/marketplace/policies/${policyId}/install`, {
+    method: "POST",
+    body: JSON.stringify({ tenant: _activeTenant, shadow_mode: shadow }),
+  });
+}
+
+export async function rateMarketplacePolicy(
+  policyId: string,
+  rating: number,
+  comment = "",
+): Promise<void> {
+  await fetchApi(`/v1/marketplace/policies/${policyId}/rate`, {
+    method: "POST",
+    body: JSON.stringify({ tenant: _activeTenant, rating, comment }),
+  });
+}
+
+// ─── Global Threat Feed (T3.3 cross-tenant) ───────────────────────────────────
+
+export async function getGlobalThreatFeed(
+  category?: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (category) qs.set("category", category);
+  const raw = await fetchApi<Record<string, unknown>>(
+    `/v1/global/threat-feed/${_activeTenant}?${qs}`,
+  );
+  const arr = (raw as Record<string, unknown>).signals;
+  return Array.isArray(arr) ? (arr as Record<string, unknown>[]) : [];
+}
