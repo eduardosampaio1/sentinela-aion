@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
-import { mockBehavior, estimateDialImpact } from "@/lib/mock-data";
+import { mockBehavior } from "@/lib/mock-data";
+import { estimateDialImpact } from "@/lib/utils/behavior-estimate";
 import { setBehavior, resetBehavior, getBehavior } from "@/lib/api";
 import type { BehaviorDial } from "@/lib/types";
 

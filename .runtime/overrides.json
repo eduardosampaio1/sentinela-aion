@@ -1,0 +1,8 @@
+{
+  "tenant-a": {
+    "model": "a"
+  },
+  "tenant-b": {
+    "model": "b"
+  }
+}
