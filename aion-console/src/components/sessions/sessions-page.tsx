@@ -19,15 +19,28 @@ import {
   ThumbsUp,
   ThumbsDown,
   MessageSquare,
+  Clock,
+  UserCheck,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { TimeRangeSelect } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
 import { useApiData } from "@/lib/use-api-data";
-import { getSessions } from "@/lib/api";
+import { getSessions, getApprovals, resolveApproval } from "@/lib/api";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockSessions, mockAnnotations } from "@/lib/mock-data";
 import type { Session, SessionTurn, AnnotationItem } from "@/lib/types";
+
+type PendingApproval = {
+  id: string;
+  session_id?: string;
+  request_id?: string;
+  risk_score?: number;
+  summary?: string;
+  created_at?: string | number;
+  reason?: string;
+};
 
 const riskConfig: Record<string, { badge: "success" | "warning" | "error" | "muted"; label: string }> = {
   low: { badge: "success", label: "Baixo" },
@@ -478,7 +491,7 @@ export function SessionsPage() {
   const [selected, setSelected] = useState<Session | null>(null);
   const [filter, setFilter] = useState<"all" | "high" | "critical" | "blocked">("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("24h");
-  const [activeTab, setActiveTab] = useState<"sessions" | "annotations">("sessions");
+  const [activeTab, setActiveTab] = useState<"sessions" | "annotations" | "approvals">("sessions");
   const [annotationState, setAnnotationState] = useState<Record<string, {
     decision_correct?: boolean;
     false_positive?: boolean;
@@ -486,6 +499,57 @@ export function SessionsPage() {
     comment: string;
     submitted: boolean;
   }>>({});
+
+  // Approvals state
+  const { data: approvalsRaw, isDemo: approvalsIsDemo, refetch: refetchApprovals } = useApiData(
+    () => getApprovals("pending"),
+    [] as Record<string, unknown>[],
+    { intervalMs: 15_000 },
+  );
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set());
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [resolveAction, setResolveAction] = useState<"approved" | "denied" | null>(null);
+  const [approverInput, setApproverInput] = useState("");
+  const [resolving, setResolving] = useState(false);
+
+  const approvals: PendingApproval[] = (approvalsRaw as Record<string, unknown>[])
+    .map((a) => ({
+      id: String(a.id ?? a.approval_id ?? ""),
+      session_id: a.session_id as string | undefined,
+      request_id: a.request_id as string | undefined,
+      risk_score: typeof a.risk_score === "number" ? a.risk_score : undefined,
+      summary: a.summary as string | undefined,
+      created_at: a.created_at as string | number | undefined,
+      reason: a.reason as string | undefined,
+    }))
+    .filter((a) => a.id && !resolvedIds.has(a.id));
+
+  function startResolve(id: string, action: "approved" | "denied") {
+    setResolvingId(id);
+    setResolveAction(action);
+    setApproverInput("");
+  }
+
+  function cancelResolve() {
+    setResolvingId(null);
+    setResolveAction(null);
+    setApproverInput("");
+  }
+
+  async function confirmResolve() {
+    if (!resolvingId || !resolveAction) return;
+    setResolving(true);
+    try {
+      await resolveApproval(resolvingId, resolveAction, approverInput.trim() || "operador");
+      setResolvedIds((prev) => new Set(prev).add(resolvingId));
+      cancelResolve();
+      refetchApprovals();
+    } catch {
+      // keep UI open, let user retry
+    } finally {
+      setResolving(false);
+    }
+  }
 
   const { data: sessions, isDemo, refetch } = useApiData(getSessions, mockSessions, {
     intervalMs: 30_000,
@@ -543,7 +607,7 @@ export function SessionsPage() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 border-b border-[var(--color-border)]">
-        {(["sessions", "annotations"] as const).map((tab) => (
+        {(["sessions", "annotations", "approvals"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -553,13 +617,18 @@ export function SessionsPage() {
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
             }`}
           >
-            {tab === "sessions" ? "Sessões" : "Anotações"}
+            {tab === "sessions" ? "Sessões" : tab === "annotations" ? "Anotações" : "Aprovações"}
             {activeTab === tab && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-primary)] rounded-t-full" />
             )}
             {tab === "annotations" && pendingCount > 0 && (
               <span className="ml-1.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold">
                 {pendingCount}
+              </span>
+            )}
+            {tab === "approvals" && approvals.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-orange-500/25 text-orange-400 text-[10px] font-bold">
+                {approvals.length}
               </span>
             )}
           </button>
@@ -668,6 +737,189 @@ export function SessionsPage() {
               }
             />
           ))}
+        </div>
+      )}
+
+      {/* Approvals tab */}
+      {activeTab === "approvals" && (
+        <div className="space-y-3">
+          {approvalsIsDemo && <DemoBanner onRetry={refetchApprovals} />}
+
+          {/* Header row */}
+          <div className="flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+            <Clock className="h-4 w-4 text-orange-400" />
+            <span>
+              <span className="font-semibold text-[var(--color-text)]">{approvals.length}</span>{" "}
+              decisões pendentes de aprovação humana
+            </span>
+          </div>
+
+          {/* Empty state */}
+          {approvals.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-16 text-center">
+              <CheckCircle2 className="h-8 w-8 text-green-400 mb-3" />
+              <p className="text-sm font-medium text-[var(--color-text)]">Nenhuma aprovação pendente</p>
+              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Todas as decisões de alto risco foram revisadas
+              </p>
+            </div>
+          )}
+
+          {/* Approval cards */}
+          {approvals.map((apv) => {
+            const isExpanded = resolvingId === apv.id;
+            const riskPct = apv.risk_score != null ? Math.round(apv.risk_score * 100) : null;
+            const riskColor =
+              apv.risk_score == null
+                ? "text-[var(--color-text-muted)]"
+                : apv.risk_score >= 0.7
+                ? "text-red-400"
+                : apv.risk_score >= 0.4
+                ? "text-amber-400"
+                : "text-green-400";
+            const createdAt =
+              apv.created_at
+                ? new Date(
+                    typeof apv.created_at === "number" ? apv.created_at * 1000 : apv.created_at,
+                  ).toLocaleString("pt-BR", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : null;
+
+            return (
+              <div
+                key={apv.id}
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden"
+              >
+                {/* Card header */}
+                <div className="flex items-start gap-3 px-5 py-4">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--color-primary)]">
+                        {apv.request_id ?? apv.id}
+                      </span>
+                      {apv.session_id && (
+                        <span className="text-[10px] text-[var(--color-text-muted)] bg-white/5 rounded px-1.5 py-0.5">
+                          sessão {apv.session_id}
+                        </span>
+                      )}
+                      {createdAt && (
+                        <span className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
+                          <Clock className="h-3 w-3" />
+                          {createdAt}
+                        </span>
+                      )}
+                    </div>
+                    {apv.summary && (
+                      <p className="text-sm text-[var(--color-text)] leading-snug">{apv.summary}</p>
+                    )}
+                    {apv.reason && (
+                      <p className="text-xs text-[var(--color-text-muted)] leading-snug italic">
+                        Motivo: {apv.reason}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Risk score pill */}
+                  {riskPct != null && (
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      <span className={`text-sm font-bold tabular-nums ${riskColor}`}>
+                        {riskPct}
+                      </span>
+                      <div className="h-1.5 w-16 rounded-full bg-white/10">
+                        <div
+                          className={`h-1.5 rounded-full ${
+                            apv.risk_score! >= 0.7
+                              ? "bg-red-500"
+                              : apv.risk_score! >= 0.4
+                              ? "bg-amber-500"
+                              : "bg-green-500"
+                          }`}
+                          style={{ width: `${riskPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action row — collapsed */}
+                {!isExpanded && (
+                  <div className="flex items-center gap-2 border-t border-[var(--color-border)]/50 px-5 py-3 bg-white/[0.02]">
+                    <button
+                      onClick={() => startResolve(apv.id, "approved")}
+                      className="flex items-center gap-1.5 rounded-lg bg-green-900/30 px-3 py-1.5 text-xs font-semibold text-green-400 hover:bg-green-900/50 transition-colors"
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      Aprovar
+                    </button>
+                    <button
+                      onClick={() => startResolve(apv.id, "denied")}
+                      className="flex items-center gap-1.5 rounded-lg bg-red-900/30 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-900/50 transition-colors"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      Negar
+                    </button>
+                  </div>
+                )}
+
+                {/* Inline confirm row — expanded */}
+                {isExpanded && (
+                  <div
+                    className={`border-t px-5 py-4 space-y-3 ${
+                      resolveAction === "approved"
+                        ? "border-green-800/40 bg-green-950/20"
+                        : "border-red-800/40 bg-red-950/20"
+                    }`}
+                  >
+                    <p className={`text-xs font-semibold ${resolveAction === "approved" ? "text-green-400" : "text-red-400"}`}>
+                      {resolveAction === "approved" ? "✓ Confirmar aprovação" : "✗ Confirmar negação"}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        autoFocus
+                        value={approverInput}
+                        onChange={(e) => setApproverInput(e.target.value)}
+                        placeholder="Seu nome (aprovador)"
+                        className="flex-1 rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]/50"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !resolving) confirmResolve();
+                          if (e.key === "Escape") cancelResolve();
+                        }}
+                      />
+                      <button
+                        onClick={confirmResolve}
+                        disabled={resolving}
+                        className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                          resolveAction === "approved"
+                            ? "bg-green-700/50 text-green-300 hover:bg-green-700/70"
+                            : "bg-red-700/50 text-red-300 hover:bg-red-700/70"
+                        }`}
+                      >
+                        {resolving ? (
+                          <span className="animate-spin h-3.5 w-3.5 border border-current rounded-full border-t-transparent" />
+                        ) : resolveAction === "approved" ? (
+                          <UserCheck className="h-3.5 w-3.5" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5" />
+                        )}
+                        {resolving ? "Salvando…" : "Confirmar"}
+                      </button>
+                      <button
+                        onClick={cancelResolve}
+                        disabled={resolving}
+                        className="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 transition-colors disabled:opacity-50"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

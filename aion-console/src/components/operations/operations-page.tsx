@@ -16,12 +16,14 @@ import {
   BellOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Toggle } from "@/components/ui/toggle";
 import { TimeRangeSelect, timeRangeMs } from "@/components/ui/time-range-select";
 import type { TimeRange } from "@/components/ui/time-range-select";
 import { useAionData } from "@/lib/use-aion-data";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockEvents, mockMonitors } from "@/lib/mock-data";
 import type { AionEvent, Monitor } from "@/lib/types";
+import { toggleModule } from "@/lib/api";
 
 type FilterType = "all" | "bypass" | "route" | "block" | "error";
 
@@ -65,11 +67,54 @@ const latencyColor = (ms: number) => {
   return "text-red-600";
 };
 
+const MODULE_CONFIG = [
+  {
+    name: "estixe" as const,
+    label: "ESTIXE",
+    desc: "Classificação, desvio e bloqueio semântico",
+    Icon: Shield,
+    color: { ring: "border-teal-800/40", bg: "bg-teal-900/20", icon: "text-teal-400", badge: "text-teal-300" },
+  },
+  {
+    name: "nomos" as const,
+    label: "NOMOS",
+    desc: "Inteligência adaptativa de roteamento",
+    Icon: GitBranch,
+    color: { ring: "border-sky-800/40", bg: "bg-sky-900/20", icon: "text-sky-400", badge: "text-sky-300" },
+  },
+  {
+    name: "metis" as const,
+    label: "METIS",
+    desc: "Compressão e otimização de contexto",
+    Icon: Gauge,
+    color: { ring: "border-violet-800/40", bg: "bg-violet-900/20", icon: "text-violet-400", badge: "text-violet-300" },
+  },
+] as const;
+
 export function OperationsPage() {
   const [filter, setFilter] = useState<FilterType>("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<AionEvent | null>(null);
+
+  // Module toggles
+  const [moduleEnabled, setModuleEnabled] = useState<Record<"estixe" | "nomos" | "metis", boolean>>({
+    estixe: true, nomos: true, metis: true,
+  });
+  const [moduleToggling, setModuleToggling] = useState<string | null>(null);
+
+  const handleModuleToggle = async (name: "estixe" | "nomos" | "metis", enabled: boolean) => {
+    const prev = moduleEnabled[name];
+    setModuleEnabled((s) => ({ ...s, [name]: enabled }));
+    setModuleToggling(name);
+    try {
+      await toggleModule(name, enabled);
+    } catch {
+      setModuleEnabled((s) => ({ ...s, [name]: prev })); // rollback
+    } finally {
+      setModuleToggling(null);
+    }
+  };
 
   const liveData = useAionData(3000, autoRefresh);
   const events = liveData.connected && liveData.events.length > 0
@@ -159,6 +204,53 @@ export function OperationsPage() {
           </button>
         ))}
       </div>
+
+      {/* ═══ Módulos ═══ */}
+      <section>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          Módulos ativos
+        </h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {MODULE_CONFIG.map((mod) => {
+            const enabled = moduleEnabled[mod.name];
+            const toggling = moduleToggling === mod.name;
+            const Icon = mod.Icon;
+            return (
+              <div
+                key={mod.name}
+                className={`flex items-center justify-between rounded-xl border p-4 transition-all ${
+                  enabled
+                    ? `${mod.color.ring} ${mod.color.bg}`
+                    : "border-slate-700/40 bg-white/[0.02] opacity-60"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5`}>
+                    <Icon className={`h-4 w-4 ${enabled ? mod.color.icon : "text-[var(--color-text-muted)]"}`} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-bold ${enabled ? mod.color.badge : "text-[var(--color-text-muted)]"}`}>
+                        {mod.label}
+                      </span>
+                      {!enabled && (
+                        <Badge variant="muted">Desligado</Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[var(--color-text-muted)]">{mod.desc}</p>
+                  </div>
+                </div>
+                <Toggle
+                  enabled={enabled}
+                  onChange={(v) => { void handleModuleToggle(mod.name, v); }}
+                  label={mod.label}
+                  disabled={toggling}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Monitores */}
       <section className="space-y-3">
