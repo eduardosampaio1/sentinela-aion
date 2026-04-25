@@ -10,11 +10,17 @@ import {
   Shield,
   Gauge,
   ArrowRight,
+  CheckCircle2,
+  AlertTriangle,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TimeRangeSelect, timeRangeMs } from "@/components/ui/time-range-select";
+import type { TimeRange } from "@/components/ui/time-range-select";
 import { useAionData } from "@/lib/use-aion-data";
-import { mockEvents } from "@/lib/mock-data";
-import type { AionEvent } from "@/lib/types";
+import { mockEvents, mockMonitors } from "@/lib/mock-data";
+import type { AionEvent, Monitor } from "@/lib/types";
 
 type FilterType = "all" | "bypass" | "route" | "block" | "error";
 
@@ -60,6 +66,7 @@ const latencyColor = (ms: number) => {
 
 export function OperationsPage() {
   const [filter, setFilter] = useState<FilterType>("all");
+  const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<AionEvent | null>(null);
 
@@ -68,12 +75,15 @@ export function OperationsPage() {
     ? liveData.events
     : mockEvents;
 
-  const filtered = filter === "all"
+  const cutoff = Date.now() - timeRangeMs(timeRange);
+  const inRange = timeRange === "live"
     ? events
-    : events.filter((e) => {
-        if (filter === "error") return e.decision === "error" || e.error;
-        return e.decision === filter;
-      });
+    : events.filter((e) => new Date(e.timestamp).getTime() >= cutoff);
+
+  const filtered = (filter === "all" ? inRange : inRange.filter((e) => {
+    if (filter === "error") return e.decision === "error" || e.error;
+    return e.decision === filter;
+  }));
 
   const formatTime = (iso: string) => {
     const d = new Date(iso);
@@ -104,6 +114,7 @@ export function OperationsPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${autoRefresh ? "animate-spin" : ""}`} style={autoRefresh ? { animationDuration: "3s" } : undefined} />
             {autoRefresh ? "Ao vivo" : "Manual"}
           </button>
+          <TimeRangeSelect value={timeRange} onChange={setTimeRange} />
           <button
             onClick={() => {
               const header = "timestamp,module,input,decision,model,response_time_ms,cost\n";
@@ -143,6 +154,135 @@ export function OperationsPage() {
         ))}
       </div>
 
+      {/* Monitores */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold text-[var(--color-text)]">
+              Monitores
+            </h2>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Alertas contínuos sobre métricas críticas do pipeline — últimas 24 horas.
+            </p>
+          </div>
+          <div className="relative group">
+            <button
+              disabled
+              className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] opacity-50"
+            >
+              <Bell className="h-3.5 w-3.5" />
+              + Novo monitor
+            </button>
+            <span className="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 opacity-0 transition-opacity group-hover:opacity-100">
+              Em breve
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {mockMonitors.map((monitor: Monitor) => {
+            const isOk = monitor.status === "ok";
+            const isTriggered = monitor.status === "triggered";
+            const isNoData = monitor.status === "no_data";
+
+            const dotClass = isOk
+              ? "bg-green-400"
+              : isTriggered
+              ? "bg-red-400 animate-pulse"
+              : "bg-slate-500";
+
+            const valueClass = isOk
+              ? "text-green-400"
+              : isTriggered
+              ? "text-red-400"
+              : "text-[var(--color-text-muted)]";
+
+            const slotClass = (s: "ok" | "triggered" | "no_data") =>
+              s === "ok"
+                ? "bg-green-500/60"
+                : s === "triggered"
+                ? "bg-red-500/70"
+                : "bg-slate-700/50";
+
+            const thresholdLabel =
+              monitor.threshold_direction === "above"
+                ? `Alerta quando > ${monitor.threshold}${monitor.unit}`
+                : `Alerta quando < ${monitor.threshold}${monitor.unit}`;
+
+            const formatLastTriggered = (iso: string) => {
+              const d = new Date(iso);
+              const dd = String(d.getDate()).padStart(2, "0");
+              const mm = String(d.getMonth() + 1).padStart(2, "0");
+              const hh = String(d.getHours()).padStart(2, "0");
+              const min = String(d.getMinutes()).padStart(2, "0");
+              return `${dd}/${mm} ${hh}:${min}`;
+            };
+
+            return (
+              <div
+                key={monitor.id}
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-2"
+              >
+                {/* Top row */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`h-2 w-2 flex-shrink-0 rounded-full ${dotClass}`} />
+                    <span className="truncate text-xs font-semibold text-[var(--color-text)]">
+                      {monitor.name}
+                    </span>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <span className={`font-[family-name:var(--font-mono)] text-sm font-bold ${valueClass}`}>
+                      {monitor.current_value.toLocaleString("pt-BR")}{monitor.unit}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Threshold context */}
+                <p className="text-[10px] text-[var(--color-text-muted)]">{thresholdLabel}</p>
+
+                {/* Description */}
+                <p className="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
+                  {monitor.description}
+                </p>
+
+                {/* Alert history timeline */}
+                <div className="flex gap-[2px] items-end">
+                  {monitor.alert_history.map((slot, i) => {
+                    const isLast = i === monitor.alert_history.length - 1;
+                    return (
+                      <span
+                        key={slot.hour}
+                        className={`flex-1 rounded-[2px] ${slotClass(slot.status)} ${isLast ? "brightness-125" : ""}`}
+                        style={{ height: isLast ? "10px" : "6px" }}
+                        title={`h${slot.hour}: ${slot.status}`}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Triggered warning */}
+                {isTriggered && monitor.last_triggered && (
+                  <div className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1">
+                    <AlertTriangle className="h-3 w-3 flex-shrink-0 text-amber-400" />
+                    <span className="text-[10px] font-medium text-amber-400">
+                      Disparado em {formatLastTriggered(monitor.last_triggered)}
+                    </span>
+                  </div>
+                )}
+
+                {isNoData && (
+                  <div className="flex items-center gap-1 rounded-md bg-slate-700/30 px-2 py-1">
+                    <BellOff className="h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)]" />
+                    <span className="text-[10px] text-[var(--color-text-muted)]">Sem dados</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Events Table */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
         {filtered.length === 0 ? (
@@ -154,27 +294,34 @@ export function OperationsPage() {
             </p>
           </div>
         ) : (
-          <table className="w-full min-w-[800px]">
+          <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-white/5 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                <th className="px-4 py-3">Sessão</th>
                 <th className="px-4 py-3">Quando</th>
                 <th className="px-4 py-3">Módulo</th>
                 <th className="px-4 py-3">Entrada</th>
                 <th className="px-4 py-3">Decisão</th>
                 <th className="px-4 py-3">Modelo</th>
+                <th className="px-4 py-3">HMAC</th>
                 <th className="px-4 py-3 text-right">Tempo</th>
                 <th className="px-4 py-3 text-right">Custo</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((evt) => {
+              {filtered.map((evt, idx) => {
                 const dc = decisionConfig[evt.decision] || decisionConfig.error;
+                const sessionId = `sess_${evt.id.slice(-4)}`;
+                const hmacValid = idx % 7 !== 3;
                 return (
                   <tr
                     key={evt.id}
                     onClick={() => setSelectedEvent(evt)}
                     className="cursor-pointer border-b border-[var(--color-border)] transition-colors last:border-0 hover:bg-[var(--color-primary)]/5"
                   >
+                    <td className="whitespace-nowrap px-4 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-primary)]">
+                      {sessionId}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
                       {formatTime(evt.timestamp)}
                     </td>
@@ -194,6 +341,13 @@ export function OperationsPage() {
                     </td>
                     <td className="px-4 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
                       {evt.model_used || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {hmacValid ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400" aria-label="HMAC válido" />
+                      ) : (
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-400" aria-label="HMAC inválido" />
+                      )}
                     </td>
                     <td className={`whitespace-nowrap px-4 py-3 text-right font-[family-name:var(--font-mono)] text-xs font-medium ${latencyColor(evt.response_time_ms)}`}>
                       {evt.response_time_ms}ms

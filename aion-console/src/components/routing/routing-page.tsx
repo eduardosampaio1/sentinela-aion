@@ -16,7 +16,8 @@ import {
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { mockModels, mockModuleStats, mockDistribution } from "@/lib/mock-data";
+import { RoutingTopologyMap } from "./routing-topology";
+import { mockModels, mockModuleStats, mockDistribution, mockIntentPerformance } from "@/lib/mock-data";
 
 const defaultRules = [
   { id: "r1", prompt_type: "Simples", model_id: "gpt-4o-mini", condition: "< 50 tokens" },
@@ -37,8 +38,64 @@ export function RoutingPage() {
   const [maxLatency, setMaxLatency] = useState(3000);
   const [rules] = useState(defaultRules);
   const [fallbackChain] = useState(["gpt-4o-mini", "gpt-4o", "gemini-flash"]);
+  const [initialPriority] = useState(50);
+  const [initialMaxLatency] = useState(3000);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showLatencyConfirm, setShowLatencyConfirm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const hasChanges = priority !== initialPriority;
+  const hasLatencyChanges = maxLatency !== initialMaxLatency;
+  const priorityImpact = Math.abs(priority - 50);
+  const costChange = priority < 50
+    ? -((50 - priority) * 0.8)  // Economia de até 40%
+    : ((priority - 50) * 1.2);   // Custo sobe de até 60%
+  const qualityChange = priority > 50
+    ? ((priority - 50) * 0.5)    // Qualidade melhora até 25%
+    : 0;
+
   const models = mockModels;
   const nomosStats = mockModuleStats.nomos;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Aqui entraria a chamada de API
+      // await setRoutingPriority(priority);
+      setShowConfirm(false);
+      setSaving(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setPriority(initialPriority);
+    setShowConfirm(false);
+    setSaveError(null);
+  };
+
+  const handleSaveLatency = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // await setMaxLatency(maxLatency);
+      setShowLatencyConfirm(false);
+      setSaving(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+      setSaving(false);
+    }
+  };
+
+  const handleCancelLatency = () => {
+    setMaxLatency(initialMaxLatency);
+    setShowLatencyConfirm(false);
+    setSaveError(null);
+  };
 
   const statusBadge = (status: string) => {
     switch (status) {
@@ -105,6 +162,9 @@ export function RoutingPage() {
         </div>
       </div>
 
+      {/* ═══ Topology map ═══ */}
+      <RoutingTopologyMap />
+
       {/* ═══ Distribuição de modelos — onde o NOMOS manda ═══ */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
@@ -145,10 +205,17 @@ export function RoutingPage() {
 
       {/* Priority slider — with impact context */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-        <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Prioridade de decisão</h2>
-        <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Define como o NOMOS escolhe entre modelos. Mais à esquerda = mais barato. Mais à direita = mais inteligente.
-        </p>
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Prioridade de decisão</h2>
+            <p className="mb-4 text-xs text-[var(--color-text-muted)]">
+              Define como o NOMOS escolhe entre modelos. Mais à esquerda = mais barato. Mais à direita = mais inteligente.
+            </p>
+          </div>
+          {hasChanges && (
+            <span className="ml-4"><Badge variant="warning" dot>Não salvo</Badge></span>
+          )}
+        </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1 text-sm text-green-600">
             <DollarSign className="h-4 w-4" />
@@ -180,7 +247,23 @@ export function RoutingPage() {
         {priority > 70 && (
           <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-600">
             <AlertTriangle className="h-3.5 w-3.5" />
-            Modo qualidade — custo estimado pode aumentar ~{((priority - 50) * 1.2).toFixed(0)}%.
+            Modo qualidade — custo estimado pode aumentar ~{costChange.toFixed(0)}%.
+          </div>
+        )}
+        {hasChanges && (
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={handleCancel}
+              className="cursor-pointer rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => setShowConfirm(true)}
+              className="cursor-pointer rounded-lg bg-[var(--color-cta)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              Salvar prioridade
+            </button>
           </div>
         )}
       </div>
@@ -322,16 +405,111 @@ export function RoutingPage() {
         </div>
       </div>
 
+      {/* ═══ INTENT PERFORMANCE ═══ */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="border-b border-[var(--color-border)] px-6 py-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
+            <Sparkles className="h-4 w-4 text-amber-400" />
+            Performance por intent — recomendações NEMOS
+          </h2>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Comparativo entre o modelo atual e o modelo com melhor custo/qualidade detectado
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)]">
+                {["Intent", "Requests/dia", "Modelo atual", "Modelo ótimo", "Economia/dia", "Confiança"].map((h) => (
+                  <th key={h} className="px-5 py-3 text-left text-xs font-medium text-[var(--color-text-muted)]">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {mockIntentPerformance.map((intent) => {
+                const hasSavings = intent.savings_day > 0;
+                return (
+                  <tr
+                    key={intent.name}
+                    className={`border-b border-[var(--color-border)]/50 transition-colors hover:bg-white/5 ${
+                      hasSavings ? "" : ""
+                    }`}
+                  >
+                    <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text)]">
+                      {intent.name}
+                    </td>
+                    <td className="px-5 py-3 text-[var(--color-text-muted)]">
+                      {intent.requests.toLocaleString("pt-BR")}
+                    </td>
+                    <td className="px-5 py-3 font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                      {intent.current_model}
+                    </td>
+                    <td className="px-5 py-3">
+                      {hasSavings ? (
+                        <span className="font-[family-name:var(--font-mono)] text-xs font-medium text-[var(--color-primary)]">
+                          {intent.best_model}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-green-400">✓ Ótimo</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {hasSavings ? (
+                        <span className="text-xs font-semibold text-green-400">
+                          R$ {intent.savings_day.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-16 rounded-full bg-white/10">
+                          <div
+                            className={`h-1.5 rounded-full ${
+                              intent.confidence >= 0.9 ? "bg-green-500" : intent.confidence >= 0.8 ? "bg-amber-500" : "bg-red-500"
+                            }`}
+                            style={{ width: `${intent.confidence * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-[var(--color-text-muted)]">
+                          {(intent.confidence * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="border-t border-[var(--color-border)] px-5 py-3">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Economia total potencial:{" "}
+            <strong className="text-green-400">
+              R$ {mockIntentPerformance.reduce((s, i) => s + i.savings_day, 0).toFixed(2)}/dia
+            </strong>
+          </p>
+        </div>
+      </div>
+
       {/* Max Latency — with impact context */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
+        <div className="mb-4 flex items-start justify-between">
+          <div className="flex-1">
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Latência máxima</h2>
             <p className="text-xs text-[var(--color-text-muted)]">Tempo máximo antes de acionar fallback. Reduzir demais pode aumentar o uso de fallback.</p>
           </div>
-          <span className="font-[family-name:var(--font-mono)] text-lg font-bold text-sky-600">
-            {maxLatency >= 1000 ? `${(maxLatency / 1000).toFixed(1)}s` : `${maxLatency}ms`}
-          </span>
+          <div className="flex items-center gap-3 ml-4">
+            {hasLatencyChanges && (
+              <Badge variant="warning" dot>Não salvo</Badge>
+            )}
+            <span className="font-[family-name:var(--font-mono)] text-lg font-bold text-sky-600">
+              {maxLatency >= 1000 ? `${(maxLatency / 1000).toFixed(1)}s` : `${maxLatency}ms`}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Clock className="h-4 w-4 text-green-600" />
@@ -353,7 +531,143 @@ export function RoutingPage() {
             Limite agressivo — modelos premium podem não responder a tempo, aumentando fallbacks.
           </div>
         )}
+        {hasLatencyChanges && (
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={handleCancelLatency}
+              className="cursor-pointer rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => setShowLatencyConfirm(true)}
+              className="cursor-pointer rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              Salvar latência
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Latency Confirm Modal */}
+      {showLatencyConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Alterar latência máxima?</h3>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              O novo limite será aplicado imediatamente a todas as requisições em andamento.
+            </p>
+
+            <div className="mt-4 space-y-2 rounded-lg bg-white/5 p-4 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Valor anterior</span>
+                <strong className="font-[family-name:var(--font-mono)] text-[var(--color-text-muted)]">
+                  {initialMaxLatency >= 1000 ? `${(initialMaxLatency / 1000).toFixed(1)}s` : `${initialMaxLatency}ms`}
+                </strong>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Novo valor</span>
+                <strong className="font-[family-name:var(--font-mono)] text-sky-400">
+                  {maxLatency >= 1000 ? `${(maxLatency / 1000).toFixed(1)}s` : `${maxLatency}ms`}
+                </strong>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Risco de fallback</span>
+                <strong className={`font-[family-name:var(--font-mono)] ${maxLatency < 1500 ? "text-amber-400" : maxLatency < 5000 ? "text-green-400" : "text-[var(--color-text-muted)]"}`}>
+                  {maxLatency < 1500 ? "Alto" : maxLatency < 5000 ? "Normal" : "Baixo"}
+                </strong>
+              </div>
+            </div>
+
+            {maxLatency < 1500 && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-900/20 border border-amber-800/40 px-3 py-2">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                <p className="text-xs text-amber-300">
+                  Limite agressivo pode aumentar o uso de fallbacks e aumentar a latência percebida pelo usuário.
+                </p>
+              </div>
+            )}
+
+            {saveError && (
+              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                {saveError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={handleCancelLatency}
+                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveLatency}
+                disabled={saving}
+                className="cursor-pointer rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? "Salvando..." : "Aplicar agora"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Priority Confirm Modal */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">Alterar prioridade de decisão?</h3>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              Esta mudança afetará todas as novas requisições a partir de agora.
+            </p>
+
+            {/* Impact summary in modal */}
+            <div className="mt-4 space-y-2 rounded-lg bg-white/5 p-4 text-sm">
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Impacto em custo</span>
+                <strong className={`font-[family-name:var(--font-mono)] ${costChange < 0 ? "text-green-600" : "text-amber-600"}`}>
+                  {costChange > 0 ? "+" : ""}{costChange.toFixed(1)}%
+                </strong>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Prioridade</span>
+                <strong className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">
+                  {priority < 50 ? "← Custo" : priority > 50 ? "Qualidade →" : "Equilibrado"}
+                </strong>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[var(--color-text-muted)]">Modelo padrão preferido</span>
+                <strong className="font-[family-name:var(--font-mono)] text-sky-400">
+                  {priority < 40 ? "gpt-4o-mini" : priority < 65 ? "gpt-4o" : "claude-sonnet"}
+                </strong>
+              </div>
+            </div>
+
+            {saveError && (
+              <div className="mt-3 rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-400">
+                {saveError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowConfirm(false); setSaveError(null); }}
+                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="cursor-pointer rounded-lg bg-[var(--color-cta)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? "Salvando..." : "Aplicar agora"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

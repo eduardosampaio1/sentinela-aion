@@ -17,11 +17,27 @@ import {
   Database,
   Wand2,
   ScanEye,
+  Check,
+  X,
+  ChevronRight,
 } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useAionData } from "@/lib/use-aion-data";
 import { useRealtimeStats } from "@/lib/use-realtime";
+import { mockSpendTrend, mockModelCostDistribution } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
 
 const fmtBRL = (n: number) => `R$ ${n.toFixed(2)}`;
@@ -169,6 +185,108 @@ export function StatusPage() {
               <AnimatedNumber value={opState.uptime_hours} format={(n) => `${n.toFixed(1)}h`} />
             </strong>
           </span>
+        </div>
+      </div>
+
+      {/* ═══ RECOMENDAÇÃO NEMOS ═══ */}
+      <NemosRecommendationCard />
+
+      {/* ═══ GRÁFICOS ═══ */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Spend trend — 2/3 width */}
+        <div className="lg:col-span-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
+            <TrendingDown className="h-4 w-4 text-green-400" />
+            Gasto vs. Custo evitado (abril)
+          </h2>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">R$ por dia</p>
+          <div className="mt-4 h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={mockSpendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradAvoided" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                  tickFormatter={(v: string) => v.slice(8)}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `${v}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "8px",
+                    fontSize: 12,
+                  }}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  labelFormatter={(v: any) => `Dia ${String(v).slice(8)}/04`}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter={(v: any, name: any) => [
+                    `R$ ${Number(v).toLocaleString("pt-BR")}`,
+                    name === "spend" ? "Gasto" : "Evitado",
+                  ]}
+                />
+                <Area type="monotone" dataKey="spend" stroke="#0ea5e9" strokeWidth={2} fill="url(#gradSpend)" />
+                <Area type="monotone" dataKey="avoided" stroke="#22c55e" strokeWidth={2} fill="url(#gradAvoided)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Model cost distribution — 1/3 width */}
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Distribuição de custo</h2>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Por modelo (% do total)</p>
+          <div className="mt-4 h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={mockModelCostDistribution}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={48}
+                  outerRadius={72}
+                  paddingAngle={2}
+                  dataKey="value"
+                >
+                  {mockModelCostDistribution.map((entry, i) => (
+                    <Cell key={i} fill={entry.fill} />
+                  ))}
+                </Pie>
+                <Legend
+                  iconSize={8}
+                  formatter={(value: string) => (
+                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
+                  )}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "var(--color-surface)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "8px",
+                    fontSize: 12,
+                  }}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter={(v: any) => [`${v}%`, "Custo"]}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
@@ -354,9 +472,11 @@ export function StatusPage() {
               <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-amber-200">CACHE</h3>
               <span className="text-xs text-amber-600">Cache semântico</span>
             </div>
-            <Badge variant={modules.cache.enabled ? "success" : "warning"} className="ml-auto text-[10px]">
-              {modules.cache.enabled ? "Ativo" : "Desligado"}
-            </Badge>
+            <span className="ml-auto">
+              <Badge variant={modules.cache.enabled ? "success" : "warning"}>
+                {modules.cache.enabled ? "Ativo" : "Desligado"}
+              </Badge>
+            </span>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -534,5 +654,127 @@ function DecisionBadge({ decision }: { decision: string }) {
     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${c.bg} ${c.text}`}>
       {c.label}
     </span>
+  );
+}
+
+function NemosRecommendationCard() {
+  const [state, setState] = useState<"idle" | "confirming" | "applied" | "dismissed">("idle");
+
+  if (state === "dismissed") return null;
+
+  if (state === "applied") {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-green-700/40 bg-green-950/20 px-5 py-4">
+        <Check className="h-4 w-4 shrink-0 text-green-400" />
+        <p className="text-sm text-green-300">
+          Recomendação aplicada — <code className="font-[family-name:var(--font-mono)]">limite_cartao_faq</code> migrado para{" "}
+          <strong>gpt-4o-mini</strong>. Economia de <strong>R$ 12,40/dia</strong> ativa.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-start gap-4 rounded-xl border border-amber-700/40 bg-amber-950/20 p-5">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-900/40">
+          <Brain className="h-5 w-5 text-amber-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-amber-200">Recomendação NEMOS</p>
+          <p className="mt-0.5 text-sm text-amber-300/80">
+            Intent{" "}
+            <code className="font-[family-name:var(--font-mono)] text-amber-200">limite_cartao_faq</code>{" "}
+            pode migrar de <strong>gpt-4o → gpt-4o-mini</strong> com 97% de confiança. Economia estimada:{" "}
+            <strong className="text-green-400">R$ 12,40/dia</strong>.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <button
+            onClick={() => setState("confirming")}
+            className="flex items-center gap-1.5 rounded-lg bg-amber-800/40 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-800/60 transition-colors"
+          >
+            Aplicar
+            <ChevronRight className="h-3 w-3" />
+          </button>
+          <button
+            onClick={() => setState("dismissed")}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-amber-400/60 hover:text-amber-300 transition-colors"
+          >
+            Ignorar
+          </button>
+        </div>
+      </div>
+
+      {/* Confirmation modal */}
+      {state === "confirming" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-900/40">
+                  <Brain className="h-5 w-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--color-text)]">Confirmar migração de modelo</h3>
+                  <p className="text-xs text-[var(--color-text-muted)]">NEMOS — 97% de confiança</p>
+                </div>
+              </div>
+              <button onClick={() => setState("idle")} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Impact preview */}
+            <div className="mt-5 rounded-xl bg-white/5 divide-y divide-[var(--color-border)]">
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Intent afetado</span>
+                <code className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">limite_cartao_faq</code>
+              </div>
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Modelo atual</span>
+                <span className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">gpt-4o</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Novo modelo</span>
+                <span className="font-[family-name:var(--font-mono)] text-[var(--color-primary)]">gpt-4o-mini</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Requests/dia afetados</span>
+                <span className="text-[var(--color-text)]">~2.840</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Economia estimada</span>
+                <span className="font-semibold text-green-400">R$ 12,40/dia · R$ 372/mês</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 text-sm">
+                <span className="text-[var(--color-text-muted)]">Qualidade esperada</span>
+                <span className="text-green-400">≥ 97% de equivalência semântica</span>
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs text-[var(--color-text-muted)]">
+              A mudança entra em vigor imediatamente. Pode ser revertida a qualquer momento na página de Roteamento.
+            </p>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => setState("idle")}
+                className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => setState("applied")}
+                className="flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                <Check className="h-4 w-4" />
+                Confirmar migração
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -6,6 +6,9 @@ import type {
   CacheStats,
   SuggestionsResponse,
   SuggestionApprovalResponse,
+  Session,
+  BudgetSummary,
+  BudgetCap,
 } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_AION_API_URL || "http://localhost:8080";
@@ -131,5 +134,57 @@ export async function setOverrides(overrides: Record<string, unknown>): Promise<
   return fetchApi("/v1/overrides", {
     method: "PUT",
     body: JSON.stringify(overrides),
+  });
+}
+
+// Sessions
+export async function getSessions(limit = 50): Promise<Session[]> {
+  return fetchApi(`/v1/sessions/${_activeTenant}?limit=${limit}`);
+}
+
+export async function getSessionAudit(sessionId: string): Promise<Session> {
+  return fetchApi(`/v1/session/${sessionId}/audit`);
+}
+
+// Budget
+export async function getBudgetStatus(): Promise<BudgetSummary> {
+  return fetchApi(`/v1/budget/${_activeTenant}/status`);
+}
+
+export async function setBudgetCap(cap: Partial<BudgetCap> & { department: string }): Promise<BudgetCap> {
+  return fetchApi(`/v1/budget/${_activeTenant}`, {
+    method: "PUT",
+    body: JSON.stringify(cap),
+  });
+}
+
+// Shadow mode
+export async function getShadowConfig(): Promise<Record<string, unknown>> {
+  return fetchApi("/v1/shadow/config");
+}
+
+export async function getShadowResults(limit = 50): Promise<Record<string, unknown>[]> {
+  return fetchApi(`/v1/shadow/results?limit=${limit}`);
+}
+
+// Threats
+export async function getThreats(): Promise<Record<string, unknown>[]> {
+  return fetchApi(`/v1/threats/${_activeTenant}`);
+}
+
+// Intelligence (NEMOS)
+export async function getIntelligenceOverview(): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/intelligence/${_activeTenant}/overview`);
+}
+
+// Reports
+export async function getExecutiveReport(): Promise<Record<string, unknown>> {
+  return fetchApi(`/v1/reports/${_activeTenant}/executive`);
+}
+
+export async function scheduleReport(config: { frequency: string; format: string }): Promise<void> {
+  await fetchApi(`/v1/reports/${_activeTenant}/schedule`, {
+    method: "POST",
+    body: JSON.stringify(config),
   });
 }

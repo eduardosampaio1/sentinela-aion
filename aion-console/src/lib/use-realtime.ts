@@ -15,14 +15,15 @@ import {
 // Helpers
 // ═══════════════════════════════════════════
 
+// Jitter oscillates symmetrically around a FIXED baseline — never compounds.
 function jitter(base: number, pct: number): number {
   const delta = base * (pct / 100);
-  return Math.round(base + (Math.random() - 0.4) * delta * 2);
+  return Math.round(base + (Math.random() - 0.5) * delta * 2);
 }
 
 function jitterFloat(base: number, pct: number): number {
   const delta = base * (pct / 100);
-  return +(base + (Math.random() - 0.4) * delta * 2).toFixed(2);
+  return +(base + (Math.random() - 0.5) * delta * 2).toFixed(2);
 }
 
 function clamp(val: number, min: number, max: number): number {
@@ -38,7 +39,7 @@ let _evtCounter = 100;
 const DEMO_TEMPLATES: Array<{
   input: string;
   decision: AionEvent["decision"];
-  module: string;
+  module: AionEvent["module"];
   model: string | null;
   cost: number | null;
   ms: number;
@@ -105,11 +106,16 @@ export interface RealtimeData {
 // Tick function — updates ALL numbers
 // ═══════════════════════════════════════════
 
+// Fixed baselines — all oscillation is relative to these, never to prev.*
+const BASE = mockStats;
+const BASE_MOD = mockModuleStats;
+
 function generateTick(prev: RealtimeData, intervalMs: number): RealtimeData {
-  const newBypasses = jitter(prev.stats.bypasses, 2);
-  const newRoutes   = jitter(prev.stats.routes, 2);
-  const newBlocks   = jitter(prev.stats.blocks, 3);
-  const newErrors   = clamp(jitter(prev.stats.errors, 6), 0, 80);
+  // All counters jitter around the FIXED mock baseline — bounded oscillation.
+  const newBypasses = jitter(BASE.bypasses, 3);
+  const newRoutes   = jitter(BASE.routes, 3);
+  const newBlocks   = clamp(jitter(BASE.blocks, 5), 0, BASE.blocks * 1.2);
+  const newErrors   = clamp(jitter(BASE.errors, 8), 0, BASE.errors * 1.5);
   const newTotal    = newBypasses + newRoutes + newBlocks + newErrors;
 
   const stats: Stats = {
@@ -119,51 +125,77 @@ function generateTick(prev: RealtimeData, intervalMs: number): RealtimeData {
     routes: newRoutes,
     blocks: newBlocks,
     errors: newErrors,
-    tokens_saved: jitter(prev.stats.tokens_saved, 1),
-    cost_saved: jitterFloat(prev.stats.cost_saved, 2),
-    avg_latency_ms: clamp(jitter(prev.stats.avg_latency_ms, 5), 80, 300),
+    tokens_saved: jitter(BASE.tokens_saved, 2),
+    cost_saved: jitterFloat(BASE.cost_saved, 3),
+    avg_latency_ms: clamp(jitter(BASE.avg_latency_ms, 5), 80, 300),
   };
 
-  const nomosDecisions = jitter(prev.modules.nomos.decisions_today, 2);
+  const nomosDecisions = jitter(BASE_MOD.nomos.decisions_today, 3);
   const nomosLight = Math.round(nomosDecisions * 0.78);
 
-  // Cache — hits/misses accumulate, hit_rate wobbles
-  const newHits   = prev.modules.cache.hits + (Math.random() > 0.3 ? Math.floor(Math.random() * 4) : 0);
-  const newMisses = prev.modules.cache.misses + (Math.random() > 0.5 ? Math.floor(Math.random() * 3) : 0);
+  // Cache: jitter around baseline totals, derive hit_rate from them.
+  const newHits   = jitter(BASE_MOD.cache.hits, 2);
+  const newMisses = jitter(BASE_MOD.cache.misses, 4);
   const newCacheTotal = newHits + newMisses;
+
+  // Slowly-incrementing counters: cap at baseline × 1.1 to avoid runaway.
+  const threats = clamp(
+    prev.modules.estixe.threats_detected + (Math.random() > 0.88 ? 1 : 0),
+    0, Math.round(BASE_MOD.estixe.threats_detected * 1.1),
+  );
+  const falsePosAvoided = clamp(
+    prev.modules.estixe.false_positives_avoided + (Math.random() > 0.82 ? 1 : 0),
+    0, Math.round(BASE_MOD.estixe.false_positives_avoided * 1.1),
+  );
+  const rewrites = clamp(
+    prev.modules.metis.rewrites_applied + (Math.random() > 0.65 ? 1 : 0),
+    0, Math.round(BASE_MOD.metis.rewrites_applied * 1.15),
+  );
+  const cacheEntries = clamp(
+    prev.modules.cache.total_entries + (Math.random() > 0.55 ? 1 : 0),
+    0, BASE_MOD.cache.total_entries + 50,
+  );
+  const invalidations = clamp(
+    prev.modules.cache.invalidations + (Math.random() > 0.95 ? 1 : 0),
+    0, BASE_MOD.cache.invalidations + 10,
+  );
+  const evictions = clamp(
+    prev.modules.cache.evictions + (Math.random() > 0.98 ? 1 : 0),
+    0, BASE_MOD.cache.evictions + 5,
+  );
 
   const modules: ModuleStats = {
     nomos: {
       decisions_today: nomosDecisions,
       routes_to_light: nomosLight,
       routes_to_premium: nomosDecisions - nomosLight,
-      avg_decision_ms: clamp(jitter(prev.modules.nomos.avg_decision_ms, 15), 1, 8),
-      cost_optimized: jitterFloat(prev.modules.nomos.cost_optimized, 2),
+      avg_decision_ms: clamp(jitter(BASE_MOD.nomos.avg_decision_ms, 15), 1, 8),
+      cost_optimized: jitterFloat(BASE_MOD.nomos.cost_optimized, 3),
       classifier_method: prev.modules.nomos.classifier_method,
     },
     estixe: {
-      bypasses_today: jitter(prev.modules.estixe.bypasses_today, 2),
-      blocks_today: jitter(prev.modules.estixe.blocks_today, 3),
-      threats_detected: prev.modules.estixe.threats_detected + (Math.random() > 0.88 ? 1 : 0),
-      tokens_saved: jitter(prev.modules.estixe.tokens_saved, 1),
-      cost_avoided: jitterFloat(prev.modules.estixe.cost_avoided, 2),
-      false_positives_avoided: prev.modules.estixe.false_positives_avoided + (Math.random() > 0.82 ? 1 : 0),
+      bypasses_today: jitter(BASE_MOD.estixe.bypasses_today, 3),
+      blocks_today: jitter(BASE_MOD.estixe.blocks_today, 4),
+      threats_detected: threats,
+      tokens_saved: jitter(BASE_MOD.estixe.tokens_saved, 2),
+      cost_avoided: jitterFloat(BASE_MOD.estixe.cost_avoided, 3),
+      false_positives_avoided: falsePosAvoided,
     },
     metis: {
-      optimizations_today: jitter(prev.modules.metis.optimizations_today, 2),
-      tokens_compressed: jitter(prev.modules.metis.tokens_compressed, 1),
-      avg_reduction_pct: clamp(jitter(prev.modules.metis.avg_reduction_pct, 5), 15, 35),
-      cost_saved: jitterFloat(prev.modules.metis.cost_saved, 2),
-      rewrites_applied: prev.modules.metis.rewrites_applied + (Math.random() > 0.65 ? 1 : 0),
+      optimizations_today: jitter(BASE_MOD.metis.optimizations_today, 3),
+      tokens_compressed: jitter(BASE_MOD.metis.tokens_compressed, 2),
+      avg_reduction_pct: clamp(jitter(BASE_MOD.metis.avg_reduction_pct, 5), 15, 35),
+      cost_saved: jitterFloat(BASE_MOD.metis.cost_saved, 3),
+      rewrites_applied: rewrites,
     },
     cache: {
       ...prev.modules.cache,
       hits: newHits,
       misses: newMisses,
       hit_rate: newCacheTotal > 0 ? +(newHits / newCacheTotal).toFixed(4) : 0,
-      total_entries: prev.modules.cache.total_entries + (Math.random() > 0.55 ? 1 : 0),
-      invalidations: prev.modules.cache.invalidations + (Math.random() > 0.95 ? 1 : 0),
-      evictions: prev.modules.cache.evictions + (Math.random() > 0.98 ? 1 : 0),
+      total_entries: cacheEntries,
+      invalidations,
+      evictions,
     },
   };
 

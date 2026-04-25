@@ -67,6 +67,15 @@ export interface IntentCategory {
   response: string;
 }
 
+export interface BlockCategory {
+  id: string;
+  name: string;
+  enabled: boolean;
+  severity: "critical" | "high" | "medium";
+  examples: string[];
+  response: string; // mensagem exibida ao usuário quando bloqueado
+}
+
 export interface SecurityRule {
   id: string;
   name: string;
@@ -129,3 +138,154 @@ export type ApprovalStatus =
   | "ready_prod"
   | "live"
   | "rejected";
+
+// ─── Sessions ───────────────────────────────────────────────────────────────
+
+export interface SessionTurn {
+  turn: number;
+  timestamp: string;
+  input: string;
+  decision: "bypass" | "route" | "block" | "fallback";
+  module: "ESTIXE" | "NOMOS" | "METIS" | null;
+  model_used: string | null;
+  latency_ms: number;
+  cost: number;
+  risk_score: number;
+  // Response fields
+  aion_response?: string;    // bypass ou block: resposta do AION sem LLM
+  llm_response?: string;     // route: resposta do LLM
+  block_reason?: string;     // block: motivo do bloqueio
+  pii_detected?: string[];   // PII encontrado neste turno
+  metis_compressed?: boolean; // METIS comprimiu o contexto
+}
+
+export interface Session {
+  id: string;
+  user_hash: string;
+  tenant: string;
+  turns: number;
+  risk: "low" | "medium" | "high" | "critical";
+  spend: number;
+  outcome: "bypassed" | "routed" | "blocked" | "optimized";
+  hmac_valid: boolean;
+  started_at: string;
+  last_activity: string;
+  turn_history: SessionTurn[];
+}
+
+// ─── Budget ─────────────────────────────────────────────────────────────────
+
+export interface BudgetCap {
+  department: string;
+  cap_brl: number;
+  used_brl: number;
+  used_pct: number;
+  mode: "downgrade" | "hard_stop" | "alert_only";
+  alert_sent: boolean;
+}
+
+export interface BudgetSummary {
+  monthly_budget: number;
+  used_brl: number;
+  used_pct: number;
+  avoided_cost: number;
+  alerts: number;
+  downgrades: number;
+  caps: BudgetCap[];
+}
+
+// ─── Admin ───────────────────────────────────────────────────────────────────
+
+export interface AdminRole {
+  name: string;
+  users: number;
+  permissions: string[];
+  color: string;
+}
+
+export interface IdentityProvider {
+  name: string;
+  type: string;
+  status: "connected" | "pending" | "error";
+  users: number;
+}
+
+// ─── Integrations ────────────────────────────────────────────────────────────
+
+export interface Integration {
+  name: string;
+  category: "llm" | "observability" | "notification" | "security";
+  status: "connected" | "ready" | "pending" | "error";
+  latency_ms: number | null;
+  description: string;
+}
+
+// ─── Threat categories (ESTIXE) ──────────────────────────────────────────────
+
+export interface ThreatCategory {
+  name: string;
+  count: number;
+  pct: number;
+  action: "block" | "sanitize" | "warn";
+}
+
+// ─── Intent performance (NOMOS) ──────────────────────────────────────────────
+
+export interface IntentPerformance {
+  name: string;
+  requests: number;
+  current_model: string;
+  best_model: string;
+  savings_day: number;
+  confidence: number;
+}
+
+// ─── Charts ───────────────────────────────────────────────────────────────────
+
+export interface SpendTrendPoint {
+  date: string;
+  spend: number;
+  avoided: number;
+}
+
+// ─── Monitors (Operations) ───────────────────────────────────────────────────
+
+export type MonitorStatus = "ok" | "triggered" | "no_data";
+
+export interface MonitorAlert {
+  hour: number; // 0 = oldest, 23 = most recent
+  status: MonitorStatus;
+}
+
+export interface Monitor {
+  id: string;
+  name: string;
+  description: string;
+  metric: string;
+  unit: string;
+  threshold: number;
+  threshold_direction: "above" | "below"; // alert when value is above/below threshold
+  current_value: number;
+  status: MonitorStatus;
+  last_triggered: string | null;
+  alert_history: MonitorAlert[]; // 24 hourly data points
+}
+
+// ─── Annotations (Sessions) ───────────────────────────────────────────────────
+
+export interface AnnotationItem {
+  id: string;
+  session_id: string;
+  turn: number;
+  prompt: string;
+  decision: "bypass" | "route" | "block";
+  aion_response?: string;
+  block_reason?: string;
+  model_used?: string;
+  flagged_reason: string;
+  annotated: boolean;
+  decision_correct?: boolean;
+  false_positive?: boolean;
+  response_adequate?: boolean;
+  comment?: string;
+}
