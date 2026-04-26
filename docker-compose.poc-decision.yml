@@ -10,7 +10,7 @@
 # Menor fricção com CISO, jurídico e arquitetura de segurança.
 #
 # Setup (2 comandos):
-#   echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+#   printf "AION_LICENSE=<jwt-fornecido-pela-baluarte>\nAION_ADMIN_KEY=chave-poc:admin\n" > .env
 #   docker compose -f docker-compose.poc-decision.yml up -d
 #
 # Verificar:
@@ -43,7 +43,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Auth admin — obrigatório
+      # Licença JWT — obrigatório para subir o servidor
+      # Gerada pela Baluarte (contato@baluarte.ai) — uma por cliente/ambiente
+      AION_LICENSE: ${AION_LICENSE}
+
+      # Auth admin — obrigatório para endpoints /v1/admin/*
       # Formato: "chave:role" — ex: "abc123poc:admin"
       AION_ADMIN_KEY: ${AION_ADMIN_KEY}
 

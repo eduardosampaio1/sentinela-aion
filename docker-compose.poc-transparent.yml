@@ -38,7 +38,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Auth admin — obrigatório
+      # Licença JWT — obrigatório para subir o servidor
+      AION_LICENSE: ${AION_LICENSE}
+
+      # Auth admin — obrigatório para endpoints /v1/admin/*
       AION_ADMIN_KEY: ${AION_ADMIN_KEY}
 
       # LLM do cliente — configure conforme o provider utilizado

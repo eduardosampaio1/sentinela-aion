@@ -299,6 +299,10 @@ async def decide(request: Request):
 
     resp = {
         "decision": result.action.value.lower() if result else "continue",
+        # bypass_response: pre-crafted reply for bypass decisions (e.g. greetings, FAQ).
+        # Present only when decision=="bypass" and a configured response exists.
+        # Use this directly — no need to call the LLM.
+        "bypass_response": (result.bypass_response_text if result else None),
         "reason": result.block_reason if result else None,
         "detected_intent": result.intent_detected if result else None,
         "confidence": result.intent_confidence if result else None,

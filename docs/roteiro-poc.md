@@ -27,8 +27,8 @@ Validar que o AION funciona como camada de controle entre a aplicação do clien
 ### Track A — POC Decision-Only (recomendado)
 
 ```bash
-curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.poc-decision.yml
-echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/develop/docker-compose.poc-decision.yml
+printf "AION_LICENSE=<jwt-fornecido-pela-baluarte>\nAION_ADMIN_KEY=chave-poc:admin\n" > .env
 docker compose -f docker-compose.poc-decision.yml up -d
 ```
 
@@ -53,7 +53,12 @@ if resp.json()["decision"] == "continue":
 ### Track B — POC Transparent (opcional)
 
 ```bash
-# .env com AION_ADMIN_KEY + credencial do LLM do cliente
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/develop/docker-compose.poc-transparent.yml
+cat > .env <<EOF
+AION_LICENSE=<jwt-fornecido-pela-baluarte>
+AION_ADMIN_KEY=chave-poc:admin
+OPENAI_API_KEY=sk-...
+EOF
 docker compose -f docker-compose.poc-transparent.yml up -d
 ```
 
