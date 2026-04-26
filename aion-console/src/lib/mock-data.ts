@@ -11,13 +11,15 @@ import type {
   BudgetSummary,
   AdminRole,
   IdentityProvider,
-  Integration,
   ThreatCategory,
   IntentPerformance,
   SpendTrendPoint,
   Monitor,
   AnnotationItem,
+  CollectivePolicy,
+  InstalledCollectivePolicy,
 } from "./types";
+
 
 // ═══════════════════════════════════════════
 // OPERATIONAL STATE — what the user sees first
@@ -745,20 +747,6 @@ export const mockIdentityProviders: IdentityProvider[] = [
   { name: "Google Workspace", type: "OAuth2", status: "pending", users: 0 },
 ];
 
-export const mockIntegrations: Integration[] = [
-  { name: "OpenAI", category: "llm", status: "connected", latency_ms: 234, description: "GPT-4o, GPT-4o-mini via API" },
-  { name: "Anthropic", category: "llm", status: "connected", latency_ms: 198, description: "Claude 3.5 Sonnet, Haiku" },
-  { name: "Azure OpenAI", category: "llm", status: "connected", latency_ms: 310, description: "Deployment regional corporativo" },
-  { name: "Cohere", category: "llm", status: "ready", latency_ms: null, description: "Command R+ para RAG" },
-  { name: "Datadog", category: "observability", status: "connected", latency_ms: 12, description: "Métricas e traces do pipeline" },
-  { name: "Grafana / Prometheus", category: "observability", status: "connected", latency_ms: 8, description: "Dashboards operacionais" },
-  { name: "Sentry", category: "observability", status: "error", latency_ms: null, description: "Error tracking — requer token" },
-  { name: "PagerDuty", category: "notification", status: "connected", latency_ms: null, description: "Alertas críticos de segurança" },
-  { name: "Slack", category: "notification", status: "connected", latency_ms: null, description: "#aion-alerts channel" },
-  { name: "Wiz", category: "security", status: "connected", latency_ms: 45, description: "CSPM e CVE scanning" },
-  { name: "Vault (HashiCorp)", category: "security", status: "connected", latency_ms: 22, description: "Gestão de secrets e rotação de chaves" },
-  { name: "Lacework", category: "security", status: "ready", latency_ms: null, description: "Runtime threat detection" },
-];
 
 export const mockThreatCategories: ThreatCategory[] = [
   { name: "Prompt Injection", count: 342, pct: 41.2, action: "block" },
@@ -955,3 +943,154 @@ export const mockAnnotations: AnnotationItem[] = [
     annotated: false,
   },
 ];
+
+// ─── AION Collective ──────────────────────────────────────────────────────────
+
+export const mockCollectivePolicies: CollectivePolicy[] = [
+  {
+    id: "aion-anti-jailbreak-v3",
+    name: "Anti-Jailbreak Avançado",
+    description: "Detecta e bloqueia 94% dos padrões conhecidos de jailbreak, incluindo variantes PT-BR",
+    sectors: ["banking", "insurance", "healthcare", "general"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "3.2.1",
+      last_updated: "2026-03-15",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v3.2.1: detecção PT-BR aprimorada", "v3.2: padrões GPT-4o adicionados"],
+    },
+    metrics: {
+      installs_production: 23,
+      avg_savings_pct: 0,
+      avg_latency_change_ms: 2.1,
+      false_positive_rate: 0.018,
+      rollback_rate: 0.04,
+      confidence_score: 0.94,
+    },
+  },
+  {
+    id: "aion-lgpd-redaction-v2",
+    name: "LGPD PII Redaction",
+    description: "Redact CPF, CNPJ, RG e dados bancários antes de enviar ao LLM",
+    sectors: ["banking", "fintech", "insurance"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "2.1.0",
+      last_updated: "2026-04-01",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v2.1.0: detecção CNPJ melhorada", "v2.0: suporte a chaves PIX"],
+    },
+    metrics: {
+      installs_production: 18,
+      avg_savings_pct: 12,
+      avg_latency_change_ms: 0.8,
+      false_positive_rate: 0.003,
+      rollback_rate: 0.01,
+      confidence_score: 0.99,
+    },
+  },
+  {
+    id: "aion-telecom-fraud-v1",
+    name: "Telecom Anti-Fraude",
+    description: "Detecta padrões de social engineering e port-out fraud em telecom",
+    sectors: ["telecom"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "1.3.0",
+      last_updated: "2026-02-20",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v1.3.0: padrões SIM swap atualizados"],
+    },
+    metrics: {
+      installs_production: 9,
+      avg_savings_pct: 0,
+      avg_latency_change_ms: 3.2,
+      false_positive_rate: 0.027,
+      rollback_rate: 0.06,
+      confidence_score: 0.87,
+    },
+  },
+  {
+    id: "aion-smalltalk-bypass-v2",
+    name: "Small-Talk Cost Saver",
+    description: "Bypassa saudações e conversas triviais sem chamar modelo premium",
+    sectors: ["general", "banking", "telecom"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "2.0.1",
+      last_updated: "2026-04-10",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v2.0.1: fix falso positivo em perguntas curtas técnicas"],
+    },
+    metrics: {
+      installs_production: 31,
+      avg_savings_pct: 34,
+      avg_latency_change_ms: -45,
+      false_positive_rate: 0.008,
+      rollback_rate: 0.02,
+      confidence_score: 0.97,
+    },
+  },
+  {
+    id: "aion-phi-healthcare-v1",
+    name: "Healthcare PHI Protection",
+    description: "Redact informações de saúde protegidas — HIPAA/CFM compliance",
+    sectors: ["healthcare"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "1.1.0",
+      last_updated: "2026-03-28",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v1.1.0: CRM e CRO adicionados"],
+    },
+    metrics: {
+      installs_production: 7,
+      avg_savings_pct: 8,
+      avg_latency_change_ms: 1.2,
+      false_positive_rate: 0.005,
+      rollback_rate: 0.01,
+      confidence_score: 0.98,
+    },
+  },
+  {
+    id: "aion-prompt-injection-v4",
+    name: "Prompt Injection Shield",
+    description: "Bloqueia tentativas de injection via system prompt e histórico de conversa",
+    sectors: ["general", "banking", "fintech"],
+    editorial: true,
+    risk_level: "low",
+    reversible: true,
+    provenance: {
+      version: "4.0.0",
+      last_updated: "2026-04-18",
+      author: "AION Editorial",
+      signed_by_aion: true,
+      changelog: ["v4.0: multi-turn injection detectado", "v3.9: novos vetores 2026"],
+    },
+    metrics: {
+      installs_production: 41,
+      avg_savings_pct: 0,
+      avg_latency_change_ms: 4.1,
+      false_positive_rate: 0.011,
+      rollback_rate: 0.03,
+      confidence_score: 0.96,
+    },
+  },
+];
+
+export const mockInstalledPolicies: InstalledCollectivePolicy[] = [];

@@ -82,6 +82,10 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
     ("GET", "/v1/approvals", "audit:read"),
     # Admin operations (key rotation) — admin only
     ("POST", "/v1/admin/", "keys:rotate"),
+    # AION Collective editorial exchange
+    ("GET",  "/v1/collective/", "collective:read"),
+    ("POST", "/v1/collective/", "collective:install"),
+    ("PUT",  "/v1/collective/", "collective:install"),
 ]
 
 # ── Permissions that require auth even when AION_ADMIN_KEY is not configured ──

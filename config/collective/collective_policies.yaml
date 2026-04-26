@@ -1,0 +1,162 @@
+# AION Collective — Editorial Policy Catalog (Phase 1)
+# Policies published and maintained by the AION Editorial team.
+# All policies are reviewed, tested in production, and signed by AION.
+# Format: loaded at startup, served via GET /v1/collective/policies
+
+- id: aion-anti-jailbreak-v3
+  name: "Anti-Jailbreak Avançado"
+  description: "Detecta e bloqueia 94% dos padrões conhecidos de jailbreak, incluindo variantes em PT-BR e técnicas de role-playing"
+  sectors:
+    - banking
+    - insurance
+    - healthcare
+    - general
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "3.2.1"
+    last_updated: "2026-03-15"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v3.2.1: detecção PT-BR aprimorada, cobertura de variantes coloquiais"
+      - "v3.2: padrões GPT-4o adicionados, role-playing multilayer"
+      - "v3.1: baseline inicial, cobertura de jailbreaks clássicos"
+  metrics:
+    installs_production: 23
+    avg_savings_pct: 0.0
+    avg_latency_change_ms: 2.1
+    false_positive_rate: 0.018
+    rollback_rate: 0.04
+    confidence_score: 0.94
+
+- id: aion-lgpd-redaction-v2
+  name: "LGPD PII Redaction"
+  description: "Redact automático de CPF, CNPJ, RG, dados bancários e chaves PIX antes de enviar ao LLM. Conformidade com LGPD Art. 46"
+  sectors:
+    - banking
+    - fintech
+    - insurance
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "2.1.0"
+    last_updated: "2026-04-01"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v2.1.0: detecção CNPJ com dígitos verificadores, fix falso negativo em CNPJ formatado"
+      - "v2.0: suporte a chaves PIX (CPF, CNPJ, telefone, email, chave aleatória)"
+      - "v1.9: cobertura de cartões de crédito e dados bancários"
+  metrics:
+    installs_production: 18
+    avg_savings_pct: 12.0
+    avg_latency_change_ms: 0.8
+    false_positive_rate: 0.003
+    rollback_rate: 0.01
+    confidence_score: 0.99
+
+- id: aion-telecom-fraud-v1
+  name: "Telecom Anti-Fraude"
+  description: "Detecta padrões de social engineering, port-out fraud e tentativas de troca de SIM card em contextos de atendimento telecom"
+  sectors:
+    - telecom
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "1.3.0"
+    last_updated: "2026-02-20"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v1.3.0: padrões SIM swap atualizados, cobertura de eSIM fraud"
+      - "v1.2: port-out fraud detection, urgência artificial"
+      - "v1.1: baseline social engineering"
+  metrics:
+    installs_production: 9
+    avg_savings_pct: 0.0
+    avg_latency_change_ms: 3.2
+    false_positive_rate: 0.027
+    rollback_rate: 0.06
+    confidence_score: 0.87
+
+- id: aion-smalltalk-bypass-v2
+  name: "Small-Talk Cost Saver"
+  description: "Identifica e bypassa saudações, conversas triviais e perguntas de estado sem chamar modelo premium. Redução média de 34% em custo"
+  sectors:
+    - general
+    - banking
+    - telecom
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "2.0.1"
+    last_updated: "2026-04-10"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v2.0.1: fix falso positivo em perguntas curtas de natureza técnica"
+      - "v2.0: cobertura ampliada PT-BR, modo agressivo configurável"
+      - "v1.9: baseline multilíngue"
+  metrics:
+    installs_production: 31
+    avg_savings_pct: 34.0
+    avg_latency_change_ms: -45.0
+    false_positive_rate: 0.008
+    rollback_rate: 0.02
+    confidence_score: 0.97
+
+- id: aion-phi-healthcare-v1
+  name: "Healthcare PHI Protection"
+  description: "Redact de informações de saúde protegidas (PHI): CID, CRM, dados de prontuário, diagnósticos. Conformidade HIPAA e CFM"
+  sectors:
+    - healthcare
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "1.1.0"
+    last_updated: "2026-03-28"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v1.1.0: CRM e CRO adicionados, melhoria em detecção de números de prontuário"
+      - "v1.0: baseline CID-10, diagnósticos, medicamentos controlados"
+  metrics:
+    installs_production: 7
+    avg_savings_pct: 8.0
+    avg_latency_change_ms: 1.2
+    false_positive_rate: 0.005
+    rollback_rate: 0.01
+    confidence_score: 0.98
+
+- id: aion-prompt-injection-v4
+  name: "Prompt Injection Shield"
+  description: "Bloqueia tentativas de injection via system prompt, histórico de conversa e conteúdo de documentos. Cobertura multi-turn"
+  sectors:
+    - general
+    - banking
+    - fintech
+  editorial: true
+  risk_level: low
+  reversible: true
+  provenance:
+    version: "4.0.0"
+    last_updated: "2026-04-18"
+    author: "AION Editorial"
+    signed_by_aion: true
+    changelog:
+      - "v4.0: multi-turn injection detectado (contexto dos últimos 3 turnos)"
+      - "v3.9: novos vetores de 2026, document injection via RAG"
+      - "v3.8: indirect injection via tool output"
+  metrics:
+    installs_production: 41
+    avg_savings_pct: 0.0
+    avg_latency_change_ms: 4.1
+    false_positive_rate: 0.011
+    rollback_rate: 0.03
+    confidence_score: 0.96

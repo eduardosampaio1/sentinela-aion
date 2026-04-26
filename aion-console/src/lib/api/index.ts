@@ -13,7 +13,7 @@
  *   intelligence  — NEMOS dashboard, benchmark, recommendations, global feed
  *   admin         — approvals, audit log, key rotation, LGPD deletion
  *   reports       — executive report, schedule
- *   marketplace   — browse, install, rate policies
+ *   collective    — AION Collective editorial exchange
  */
 
 // Core tenant utils (public)
@@ -28,4 +28,4 @@ export * from "./economics";
 export * from "./intelligence";
 export * from "./admin";
 export * from "./reports";
-export * from "./marketplace";
+export * from "./collective";

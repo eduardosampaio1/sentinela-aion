@@ -29,11 +29,13 @@ def main():
         loop = "asyncio"
 
     workers = int(os.environ.get("AION_WORKERS", "1"))
+    # $PORT is set by Render/Heroku/Railway — takes precedence over AION_PORT default
+    port = int(os.environ.get("PORT", settings.port))
 
     uvicorn.run(
         "aion.main:app",
         host="0.0.0.0",
-        port=settings.port,
+        port=port,
         log_level=settings.log_level,
         loop=loop,
         http="httptools",

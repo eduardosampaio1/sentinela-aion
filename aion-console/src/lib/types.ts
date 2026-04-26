@@ -211,16 +211,6 @@ export interface IdentityProvider {
   users: number;
 }
 
-// ─── Integrations ────────────────────────────────────────────────────────────
-
-export interface Integration {
-  name: string;
-  category: "llm" | "observability" | "notification" | "security";
-  status: "connected" | "ready" | "pending" | "error";
-  latency_ms: number | null;
-  description: string;
-}
-
 // ─── Threat categories (ESTIXE) ──────────────────────────────────────────────
 
 export interface ThreatCategory {
@@ -294,4 +284,45 @@ export interface AnnotationItem {
   false_positive?: boolean;
   response_adequate?: boolean;
   comment?: string;
+}
+
+// ─── AION Collective (Editorial Exchange) ────────────────────────────────────
+
+export interface PolicyProvenance {
+  version: string;
+  last_updated: string;
+  author: string;
+  signed_by_aion: boolean;
+  changelog: string[];
+}
+
+export interface CollectivePolicyMetrics {
+  installs_production: number;
+  avg_savings_pct: number;
+  avg_latency_change_ms: number;
+  false_positive_rate: number;
+  rollback_rate: number;
+  confidence_score: number;
+}
+
+export interface CollectivePolicy {
+  id: string;
+  name: string;
+  description: string;
+  sectors: string[];
+  editorial: boolean;
+  risk_level: "low" | "medium" | "high";
+  reversible: boolean;
+  provenance: PolicyProvenance;
+  metrics: CollectivePolicyMetrics;
+  installed_status?: "sandbox" | "shadow" | "production" | null;
+}
+
+export interface InstalledCollectivePolicy {
+  policy_id: string;
+  name: string;
+  version: string;
+  status: "sandbox" | "shadow" | "production";
+  installed_at: number;
+  sectors: string[];
 }

@@ -163,6 +163,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "calibration:promote", "calibration:rollback",
         "approvals:resolve",
         "keys:rotate",
+        "collective:read", "collective:install",
     },
     Role.OPERATOR: {
         "overrides:write", "overrides:read",
@@ -174,24 +175,28 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "budget:write", "budget:read",
         "calibration:promote", "calibration:rollback",
         "approvals:resolve",
+        "collective:read", "collective:install",
     },
     Role.ANALYST: {
         "overrides:read", "behavior:read", "modules:read",
         "audit:read",
         "stats:read", "events:read", "models:read",
         "budget:read",
+        "collective:read",
     },
     Role.VIEWER: {
         "overrides:read", "behavior:read", "modules:read",
         "audit:read",
         "stats:read", "events:read", "models:read",
         "budget:read",
+        "collective:read",
     },
     Role.AUDITOR: {
         "audit:read",
         "stats:read", "events:read", "models:read",
         "budget:read",
         "overrides:read", "behavior:read", "modules:read",
+        "collective:read",
     },
     Role.SECURITY: {
         "killswitch:write", "killswitch:read",
@@ -200,6 +205,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "overrides:read", "modules:read", "budget:read",
         "approvals:resolve",
         "policies:write",
+        "collective:read",
     },
     # console_proxy has NO own permissions — it is a trusted transport, not a human actor.
     # All RBAC enforcement uses the SSO actor role from X-Aion-Actor-Role header.

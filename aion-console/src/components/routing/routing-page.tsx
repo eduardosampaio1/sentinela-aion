@@ -14,6 +14,10 @@ import {
   Gauge,
   ArrowRight,
   Zap,
+  Server,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RoutingTopologyMap } from "./routing-topology";
@@ -346,6 +350,89 @@ export function RoutingPage() {
             );
           })}
         </div>
+      </div>
+
+      {/* ═══ Provedores — o que o NOMOS enxerga ═══ */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <Server className="h-4 w-4 text-sky-600" />
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Provedores</h2>
+          <span className="ml-auto text-xs text-[var(--color-text-muted)]">
+            leitura do NOMOS — atualiza automaticamente
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(() => {
+            // Group models by provider and compute per-provider circuit breaker status
+            const byProvider = models.reduce<Record<string, typeof models>>((acc, m) => {
+              const p = m.provider;
+              acc[p] = acc[p] ?? [];
+              acc[p].push(m);
+              return acc;
+            }, {});
+
+            return Object.entries(byProvider).map(([provider, provModels]) => {
+              const hasError = provModels.some((m) => (m.status as string) === "error");
+              const allFallback = provModels.every((m) => (m.status as string) === "fallback");
+              const cbStatus = hasError ? "indisponivel" : allFallback ? "fallback" : "ativo";
+
+              const statusConfig = {
+                ativo: {
+                  icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />,
+                  label: "Ativo",
+                  color: "text-emerald-400",
+                  border: "border-emerald-800/30",
+                  bg: "bg-emerald-900/10",
+                },
+                fallback: {
+                  icon: <AlertCircle className="h-3.5 w-3.5 text-amber-400" />,
+                  label: "Apenas fallback",
+                  color: "text-amber-400",
+                  border: "border-amber-800/30",
+                  bg: "bg-amber-900/10",
+                },
+                indisponivel: {
+                  icon: <XCircle className="h-3.5 w-3.5 text-red-400" />,
+                  label: "Indisponível",
+                  color: "text-red-400",
+                  border: "border-red-800/30",
+                  bg: "bg-red-900/10",
+                },
+              }[cbStatus];
+
+              return (
+                <div
+                  key={provider}
+                  className={`rounded-xl border p-4 ${statusConfig.border} ${statusConfig.bg}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-semibold text-[var(--color-text)]">
+                      {provider}
+                    </span>
+                    <div className={`flex items-center gap-1 text-[10px] font-medium ${statusConfig.color}`}>
+                      {statusConfig.icon}
+                      {statusConfig.label}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {provModels.map((m) => (
+                      <span
+                        key={m.id}
+                        className="rounded-md bg-white/5 px-2 py-0.5 font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]"
+                      >
+                        {m.id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </div>
+        <p className="mt-3 text-[10px] text-[var(--color-text-muted)]/60">
+          Provedores são configurados via <code className="font-[family-name:var(--font-mono)]">models.yaml</code>.
+          O status reflete o circuit breaker do NOMOS em tempo real.
+        </p>
       </div>
 
       {/* Rules Table */}

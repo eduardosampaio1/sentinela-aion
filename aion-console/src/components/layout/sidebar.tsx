@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   TrendingDown,
   Users,
-  Plug,
   FileBarChart,
   Settings,
   HelpCircle,
@@ -24,7 +23,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Brain,
-  Store,
+  Network,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { mockAdminRoles } from "@/lib/mock-data";
@@ -52,8 +51,7 @@ const navGroups = [
     items: [
       { href: "/sessions", label: "Sessões", icon: MessagesSquare },
       { href: "/budget", label: "Economia", icon: TrendingDown },
-      { href: "/marketplace", label: "Marketplace", icon: Store },
-      { href: "/integrations", label: "Integrações", icon: Plug },
+      { href: "/collective", label: "AION Collective", icon: Network },
       { href: "/reports", label: "Relatórios", icon: FileBarChart },
     ],
   },

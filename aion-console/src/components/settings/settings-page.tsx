@@ -14,6 +14,7 @@ import {
   Bell,
   Mail,
   Webhook,
+  Hash,
   Globe,
   Building2,
   Key,
@@ -94,6 +95,8 @@ export function SettingsPage() {
   const [notifWeekly, setNotifWeekly] = useState(true);
   const [notifEmail, setNotifEmail] = useState(true);
   const [notifWebhook, setNotifWebhook] = useState(false);
+  const [notifSlack, setNotifSlack] = useState(false);
+  const [notifPagerDuty, setNotifPagerDuty] = useState(false);
 
   const apiKeyMasked = "sk-aion-••••••••••••••••••••••••k9Qp";
   const apiKeyFull = "sk-aion-l7X3mN8vKj2pQrT5wYzA4bCdE6fGhIJk9Qp";
@@ -335,6 +338,49 @@ export function SettingsPage() {
                   <input
                     type="url"
                     placeholder="https://hooks.empresa.com/aion-alerts"
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm font-[family-name:var(--font-mono)] text-[var(--color-text)] placeholder-[var(--color-text-muted)]/40 outline-none focus:border-[var(--color-primary)]/60 transition-colors"
+                  />
+                )}
+              </div>
+              <div className="px-5 py-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <Hash className="h-4 w-4 text-[var(--color-text-muted)]" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--color-text)]">Slack</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Incoming webhook do canal de alertas
+                      </p>
+                    </div>
+                  </div>
+                  <Toggle checked={notifSlack} onChange={setNotifSlack} />
+                </div>
+                {notifSlack && (
+                  <input
+                    type="url"
+                    placeholder="https://hooks.slack.com/services/T00/B00/xxx"
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm font-[family-name:var(--font-mono)] text-[var(--color-text)] placeholder-[var(--color-text-muted)]/40 outline-none focus:border-[var(--color-primary)]/60 transition-colors"
+                  />
+                )}
+              </div>
+              <div className="px-5 py-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <Bell className="h-4 w-4 text-[var(--color-text-muted)]" />
+                    <div>
+                      <p className="text-sm font-medium text-[var(--color-text)]">PagerDuty</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Alertas críticos — provider indisponível, killswitch
+                      </p>
+                    </div>
+                  </div>
+                  <Toggle checked={notifPagerDuty} onChange={setNotifPagerDuty} />
+                </div>
+                {notifPagerDuty && (
+                  <input
+                    type="password"
+                    placeholder="Integration key do PagerDuty"
+                    autoComplete="off"
                     className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm font-[family-name:var(--font-mono)] text-[var(--color-text)] placeholder-[var(--color-text-muted)]/40 outline-none focus:border-[var(--color-primary)]/60 transition-colors"
                   />
                 )}

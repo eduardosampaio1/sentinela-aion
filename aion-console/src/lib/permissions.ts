@@ -35,7 +35,7 @@ export type Permission =
   | "policies:write"
   | "keys:rotate"
   | "lgpd:delete"
-  | "marketplace:install"
+  | "collective:install"
   // Approvals
   | "approvals:resolve"
   | "approvals:read";
@@ -112,6 +112,7 @@ const ROLE_PERMISSIONS: Record<AionRole, Permission[]> = {
     "shadow:promote",
     "shadow:rollback",
     "overrides:write",
+    "collective:install",
   ],
 
   admin: [
@@ -138,7 +139,7 @@ const ROLE_PERMISSIONS: Record<AionRole, Permission[]> = {
     "policies:write",
     "keys:rotate",
     "lgpd:delete",
-    "marketplace:install",
+    "collective:install",
   ],
 };
 

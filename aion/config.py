@@ -76,6 +76,9 @@ class AionSettings(BaseSettings):
     # --- Cross-tenant learning ---
     contribute_global_learning: bool = False  # AION_CONTRIBUTE_GLOBAL_LEARNING=true
 
+    # --- AION Collective (editorial policy exchange) ---
+    collective_enabled: bool = True   # serves /v1/collective/* from bundled YAML catalog
+
     # --- Data residency ---
     data_residency: str = ""  # e.g. "BR" (Brazil), "EU", "US" — informational for compliance
 
