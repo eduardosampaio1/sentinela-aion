@@ -596,12 +596,11 @@ export function IntelligencePage() {
             <div className="flex items-start gap-3">
               <Activity className="h-4 w-4 flex-shrink-0 mt-0.5 text-sky-400" />
               <div>
-                <p className="text-sm font-medium text-sky-400">Feed de ameaças cross-tenant (k-anônimo)</p>
+                <p className="text-sm font-medium text-sky-400">Feed global — Shadow Mode (roadmap)</p>
                 <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Sinais agregados de múltiplos tenants com k-anonimidade.
-                  Configure <code className="text-sky-300">AION_CONTRIBUTE_GLOBAL_LEARNING=true</code> para
-                  contribuir e receber sinais globais. Nenhum conteúdo de mensagem é compartilhado — apenas
-                  vetores de features anonimizados.
+                  Sinais agregados de múltiplos tenants com k-anonimidade estarão disponíveis no
+                  Shadow Mode (opt-in). Durante o POC, todo o processamento é local — nenhum
+                  dado sai do ambiente do cliente. Nenhum conteúdo de mensagem é compartilhado.
                 </p>
               </div>
             </div>
@@ -610,9 +609,9 @@ export function IntelligencePage() {
           {globalFeed.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-16">
               <Activity className="mb-3 h-10 w-10 text-[var(--color-text-muted)] opacity-40" />
-              <p className="text-sm font-medium text-[var(--color-text)]">Feed global indisponível</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">Feed global — disponível no Shadow Mode</p>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Ative <code>AION_CONTRIBUTE_GLOBAL_LEARNING=true</code> para acessar
+                Disponível após ativação do Shadow Mode (opt-in com DPA assinado)
               </p>
             </div>
           ) : (

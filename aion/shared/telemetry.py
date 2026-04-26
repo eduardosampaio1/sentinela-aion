@@ -343,10 +343,14 @@ def reset_counters() -> None:
 async def beacon_shadow_stats(tenant: str, stats: dict) -> None:
     """Emit anonymized shadow calibration stats to ARGOS (fire-and-forget).
 
-    Sends only aggregate signals — no user content, no seed matches.
-    Payload: {type, tenant, categories: [{category, total_seen, avg_confidence, days_monitored}]}
-    This powers the ARGOS network effect: each client AION contributes calibration
-    signal; ARGOS aggregates across deployments to improve risk_taxonomy.yaml for all.
+    SHADOW MODE ONLY — disabled by default.
+    This function is a no-op unless ARGOS_TELEMETRY_URL is explicitly configured.
+    During POC deployments, ARGOS_TELEMETRY_URL is unset and nothing is sent.
+
+    When enabled (opt-in Shadow Mode with customer DPA):
+    - Sends only aggregate signals — no user content, no prompts, no PII.
+    - Payload: {type, tenant, categories: [{category, total_seen, avg_confidence, days_monitored}]}
+    - Purpose: calibration signal for risk_taxonomy.yaml improvements.
     """
     settings = get_settings()
     if not settings.argos_telemetry_url:

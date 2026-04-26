@@ -235,7 +235,7 @@ async def install_collective_policy(policy_id: str, request: Request):
         "tenant": tenant,
         "status": "sandbox",
         "version": policy.provenance.version,
-        "note": "Policy installed in sandbox mode. Monitor for 7+ days before promoting to shadow.",
+        "note": "Policy registered in sandbox status. This is administrative lifecycle tracking — runtime enforcement is not yet active.",
     }
 
 
@@ -280,7 +280,7 @@ async def promote_collective_policy(policy_id: str, request: Request):
         "tenant": tenant,
         "previous_status": existing_status,
         "status": next_status,
-        "note": f"Policy promoted to {next_status}.",
+        "note": f"Policy status updated to '{next_status}'. Administrative lifecycle tracking only — runtime enforcement is not yet active.",
     }
 
 

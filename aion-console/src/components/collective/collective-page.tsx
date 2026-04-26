@@ -509,16 +509,16 @@ export function CollectivePage() {
         />
       )}
 
-      {/* Shadow Mode upsell banner */}
+      {/* Shadow Mode info banner */}
       <div className="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-sky-900/10 px-5 py-4">
         <AlertOctagon className="h-4 w-4 flex-shrink-0 mt-0.5 text-sky-400" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-sky-400">
-            Shadow Mode ativa benchmarks comparativos
+            Ciclo de vida: Sandbox → Shadow → Produção
           </p>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-            Ao promover uma política para Shadow Mode, o AION executa avaliação paralela —
-            monitorando impacto em custo e latência antes da promoção para produção.
+            O status de cada política é rastreado administrativamente. A integração de
+            runtime (aplicação automática no pipeline) está prevista para uma fase futura.
           </p>
         </div>
         <a
@@ -560,11 +560,10 @@ export function CollectivePage() {
         impact={[
           `Política: ${promoteTarget?.policy_id ?? ""}`,
           `Origem: ${promoteTarget?.status ?? ""} → ${promoteTarget ? promoteNextStatus(promoteTarget.status) : ""}`,
-          promoteTarget?.status === "shadow"
-            ? "Tráfego real será afetado — confirme apenas com dados Shadow estáveis"
-            : "Apenas avaliação paralela — sem impacto em produção",
+          "Alteração de status administrativo — nenhum tráfego é afetado nesta fase",
+          "Reversível com um clique a qualquer momento",
         ]}
-        severity={promoteTarget?.status === "shadow" ? "critical" : "warning"}
+        severity="warning"
         actionLabel="Promover"
         loading={actionLoading}
         error={actionError}

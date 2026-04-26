@@ -46,7 +46,9 @@ class AionSettings(BaseSettings):
     # --- Redis (optional) ---
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
 
-    # --- ARGOS integration (optional) ---
+    # --- ARGOS integration (Shadow Mode only — disabled by default) ---
+    # Set ARGOS_TELEMETRY_URL only when deploying in Shadow Mode (opt-in telemetry to AION Baluarte).
+    # During POC: leave unset. Zero data leaves the client environment.
     argos_telemetry_url: Optional[str] = Field(default=None, alias="ARGOS_TELEMETRY_URL")
 
     # --- Auth ---
@@ -73,11 +75,17 @@ class AionSettings(BaseSettings):
     # --- Multi-turn context ---
     multi_turn_context: bool = False  # opt-in: AION_MULTI_TURN_CONTEXT=true
 
-    # --- Cross-tenant learning ---
-    contribute_global_learning: bool = False  # AION_CONTRIBUTE_GLOBAL_LEARNING=true
+    # --- Cross-tenant learning (Shadow Mode only — disabled by default) ---
+    # Enables opt-in telemetry signals to AION Baluarte for cross-tenant calibration.
+    # POC deployment: leave False. No data leaves the client environment.
+    # Shadow Mode: set AION_CONTRIBUTE_GLOBAL_LEARNING=true after customer DPA is signed.
+    contribute_global_learning: bool = False
 
     # --- AION Collective (editorial policy exchange) ---
-    collective_enabled: bool = True   # serves /v1/collective/* from bundled YAML catalog
+    # Phase 0: serves editorial catalog from bundled YAML (no cloud dependency).
+    # Install status tracked in Redis (client's Redis). Administrative lifecycle only —
+    # installed policies are NOT yet applied at runtime (runtime enforcement is future work).
+    collective_enabled: bool = True
 
     # --- Data residency ---
     data_residency: str = ""  # e.g. "BR" (Brazil), "EU", "US" — informational for compliance

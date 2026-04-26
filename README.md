@@ -167,6 +167,6 @@ App do cliente
      v
   Resposta ao cliente
      |
-     v (async, opcional)
-  ARGOS (telemetria, analise, aprendizado)
+     v (async, Shadow Mode only — opt-in, desativado por default)
+  ARGOS / Baluarte (telemetria anonima — zero dados no POC)
 ```

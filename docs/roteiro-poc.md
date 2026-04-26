@@ -34,9 +34,14 @@ client = OpenAI(api_key="sk-...", base_url="http://localhost:8080/v1")
 
 ---
 
-## Fase 2 — Observação em Shadow Mode (Dias 2–7)
+## Fase 2 — Observação Local (Dias 2–7)
 
 **Meta:** Acumular dados reais sem interferir em nada.
+
+> **Nota:** Esta fase é totalmente local. Nenhum dado sai do ambiente do cliente.
+> Toda a observação acontece via dashboard interno (`/v1/stats`, `/v1/events`).
+> "Shadow Mode" no contexto do AION Baluarte é uma fase separada, opt-in, que requer
+> DPA assinado — não faz parte deste roteiro de POC.
 
 O que observar no dashboard (`http://localhost:3001`):
 
