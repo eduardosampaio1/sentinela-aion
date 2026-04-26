@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import {
   Activity,
@@ -24,9 +24,39 @@ import {
   ChevronDown,
   Brain,
   Network,
+  Cpu,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { mockAdminRoles } from "@/lib/mock-data";
+import { getHealth, type HealthInfo } from "@/lib/api/observability";
+
+// ── Mode label helpers ────────────────────────────────────────────────────────
+
+const MODE_LABELS: Record<string, string> = {
+  poc_decision:    "POC Decision-Only",
+  poc_transparent: "POC Transparent",
+  full_transparent: "Full Transparent",
+  decision_only:   "Decision-Only",
+  not_configured:  "Modo não configurado",
+};
+
+const MODE_COLORS: Record<string, string> = {
+  poc_decision:    "text-amber-400 border-amber-800/40 bg-amber-900/10",
+  poc_transparent: "text-sky-400 border-sky-800/40 bg-sky-900/10",
+  full_transparent: "text-emerald-400 border-emerald-800/40 bg-emerald-900/10",
+  decision_only:   "text-violet-400 border-violet-800/40 bg-violet-900/10",
+  not_configured:  "text-[var(--color-text-muted)] border-[var(--color-border)] bg-transparent",
+};
+
+function ModeLabel({ mode }: { mode: string }) {
+  const label = MODE_LABELS[mode] ?? mode;
+  const color = MODE_COLORS[mode] ?? MODE_COLORS.not_configured;
+  return (
+    <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${color}`}>
+      {label}
+    </span>
+  );
+}
 
 const navGroups = [
   {
@@ -78,6 +108,13 @@ export function Sidebar({
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState(mockAdminRoles[3]?.name ?? "Developer");
   const [inviteStatus, setInviteStatus] = useState<InviteStatus>("idle");
+  const [healthInfo, setHealthInfo] = useState<HealthInfo | null>(null);
+
+  useEffect(() => {
+    getHealth()
+      .then(setHealthInfo)
+      .catch(() => setHealthInfo(null));
+  }, []);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -170,6 +207,43 @@ export function Sidebar({
             </div>
           ))}
         </nav>
+
+        {/* Mode badge strip */}
+        {healthInfo && (
+          <div className="border-t border-[var(--color-border)] px-3 py-2">
+            {collapsed ? (
+              /* Collapsed: just a colored dot */
+              <div
+                title={MODE_LABELS[healthInfo.aion_mode ?? ""] ?? healthInfo.aion_mode ?? "Modo não configurado"}
+                className="flex justify-center"
+              >
+                <Cpu className={`h-4 w-4 ${
+                  healthInfo.aion_mode === "poc_decision" ? "text-amber-400" :
+                  healthInfo.aion_mode === "poc_transparent" ? "text-sky-400" :
+                  healthInfo.aion_mode === "full_transparent" ? "text-emerald-400" :
+                  healthInfo.aion_mode === "decision_only" ? "text-violet-400" :
+                  "text-[var(--color-text-muted)]"
+                }`} />
+              </div>
+            ) : (
+              /* Expanded: full badge with status pills */
+              <div className="space-y-1.5">
+                <ModeLabel mode={healthInfo.aion_mode ?? "not_configured"} />
+                <div className="flex flex-wrap gap-1">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${healthInfo.executes_llm ? "text-sky-400 border-sky-800/40 bg-sky-900/10" : "text-[var(--color-text-muted)] border-[var(--color-border)]"}`}>
+                    LLM {healthInfo.executes_llm ? "ativo" : "externo"}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${healthInfo.telemetry_enabled ? "text-orange-400 border-orange-800/40 bg-orange-900/10" : "text-[var(--color-text-muted)] border-[var(--color-border)]"}`}>
+                    Telemetria {healthInfo.telemetry_enabled ? "on" : "off"}
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${healthInfo.collective_enabled ? "text-purple-400 border-purple-800/40 bg-purple-900/10" : "text-[var(--color-text-muted)] border-[var(--color-border)]"}`}>
+                    Collective {healthInfo.collective_enabled ? "on" : "off"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Bottom */}
         <div className="border-t border-[var(--color-border)] px-2 py-3 space-y-0.5">

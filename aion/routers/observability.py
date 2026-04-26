@@ -104,6 +104,21 @@ async def health():
     )
     # ─────────────────────────────────────────────────────────────────────────
 
+    # ── Deployment mode visibility ────────────────────────────────────────────
+    # Exposes how AION is configured so the console and operators can see the
+    # active mode without inspecting env vars manually.
+    aion_mode = settings.mode or "not_configured"
+    executes_llm = (
+        settings.nomos_enabled
+        and bool(settings.default_provider)
+        and aion_mode not in ("poc_decision", "decision_only")
+    )
+    health_data["aion_mode"] = aion_mode
+    health_data["executes_llm"] = executes_llm
+    health_data["telemetry_enabled"] = bool(settings.argos_telemetry_url)
+    health_data["collective_enabled"] = settings.collective_enabled
+    # ─────────────────────────────────────────────────────────────────────────
+
     mode = health_data.get("mode", "unknown")
     status = 200 if mode == "normal" else 207 if mode in ("degraded", "safe") else 503
     return JSONResponse(status_code=status, content=health_data)

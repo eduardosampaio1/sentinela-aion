@@ -2,7 +2,18 @@ import type { Stats, AionEvent, CacheStats } from "@/lib/types";
 import { fetchApi, transformStats, transformEvent } from "./_core";
 import type { RawStats, RawEvent } from "./_core";
 
-export async function getHealth(): Promise<{ status: string; ready?: boolean }> {
+export interface HealthInfo {
+  status: string;
+  ready?: boolean;
+  mode?: string;                  // pipeline mode: normal | degraded | safe
+  aion_mode?: string;             // deployment mode: poc_decision | poc_transparent | ...
+  executes_llm?: boolean;
+  telemetry_enabled?: boolean;
+  collective_enabled?: boolean;
+  active_modules?: string[];
+}
+
+export async function getHealth(): Promise<HealthInfo> {
   return fetchApi("/health");
 }
 

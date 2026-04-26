@@ -1,0 +1,108 @@
+# AION — POC Transparent (gateway/proxy completo)
+# ============================================================
+# MODO OPCIONAL — integração acelerada quando o cliente aceita
+# o AION como gateway entre a aplicação e o LLM.
+#
+# Fluxo:
+#   App do cliente → POST /v1/chat/completions → AION → LLM do cliente → AION → App
+#
+# AION recebe credencial/endpoint do LLM do cliente.
+# Integração zero-code: cliente apenas troca base_url.
+#
+# ATENÇÃO: Este modo requer que o cliente compartilhe credencial de LLM
+# com o AION. Discuta com CISO e jurídico antes de usar em ambiente restritivo.
+# Para primeiro contato com banco/telecom, prefira docker-compose.poc-decision.yml
+#
+# Setup:
+#   cp .env.poc-transparent.example .env
+#   # Edite .env com AION_ADMIN_KEY e credencial do LLM
+#   docker compose -f docker-compose.poc-transparent.yml up -d
+#
+# Verificar:
+#   curl http://localhost:8080/health
+#
+# Testar:
+#   curl -s http://localhost:8080/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -H "X-Aion-Tenant: poc" \
+#     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Olá"}]}' | jq .
+#
+# Não inclui:
+#   - telemetria externa (Baluarte/ARGOS não são dependência desta POC)
+#   - Supabase ou qualquer serviço da Baluarte
+# ============================================================
+
+services:
+  aion:
+    image: ghcr.io/eduardosampaio1/sentinela-aion:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Auth admin — obrigatório
+      AION_ADMIN_KEY: ${AION_ADMIN_KEY}
+
+      # LLM do cliente — configure conforme o provider utilizado
+      # OpenAI:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Anthropic:
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Azure / vLLM / Ollama / qualquer OpenAI-compatible:
+      # AION_DEFAULT_BASE_URL: ${AION_DEFAULT_BASE_URL:-}
+      # AION_DEFAULT_API_KEY: ${AION_DEFAULT_API_KEY:-}
+
+      AION_DEFAULT_PROVIDER: ${AION_DEFAULT_PROVIDER:-openai}
+      AION_DEFAULT_MODEL: ${AION_DEFAULT_MODEL:-gpt-4o-mini}
+
+      # Modo: todos os módulos ativos (bypass, routing, compressão)
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "true"
+
+      # Identificação do modo — exposto no /health
+      AION_MODE: "poc_transparent"
+
+      # Comportamento em falha: fail-open (request passa para LLM diretamente)
+      AION_FAIL_MODE: "open"
+      AION_PORT: "8080"
+
+      # Multi-tenancy
+      AION_REQUIRE_TENANT: "false"
+      AION_DEFAULT_TENANT: "default"
+
+      # Redis local — velocity detection, decision cache, session audit
+      REDIS_URL: "redis://redis:6379/0"
+
+      # Telemetria externa DESLIGADA — zero dados saem do ambiente
+      AION_CONTRIBUTE_GLOBAL_LEARNING: "false"
+
+      # Collective: catálogo editorial apenas
+      AION_COLLECTIVE_ENABLED: "true"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 320M

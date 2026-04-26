@@ -1,0 +1,105 @@
+# AION — POC Decision-Only
+# ============================================================
+# MODO RECOMENDADO para banco, telecom e enterprise restritivo.
+#
+# Fluxo:
+#   App do cliente → POST /v1/decide → AION → Decision Contract
+#   → App do cliente chama a LLM com suas próprias credenciais
+#
+# AION nunca recebe credencial de LLM. Menor superfície de integração.
+# Menor fricção com CISO, jurídico e arquitetura de segurança.
+#
+# Setup (2 comandos):
+#   echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+#   docker compose -f docker-compose.poc-decision.yml up -d
+#
+# Verificar:
+#   curl http://localhost:8080/health
+#   curl http://localhost:8080/ready
+#
+# Testar:
+#   curl -s http://localhost:8080/v1/decide \
+#     -H "Content-Type: application/json" \
+#     -H "X-Aion-Tenant: poc" \
+#     -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Olá"}]}' | jq .
+#
+# Exemplo de resposta:
+#   {"decision":"bypass","bypass_response":"Olá! Como posso ajudar?","latency_ms":2.1}
+#
+# Decisões possíveis:
+#   bypass   → AION respondeu diretamente (saudação, intent trivial) — não chame o LLM
+#   block    → AION bloqueou (policy violation, PII, jailbreak) — não chame o LLM
+#   continue → AION aprovado — chame seu próprio LLM normalmente
+#
+# Não inclui:
+#   - credencial de LLM (AION não chama LLM neste modo)
+#   - telemetria externa (Baluarte/ARGOS não são dependência desta POC)
+#   - Supabase ou qualquer serviço da Baluarte
+# ============================================================
+
+services:
+  aion:
+    image: ghcr.io/eduardosampaio1/sentinela-aion:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Auth admin — obrigatório
+      # Formato: "chave:role" — ex: "abc123poc:admin"
+      AION_ADMIN_KEY: ${AION_ADMIN_KEY}
+
+      # Modo: ESTIXE + NOMOS ativos para decisão completa
+      # METIS desligado — compressão não se aplica em Decision-Only
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "false"
+
+      # Identificação do modo — exposto no /health
+      AION_MODE: "poc_decision"
+
+      # Comportamento em falha: fail-open (request passa, AION não bloqueia)
+      AION_FAIL_MODE: "open"
+      AION_PORT: "8080"
+
+      # Multi-tenancy (opcional — use para isolar por equipe/projeto)
+      AION_REQUIRE_TENANT: "false"
+      AION_DEFAULT_TENANT: "default"
+
+      # Redis local — velocity detection, decision cache
+      REDIS_URL: "redis://redis:6379/0"
+
+      # Telemetria externa DESLIGADA — zero dados saem do ambiente
+      # Ativar apenas em Shadow Mode, após DPA assinado com Baluarte
+      AION_CONTRIBUTE_GLOBAL_LEARNING: "false"
+
+      # Collective: catálogo editorial apenas — lifecycle administrativo
+      # Installed policies NÃO são aplicadas no runtime nesta fase
+      AION_COLLECTIVE_ENABLED: "true"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 192M

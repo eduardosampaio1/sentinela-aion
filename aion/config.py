@@ -93,6 +93,14 @@ class AionSettings(BaseSettings):
     # --- Data retention ---
     telemetry_retention_hours: int = 168  # 7 days default
 
+    # --- Deployment mode (informational — exposto no /health e console) ---
+    # poc_decision    → AION decide, cliente chama LLM (recomendado para enterprise)
+    # poc_transparent → AION proxy completo, chama LLM do cliente
+    # full_transparent → produção como gateway completo
+    # decision_only   → produção em modo decisão pura
+    # Não altera o comportamento do pipeline — use os módulos para isso.
+    mode: str = ""  # Set via AION_MODE — empty = not explicitly configured
+
     # --- Environment (contract meta) ---
     environment: str = "prod"  # prod | staging | dev — validated by contract
 

@@ -6,29 +6,63 @@ Validar que o AION funciona como camada de controle entre a aplicação do clien
 
 ---
 
+## Escolha o modo de POC
+
+| | POC Decision-Only | POC Transparent |
+|---|---|---|
+| **Recomendado para** | Banco, telecom, enterprise restritivo | Integração acelerada |
+| **AION recebe chave do LLM?** | **Não** | Sim |
+| **Fricção com CISO/jurídico** | Mínima | Média |
+| **Mudança na app** | Chamar `/v1/decide` antes do LLM | Trocar `base_url` |
+| **Compose file** | `docker-compose.poc-decision.yml` | `docker-compose.poc-transparent.yml` |
+
+**Recomendação para primeiro contato:** comece pelo Decision-Only. O cliente prova o valor do AION sem compartilhar credenciais do LLM. Após aprovação interna, a migração para Transparent é uma mudança de `.env`.
+
+---
+
 ## Fase 1 — Setup (Dia 1)
 
 **Meta:** AION rodando no ambiente do cliente, recebendo tráfego real ou simulado.
 
+### Track A — POC Decision-Only (recomendado)
+
 ```bash
-git clone https://github.com/eduardosampaio1/sentinela-aion.git
-cd sentinela-aion
-pip install -e .
-python start.py
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.poc-decision.yml
+echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+docker compose -f docker-compose.poc-decision.yml up -d
 ```
 
 Verificação mínima:
 ```bash
 curl http://localhost:8080/health
-# Esperado: {"status": "ok", "modules": {...}}
+# → {"status":"ok","aion_mode":"poc_decision","executes_llm":false,...}
 ```
 
-Troca o `base_url` da aplicação:
+Integração na app do cliente:
+```python
+# Antes de chamar o LLM, consultar o AION
+resp = httpx.post("http://localhost:8080/v1/decide",
+    headers={"X-Aion-Tenant": "meu-tenant"},
+    json={"model": "gpt-4o", "messages": messages},
+)
+if resp.json()["decision"] == "continue":
+    # chamar o LLM com as próprias credenciais do cliente
+    pass
+```
+
+### Track B — POC Transparent (opcional)
+
+```bash
+# .env com AION_ADMIN_KEY + credencial do LLM do cliente
+docker compose -f docker-compose.poc-transparent.yml up -d
+```
+
+Integração na app do cliente (zero-code):
 ```python
 # Antes
 client = OpenAI(api_key="sk-...")
 
-# Depois (zero mudança no restante do código)
+# Depois (única mudança)
 client = OpenAI(api_key="sk-...", base_url="http://localhost:8080/v1")
 ```
 
@@ -48,6 +82,7 @@ O que observar no dashboard (`http://localhost:3001`):
 | Métrica | O que significa |
 |---------|----------------|
 | `bypass_rate` | % de requests que o AION respondeu sem chamar o LLM |
+| `block_rate` | % bloqueados por policy, PII ou guardrail |
 | `pii_detected` | Quantos requests tinham CPF, email, chave de API expostos |
 | `cost_saved` | Estimativa de tokens economizados por bypass |
 | `decisions` | Distribuição: BYPASS / CONTINUE / BLOCK |
@@ -62,16 +97,10 @@ Critério de saúde: latência adicionada pelo AION < 20ms no P95 (ver `/v1/stat
 
 Checklist:
 - [ ] Respostas da aplicação idênticas às sem o AION (testar 10 casos reais)
-- [ ] Nenhum falso positivo crítico em PII (revisar `/v1/audit`)
+- [ ] Nenhum falso positivo crítico em PII (revisar `/v1/events`)
 - [ ] `bypass_rate` > 0% (se zero, os intents não estão calibrados)
 - [ ] Latência P95 aceitável
-
-Se tudo OK → aprovar calibração:
-```bash
-curl -X PUT http://localhost:8080/v1/calibration/seu-tenant \
-  -H "Content-Type: application/json" \
-  -d '{"promote": true}'
-```
+- [ ] Nenhum erro 5xx introduzido pelo AION
 
 ---
 
@@ -92,19 +121,32 @@ curl -X PUT http://localhost:8080/v1/calibration/seu-tenant \
 Se algo der errado, ative o safe mode — o AION vira passthrough transparente:
 
 ```bash
-curl -X PUT http://localhost:8080/v1/killswitch
+curl -X PUT http://localhost:8080/v1/killswitch \
+  -H "Authorization: Bearer chave-poc"
 # AION passa tudo direto, sem processar
+
+# Para desativar:
+curl -X DELETE http://localhost:8080/v1/killswitch \
+  -H "Authorization: Bearer chave-poc"
 ```
 
-Para desativar:
-```bash
-curl -X DELETE http://localhost:8080/v1/killswitch
-```
+---
+
+## Próximos passos após POC aprovada
+
+| Etapa | O que é |
+|-------|---------|
+| POC Transparent | Migrar de Decision-Only para proxy completo (se ainda não foi) |
+| Calibração de intents | Adicionar intents específicos do domínio do cliente |
+| Redis do cliente | Apontar para Redis de produção do cliente |
+| Shadow Mode | Fase opt-in — requer DPA assinado com Baluarte |
+| Collective | Catálogo editorial de policies — lifecycle administrativo |
 
 ---
 
 ## Contatos e suporte
 
 - Repositório: https://github.com/eduardosampaio1/sentinela-aion
-- Runbook operacional: `docs/RUNBOOK.md`
+- Quickstart: `docs/quickstart.md`
+- Guia de integração: `docs/poc-integration-guide.md`
 - Checklist de produção: `docs/PRODUCTION_CHECKLIST.md`

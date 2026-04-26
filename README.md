@@ -35,19 +35,33 @@ client = OpenAI(
 
 ## Quick Start com Docker
 
-Dois modos de operacao, escolha o que se encaixa no cliente:
+### POC Decision-Only — recomendado para banco, telecom e enterprise restritivo
 
-**Modo Decision** — AION decide, sua app chama o LLM (sem compartilhar chaves):
+AION decide (bloqueia / bypass / aprova). Sua app chama o LLM com suas próprias credenciais.
+**AION não recebe credencial de LLM.**
+
 ```bash
-curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.decision.yml
-echo "AION_LICENSE=<seu-jwt>" > .env
-docker compose -f docker-compose.decision.yml up -d
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.poc-decision.yml
+echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+docker compose -f docker-compose.poc-decision.yml up -d
 ```
 
-**Modo Proxy** — AION intercepta tudo, incluindo a chamada ao LLM (zero-code na app):
+Testar:
 ```bash
-# .env com AION_LICENSE + chave do LLM (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
-docker compose -f docker-compose.proxy.yml up -d
+curl -s http://localhost:8080/v1/decide \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Olá"}]}' | jq .
+# → {"decision":"bypass","bypass_response":"Olá! Como posso ajudar?","latency_ms":1.8}
+```
+
+### POC Transparent — opcional, integração acelerada
+
+AION intercepta e executa a chamada ao LLM. Cliente troca apenas o `base_url`.
+Requer credencial do LLM. Discuta com CISO antes em ambientes restritivos.
+
+```bash
+# .env com AION_ADMIN_KEY + OPENAI_API_KEY (ou outro provider)
+docker compose -f docker-compose.poc-transparent.yml up -d
 ```
 
 Verificar: `curl http://localhost:8080/health`

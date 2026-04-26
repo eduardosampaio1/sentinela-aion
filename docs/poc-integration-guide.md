@@ -19,44 +19,33 @@ AION e um proxy gateway OpenAI-compatible que intercepta chamadas de LLM com 3 m
 
 ## Quick Start
 
-### 1. Simulado (sem chave OpenAI — recomendado para POC)
+### 1. POC Decision-Only — recomendado para enterprise restritivo
+
+AION decide. Sua app chama o LLM com suas próprias credenciais. AION não recebe chave de LLM.
 
 ```bash
-git clone https://github.com/eduardosampaio1/sentinela-aion.git
-cd sentinela-aion
-pip install -e .
-python start.py
+curl -O https://raw.githubusercontent.com/eduardosampaio1/sentinela-aion/main/docker-compose.poc-decision.yml
+echo "AION_ADMIN_KEY=chave-poc:admin" > .env
+docker compose -f docker-compose.poc-decision.yml up -d
 ```
 
-Isso sobe: AION + mock LLM (OpenAI-compatible fake) + Redis local. Zero configuracao, zero custo.
+### 2. POC Transparent — integração acelerada
 
-### 2. Docker — Modo Decision (AION decide, voce chama o LLM)
+AION intercepta e executa a chamada ao LLM. Cliente troca apenas `base_url`.
 
 ```bash
-echo "AION_LICENSE=<seu-jwt>" > .env
-docker compose -f docker-compose.decision.yml up -d
+# .env com AION_ADMIN_KEY + credencial do LLM (OPENAI_API_KEY, etc.)
+docker compose -f docker-compose.poc-transparent.yml up -d
 ```
 
-Neste modo o AION retorna `BLOCK / BYPASS / CONTINUE` via `POST /v1/decide`.
-Sua app usa a decisao e chama o LLM com suas proprias credenciais.
-
-### 3. Docker — Modo Proxy (AION intercepta tudo)
-
-```bash
-# .env com AION_LICENSE + OPENAI_API_KEY (ou outro provider)
-docker compose -f docker-compose.proxy.yml up -d
-```
-
-Neste modo sua app aponta `base_url` para o AION e nao muda mais nada.
-
-### 4. Local (desenvolvimento)
+### 3. Local (desenvolvimento)
 
 ```bash
 pip install -e .
 python -m aion.cli
 ```
 
-### 5. Verificar que esta rodando
+### 4. Verificar que esta rodando
 
 ```bash
 curl http://localhost:8080/health
@@ -68,12 +57,10 @@ curl http://localhost:8080/ready
 
 ## Modos de uso
 
-AION suporta dois modos distintos — escolha conforme sua arquitetura:
-
 | Modo | Endpoint | Quando usar |
 |------|----------|-------------|
-| **Proxy** | `POST /v1/chat/completions` | AION intercepta e chama o LLM por voce |
-| **Gate** | `POST /v1/decide` | Voce ja tem LLM proprio — AION so decide (bloqueia/permite/bypass) |
+| **POC Decision-Only** (recomendado) | `POST /v1/decide` | AION decide — você chama o LLM com suas credenciais |
+| **POC Transparent** (opcional) | `POST /v1/chat/completions` | AION intercepta e chama o LLM por você |
 
 ## Integracao com sua aplicacao
 
@@ -108,9 +95,9 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-### Modo Gate — /v1/decide (sem proxy LLM)
+### POC Decision-Only — /v1/decide (recomendado)
 
-Use quando voce ja tem seu proprio LLM e quer apenas a camada de seguranca/decisao do AION:
+AION retorna Decision Contract. Você chama seu próprio LLM apenas quando `decision == "continue"`:
 
 ```python
 import httpx
@@ -341,8 +328,8 @@ A: PII e detectada/mascarada antes de enviar ao LLM. Use `DELETE /v1/data/{tenan
 **Q: AION suporta streaming?**
 A: Sim, SSE com timeout de 300s. Compativel com OpenAI SDK streaming.
 
-**Q: Como testar sem LLM real?**
-A: `python start.py` sobe o AION com um mock LLM embutido (OpenAI-compatible, respostas instantaneas, custo zero). Ideal para POC e desenvolvimento. O mock responde a qualquer request com latencia simulada.
+**Q: Como testar sem credencial de LLM?**
+A: Use o POC Decision-Only (`docker-compose.poc-decision.yml`). O AION não chama nenhum LLM neste modo — apenas decide (block/bypass/continue). Você pode validar bypass, bloqueio, PII detection e audit trail sem nenhuma chave de API.
 
 ## Swagger / OpenAPI
 
