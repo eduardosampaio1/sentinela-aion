@@ -1,0 +1,6 @@
+.next
+node_modules
+.env*
+!.env.poc-decision.example
+*.log
+.git

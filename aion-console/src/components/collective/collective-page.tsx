@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Network,
   ShieldCheck,
@@ -13,6 +13,7 @@ import {
   TrendingDown,
   Clock,
   AlertOctagon,
+  Info,
 } from "lucide-react";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
@@ -23,6 +24,7 @@ import {
   installCollectivePolicy,
   promoteCollectivePolicy,
 } from "@/lib/api";
+import { getHealth, type HealthInfo } from "@/lib/api/observability";
 import {
   mockCollectivePolicies,
   mockInstalledPolicies,
@@ -356,6 +358,15 @@ export function CollectivePage() {
   const [promoteTarget, setPromoteTarget] = useState<InstalledCollectivePolicy | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [healthInfo, setHealthInfo] = useState<HealthInfo | null>(null);
+
+  useEffect(() => {
+    getHealth()
+      .then(setHealthInfo)
+      .catch(() => setHealthInfo(null));
+  }, []);
+
+  const isPocDecision = healthInfo?.aion_mode === "poc_decision";
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   const sectorParam = activeSector !== "all" ? activeSector : undefined;
@@ -453,6 +464,22 @@ export function CollectivePage() {
           Atualizar
         </button>
       </div>
+
+      {isPocDecision && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-800/40 bg-amber-900/10 px-5 py-4">
+          <Info className="h-4 w-4 flex-shrink-0 mt-0.5 text-amber-400" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-400">
+              Catálogo editorial — modo POC Decision-Only
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Neste modo, políticas instaladas <strong className="text-[var(--color-text)]">não são aplicadas no runtime</strong>.
+              O ciclo de vida (Sandbox → Shadow → Produção) é rastreado administrativamente para demonstração.
+              Runtime enforcement entra em Shadow Mode.
+            </p>
+          </div>
+        </div>
+      )}
 
       {isDemo && <DemoBanner onRetry={refetchPolicies} />}
 

@@ -237,7 +237,7 @@ export function Sidebar({
                     Telemetria {healthInfo.telemetry_enabled ? "on" : "off"}
                   </span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${healthInfo.collective_enabled ? "text-purple-400 border-purple-800/40 bg-purple-900/10" : "text-[var(--color-text-muted)] border-[var(--color-border)]"}`}>
-                    Collective {healthInfo.collective_enabled ? "on" : "off"}
+                    Collective {healthInfo.collective_enabled ? (healthInfo.aion_mode === "poc_decision" ? "catálogo" : "on") : "off"}
                   </span>
                 </div>
               </div>

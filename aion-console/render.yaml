@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: aion-console
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: NEXT_PUBLIC_AION_TENANT
+        value: default
+      - key: NEXT_PUBLIC_DEMO_MODE
+        value: "false"
+      - key: AION_DEFAULT_ROLE
+        value: viewer
+      # Required — set in Render dashboard after first deploy:
+      - key: AION_API_URL
+        sync: false
+      - key: AION_API_KEY
+        sync: false
+      # Optional OAuth — leave blank to disable provider:
+      - key: AUTH_GOOGLE_ID
+        sync: false
+      - key: AUTH_GOOGLE_SECRET
+        sync: false
+      - key: AUTH_ENTRA_ID
+        sync: false
+      - key: AUTH_ENTRA_SECRET
+        sync: false
+      - key: AUTH_ENTRA_TENANT_ID
+        sync: false
+      # Optional RBAC:
+      - key: AION_ROLE_MAP
+        sync: false
+      - key: AION_ADMIN_EMAILS
+        sync: false

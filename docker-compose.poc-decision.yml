@@ -94,6 +94,30 @@ services:
         limits:
           memory: 1G
 
+  aion-console:
+    build:
+      context: ./aion-console
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # Segredo de sessão — defina em .env ou use o valor gerado
+      AUTH_SECRET: ${CONSOLE_AUTH_SECRET:-insecure-default-change-in-prod}
+      NEXT_PUBLIC_AION_TENANT: default
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      AION_DEFAULT_ROLE: viewer
+      # Aponta para o runtime na rede interna do compose
+      AION_API_URL: http://aion:8080
+    depends_on:
+      aion:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""

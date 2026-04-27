@@ -170,10 +170,16 @@ class TestRBACIntegration:
     async def test_admin_can_activate_killswitch(self, client):
         resp = await client.put("/v1/killswitch",
             json={"reason": "test"},
-            headers={"Authorization": "Bearer admin-key"})
+            headers={
+                "Authorization": "Bearer admin-key",
+                "X-Aion-Actor-Reason": "automated test - killswitch validation",
+            })
         assert resp.status_code == 200
         # Cleanup
-        await client.delete("/v1/killswitch", headers={"Authorization": "Bearer admin-key"})
+        await client.delete("/v1/killswitch", headers={
+            "Authorization": "Bearer admin-key",
+            "X-Aion-Actor-Reason": "automated test - cleanup",
+        })
 
 
 # ══════════════════════════════════════════════

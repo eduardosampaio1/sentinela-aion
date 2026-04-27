@@ -1,10 +1,10 @@
 /**
- * Next.js middleware — enforces authentication on all console routes.
+ * Next.js proxy — enforces authentication on all console routes.
  *
  * Public paths (no auth required): /login, /api/auth/*
  * Everything else redirects to /login if session is absent.
  */
-export { auth as middleware } from "@/auth";
+export { auth as proxy } from "@/auth";
 
 export const config = {
   matcher: [
