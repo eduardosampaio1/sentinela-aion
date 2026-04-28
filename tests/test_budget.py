@@ -187,12 +187,16 @@ def client(monkeypatch):
 
 
 def test_put_budget_without_auth_returns_401(client):
-    resp = client.put("/v1/budget/acme", json={"daily_cap": 5.0})
+    resp = client.put(
+        "/v1/budget/acme",
+        json={"daily_cap": 5.0},
+        headers={"X-Aion-Tenant": "acme"},
+    )
     assert resp.status_code == 401
 
 
 def test_get_budget_status_without_auth_returns_401(client):
-    resp = client.get("/v1/budget/acme/status")
+    resp = client.get("/v1/budget/acme/status", headers={"X-Aion-Tenant": "acme"})
     assert resp.status_code == 401
 
 
@@ -211,7 +215,11 @@ def test_put_budget_with_operator_role_returns_200(client):
     resp = client.put(
         "/v1/budget/acme",
         json={"daily_cap": 5.0, "on_cap_reached": "downgrade"},
-        headers={"Authorization": "Bearer admin-key"},
+        headers={
+            "Authorization": "Bearer admin-key",
+            "X-Aion-Tenant": "acme",
+            "X-Aion-Actor-Reason": "unit-test budget update",
+        },
     )
     # 200 means RBAC passed; storage may fail without Redis (fine in unit test)
     assert resp.status_code in (200, 500)

@@ -367,7 +367,11 @@ class TestKillswitchAPI:
         admin_headers = {"Authorization": "Bearer test-admin-key"}
 
         # Activate
-        resp = await client.put("/v1/killswitch", json={"reason": "llm_instability"}, headers=admin_headers)
+        resp = await client.put(
+            "/v1/killswitch",
+            json={"reason": "llm_instability"},
+            headers={**admin_headers, "X-Aion-Actor-Reason": "llm_instability"},
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "safe_mode_active"
 
@@ -398,7 +402,10 @@ class TestKillswitchAPI:
             mock_fwd.assert_called_once()
 
         # Deactivate
-        resp = await client.delete("/v1/killswitch", headers=admin_headers)
+        resp = await client.delete(
+            "/v1/killswitch",
+            headers={**admin_headers, "X-Aion-Actor-Reason": "test cleanup"},
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "normal_mode_restored"
 

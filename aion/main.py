@@ -33,6 +33,7 @@ _pipeline: Pipeline | None = None
 # Background task handles
 _snapshot_task: asyncio.Task | None = None
 _approval_task: asyncio.Task | None = None
+_trust_guard_task: asyncio.Task | None = None
 
 
 async def _snapshot_baselines_loop():
@@ -136,6 +137,10 @@ async def lifespan(app: FastAPI):
         settings.nomos_enabled = False
         settings.metis_enabled = False
 
+    # ── Trust Guard: startup validation (license claims + integrity manifest) ─
+    from aion.trust_guard import startup_validation
+    _trust_state = await startup_validation()
+
     from aion.middleware import _load_overrides_from_disk
     _load_overrides_from_disk()
 
@@ -161,7 +166,20 @@ async def lifespan(app: FastAPI):
     _pipeline_ready.set()
     logger.info("AION pipeline ready")
 
-    global _snapshot_task, _approval_task
+    # ── Trust Guard: apply entitlement from startup state + launch loop ───────
+    global _snapshot_task, _approval_task, _trust_guard_task
+    try:
+        from aion.trust_guard.entitlement_engine import EntitlementEngine, TrustViolationBehavior
+        from aion.config import get_trust_guard_settings
+        _tg_settings = get_trust_guard_settings()
+        if _tg_settings.enabled:
+            _behavior = TrustViolationBehavior(_tg_settings.violation_behavior)
+            EntitlementEngine.apply(_pipeline, _trust_state, _behavior)
+            from aion.trust_guard import start_trust_guard_loop
+            _trust_guard_task = start_trust_guard_loop(_pipeline)
+    except Exception as _tg_err:
+        logger.warning("Trust Guard startup failed (non-fatal): %s", _tg_err)
+
     _snapshot_task = asyncio.create_task(_snapshot_baselines_loop())
     _approval_task = asyncio.create_task(_approval_sweep_loop())
 
@@ -171,6 +189,8 @@ async def lifespan(app: FastAPI):
         _snapshot_task.cancel()
     if _approval_task:
         _approval_task.cancel()
+    if _trust_guard_task:
+        _trust_guard_task.cancel()
 
     await shutdown_telemetry()
     await shutdown_client()

@@ -15,3 +15,13 @@ venv/
 htmlcov/
 *.log
 .DS_Store
+
+# Key generation tools — NEVER commit (contains private key scripts)
+tools/
+
+# Runtime state — generated at startup, not part of source
+.runtime/
+
+# License files — tenant-specific, never committed
+*.lic
+aion.lic

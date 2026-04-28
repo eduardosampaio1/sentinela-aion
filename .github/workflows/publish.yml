@@ -16,6 +16,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required by cosign for keyless signing (OIDC token)
+      id-token: write
 
     steps:
       - name: Checkout
@@ -26,6 +28,33 @@ jobs:
         run: |
           VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate build_id
+        id: build_id
+        run: |
+          BUILD_ID="build_$(date +%Y%m%d_%H%M%S)_${GITHUB_SHA::8}"
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+
+      - name: Set up Python for manifest signing
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install manifest signing dependencies
+        run: pip install cryptography pyjwt
+
+      - name: Sign integrity manifest
+        env:
+          AION_ARTIFACT_SIGNING_KEY_PATH: ${{ secrets.SENTINELA_ARTIFACT_SIGNING_KEY_PATH }}
+        run: |
+          SIGN_ARGS="--build-id ${{ steps.build_id.outputs.build_id }}"
+          if [[ -n "$AION_ARTIFACT_SIGNING_KEY_PATH" ]]; then
+            SIGN_ARGS="$SIGN_ARGS --artifact-key $AION_ARTIFACT_SIGNING_KEY_PATH"
+          fi
+          python tools/generate_manifest.py $SIGN_ARGS \
+            --files-root . \
+            --out aion/trust_guard/integrity_manifest.json
+          echo "Integrity manifest signed for build ${{ steps.build_id.outputs.build_id }}"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -47,7 +76,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -56,5 +89,34 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            AION_BUILD_ID=${{ steps.build_id.outputs.build_id }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # ── Cosign: sign the image digest (keyless via GitHub OIDC) ──────────────
+      # Customers verify with:
+      #   cosign verify \
+      #     --certificate-identity-regexp "https://github.com/YOUR_ORG/aion/.*" \
+      #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      #     ghcr.io/YOUR_ORG/aion@sha256:DIGEST
+      - name: Sign image with cosign (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images="$images ${tag}@${DIGEST}"
+          done
+          cosign sign --yes $images
+
+      # ── Attach manifest attestation ───────────────────────────────────────────
+      - name: Attest integrity manifest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --predicate aion/trust_guard/integrity_manifest.json \
+            --type https://sentinela.io/trust-guard/integrity/v1 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}

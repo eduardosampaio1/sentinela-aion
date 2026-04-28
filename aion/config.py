@@ -225,12 +225,49 @@ class MetisSettings(BaseSettings):
     rewrite_level: str = "off"  # off | light | moderate
 
 
+class TrustGuardSettings(BaseSettings):
+    """Settings for the AION Trust Guard (License & Integrity Control Plane)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AION_TRUST_GUARD_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = True
+    # AION_TRUST_GUARD_ENABLED=false disables Trust Guard entirely (dev/test)
+
+    heartbeat_interval: int = 600
+    # AION_TRUST_GUARD_HEARTBEAT_INTERVAL — seconds between heartbeat attempts
+
+    grace_hours: int = 48
+    # AION_TRUST_GUARD_GRACE_HOURS — hours before cached entitlement expires on restart
+
+    server_url: str = ""
+    # AION_TRUST_GUARD_SERVER_URL — overrides heartbeat_url from JWT (staging/dev)
+
+    violation_behavior: str = "passthrough"
+    # AION_TRUST_GUARD_VIOLATION_BEHAVIOR — passthrough | health_only
+    # passthrough: protected modules off, proxy 100% functional (POC default)
+    # health_only: only /health and /ready respond when TAMPERED/INVALID
+
+    artifact_public_key: str = ""
+    # AION_TRUST_GUARD_ARTIFACT_PUBLIC_KEY — Sentinela Artifact Signing Key (public PEM)
+    # If empty, manifest signature check is skipped (dev mode)
+
+    policy_pack_public_key: str = ""
+    # AION_TRUST_GUARD_POLICY_PACK_PUBLIC_KEY — Sentinela Policy Pack Signing Key (public PEM)
+    # If empty, external policy pack signature check is skipped (dev mode)
+
+
 # Singletons
 _settings: Optional[AionSettings] = None
 _estixe_settings: Optional[EstixeSettings] = None
 _nomos_settings: Optional[NomosSettings] = None
 _metis_settings: Optional[MetisSettings] = None
 _cache_settings: Optional[CacheSettings] = None
+_trust_guard_settings: Optional[TrustGuardSettings] = None
 
 
 def get_settings() -> AionSettings:
@@ -266,3 +303,10 @@ def get_cache_settings() -> CacheSettings:
     if _cache_settings is None:
         _cache_settings = CacheSettings()
     return _cache_settings
+
+
+def get_trust_guard_settings() -> TrustGuardSettings:
+    global _trust_guard_settings
+    if _trust_guard_settings is None:
+        _trust_guard_settings = TrustGuardSettings()
+    return _trust_guard_settings
