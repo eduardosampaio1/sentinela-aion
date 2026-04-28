@@ -1,24 +1,50 @@
-version: "3.8"
-
 services:
+
   aion:
     build:
       context: .
       target: production
+    image: aion:poc
+    container_name: aion
+    restart: unless-stopped
     ports:
       - "8080:8080"
     env_file:
       - .env
-    environment:
-      - AION_PORT=8080
+    volumes:
+      # Licença: coloque o arquivo aion.lic na mesma pasta do docker-compose
+      # Alternativa: defina AION_LICENSE=<jwt> direto no .env
+      - ./aion.lic:/app/aion.lic:ro
+      # Estado persistente (NEMOS baselines, runtime state)
+      - aion_runtime:/var/aion/runtime
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      test: ["CMD", "python", "-c",
+             "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
       interval: 30s
       timeout: 5s
+      start_period: 30s
       retries: 3
-      start_period: 60s  # embedding model download on cold start
-    restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    container_name: aion-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  aion_runtime:
+  redis_data:
