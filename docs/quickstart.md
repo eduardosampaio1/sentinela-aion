@@ -162,7 +162,9 @@ curl http://localhost:8080/health | jq '.active_modules'
 
 | Variável | Obrigatória | Default | Descrição |
 |----------|-------------|---------|-----------|
-| `AION_ADMIN_KEY` | Sim | — | Formato: `chave:role` — ex: `abc123:admin` |
+| `AION_LICENSE` | **Sim** | — | JWT de licença (ou arquivo `aion.lic` na raiz) |
+| `AION_ADMIN_KEY` | **Sim** | — | Formato: `chave:role` — ex: `abc123:admin` |
+| `AION_SESSION_AUDIT_SECRET` | Recomendado | — | Assina trilha de auditoria — `openssl rand -hex 32` |
 | `AION_MODE` | Não | — | `poc_decision` / `poc_transparent` — exposto no `/health` |
 | `REDIS_URL` | Não | — | Incluído nos compose files POC |
 | `AION_ESTIXE_ENABLED` | Não | `true` | Controle e bypass |
@@ -193,11 +195,15 @@ O overhead do AION é < 20ms no P95. Se estiver acima, verifique `X-Aion-Pipelin
 ```bash
 # Ativar passthrough total (AION vira proxy transparente)
 curl -X PUT http://localhost:8080/v1/killswitch \
-  -H "Authorization: Bearer chave-poc"
+  -H "Authorization: Bearer chave-poc" \
+  -H "X-Aion-Actor-Reason: emergencia-producao" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "emergencia-producao"}'
 
 # Desativar
 curl -X DELETE http://localhost:8080/v1/killswitch \
-  -H "Authorization: Bearer chave-poc"
+  -H "Authorization: Bearer chave-poc" \
+  -H "X-Aion-Actor-Reason: restaurar-pipeline"
 ```
 
 ---
@@ -207,7 +213,7 @@ curl -X DELETE http://localhost:8080/v1/killswitch \
 | Item | Status |
 |------|--------|
 | Telemetria para Baluarte (ARGOS) | Shadow Mode — opt-in, requer DPA |
-| Supabase da Baluarte | Shadow Mode / Collective futuro |
+| Conteúdo de mensagens no Supabase | Nunca — apenas metadados (decisão, custo, latência) |
 | Collective runtime enforcement | Roadmap — lifecycle é administrativo hoje |
 | Cross-tenant intelligence | Roadmap — Shadow Mode com dados reais |
 | Mock LLM | Dev/demo interna apenas |

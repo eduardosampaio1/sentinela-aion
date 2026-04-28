@@ -51,16 +51,20 @@ ambiente do cliente, usando os recursos de infraestrutura do cliente.
 |---------------|-------|
 | Onde roda | Ambiente do cliente (Docker/bare-metal) |
 | Redis | Redis do próprio cliente |
-| Telemetria externa | **Zero** — nada sai do ambiente |
+| Conteúdo de mensagens e prompts | **100% no cliente** — nunca sai |
+| Validação de licença | Offline (Ed25519 local) — sem phone-home |
 | Dependência de internet | Apenas para chamar o LLM provider |
-| Baluarte cloud | Não utilizada |
-| Supabase Baluarte | Não utilizada |
+| Baluarte cloud (ARGOS) | Não utilizada |
 | DPA necessário | Não |
 | `ARGOS_TELEMETRY_URL` | Não configurado |
 | `AION_CONTRIBUTE_GLOBAL_LEARNING` | `false` (default) |
+| Supabase Baluarte (telemetria opcional) | **Opt-in** — metadados de decisão apenas (sem conteúdo); ativado via `AION_SUPABASE_URL` + `AION_SUPABASE_SERVICE_ROLE_KEY` |
 
-**Tudo que o AION processa — prompts, respostas, logs, Redis — fica 100% no
-ambiente do cliente.**
+**O que nunca sai do ambiente do cliente:** prompts, respostas, PII, dados de usuário,
+chaves de API, dados do Redis. A licença é validada 100% offline.
+
+**O que pode sair (apenas se configurado):** metadados de decisão anônimos para o Supabase
+da Baluarte (`AION_SUPABASE_URL`). Sem configuração = zero saída de dados.
 
 ---
 
@@ -172,8 +176,12 @@ ao Baluarte em Phase 0.
 
 | Variável | Default | Quando usar |
 |----------|---------|------------|
-| `AION_ADMIN_KEY` | `""` | Sempre — autenticação da console |
+| `AION_LICENSE` | — | **Obrigatório** — JWT fornecido pela Baluarte (ou via `aion.lic`) |
+| `AION_ADMIN_KEY` | `""` | Sempre — autenticação da console (`chave:admin`) |
+| `AION_SESSION_AUDIT_SECRET` | — | Recomendado — assina trilha de auditoria (HMAC-SHA256) |
 | `REDIS_URL` | `None` | Recomendado — Redis do cliente |
+| `AION_SUPABASE_URL` | `None` | Opcional — persiste metadados de decisão no painel Baluarte |
+| `AION_SUPABASE_SERVICE_ROLE_KEY` | `None` | Opcional — par com `AION_SUPABASE_URL` |
 | `ARGOS_TELEMETRY_URL` | `None` | **Apenas Shadow Mode** — nunca no POC |
 | `AION_CONTRIBUTE_GLOBAL_LEARNING` | `false` | **Apenas Shadow Mode** |
 | `AION_COLLECTIVE_ENABLED` | `true` | Mantido — catálogo editorial |

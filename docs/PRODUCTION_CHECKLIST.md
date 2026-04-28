@@ -15,11 +15,17 @@ e dev; produção requer os itens abaixo.
   - Pre-baixar `sentence-transformers/all-MiniLM-L6-v2` no container
   - Setar `HF_HUB_OFFLINE=1` para prevenir calls externos
 
-## 2. Segurança
+## 2. Licença e Segurança
 
+- [ ] **`AION_LICENSE` configurado** — JWT fornecido pela Baluarte ou arquivo `aion.lic` na raiz
+  - Licença validada offline (Ed25519) — sem dependência de rede
+  - Estado visível em `/health` → `trust_guard.trust_state`
+- [ ] **`AION_SESSION_AUDIT_SECRET` definido** — segredo HMAC-SHA256 para trilha de auditoria
+  - Gerar: `openssl rand -hex 32`
+  - Sem este segredo, a trilha de auditoria não tem assinatura (sem evidência de integridade)
 - [ ] **`AION_REQUIRE_CHAT_AUTH=true`** — nenhum request anônimo em prod
 - [ ] **`AION_REQUIRE_TENANT=true`** — header `X-Aion-Tenant` obrigatório
-- [ ] **`AION_ADMIN_KEY` definido** (rotacionável: `"key1,key2"`) — protege endpoints `/v1/overrides`, `/v1/estixe/*/reload`, etc
+- [ ] **`AION_ADMIN_KEY` definido com roles** (rotacionável: `"key1:admin,key2:operator"`)
 - [ ] **`AION_CORS_ORIGINS` restritivo** — só origens conhecidas, nunca `*`
 - [ ] **API keys de provider em secrets manager**, nunca em `.env`
 - [ ] **Rate limits calibrados por tenant** via `AION_CHAT_RATE_LIMIT` e overrides
@@ -100,24 +106,27 @@ Após rodar `python stress_test.py --workers 50 -n 100` em ambiente prod-like:
 
 ## 10. Pre-deploy
 
-- [ ] Rodar `python test_suite.py all` em staging — **100% pass**
-- [ ] Rodar `python stress_test.py` em staging — **todos critérios OK**
+- [ ] Rodar `pytest tests/` em staging — **702+ testes, 0 falhas**
+- [ ] Rodar stress test em staging — **todos critérios OK**
 - [ ] Smoke test com traffic real sombreado (mirror produção por 24h)
 - [ ] Runbook de rollback documentado
 
-## Estado atual do AION Sim (este repo)
+## Estado atual
 
 | Item | Status | Nota |
 |---|---|---|
+| Licença Ed25519 (offline) | ✅ implementado | `aion/license.py` — sem phone-home |
+| Trust Guard (integridade + entitlement) | ✅ implementado | `aion/trust_guard/` |
 | Redis fallback | ✅ implementado | Velocity usa Redis quando disponível |
 | Overrides persistentes | ✅ implementado | Arquivo JSON sem Redis; Redis quando disponível |
 | Streaming output guard | ✅ implementado | Buffer-accumulate-flush (v1) |
 | Shadow mode | ✅ 1 categoria em observação | `social_engineering` |
 | Hot-reload guardrails | ✅ implementado | `POST /v1/estixe/guardrails/reload` |
-| Sim guardrail anti-key-real | ✅ implementado | `start.py` override |
-| Port collision detector | ✅ implementado | `start.py` aborta se portas ocupadas |
 | Telemetria ESTIXE completa | ✅ implementado | shadow/velocity/flagged em `/v1/events` |
-| Stress test | ✅ script criado | `python stress_test.py` |
-| Test suite | ✅ 50+ assertions | `python test_suite.py` |
+| Supabase writer (metadados) | ✅ implementado | `aion/supabase_writer.py` — opt-in via env var |
+| Trilha de auditoria hash-chained | ✅ implementado | `aion/middleware.py` — HMAC-SHA256 |
+| Budget cap por tenant | ✅ implementado | `PUT /v1/budget/{tenant}` |
+| Sessão de auditoria LGPD | ✅ implementado | `GET /v1/session/{id}/audit` |
+| Test suite | ✅ 702 testes | `pytest tests/` |
 | Distributed tracing (OTel) | ❌ fora de escopo v1 | |
-| Offline embedding | ⚠️ depende de pre-cache manual | Docker com modelo pre-baixado |
+| Offline embedding | ✅ bundled no Docker | `HF_HUB_OFFLINE=1`, modelo em `/opt/hf-model` |
