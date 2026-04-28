@@ -36,7 +36,7 @@ _GRACE_SECONDS = 7 * 24 * 3600  # 7 days
 # Generated with tools/generate_keys.py. Replace with production key before shipping.
 # The matching private key is in tools/keys/private.pem (never commit to git).
 _EMBEDDED_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAlNr9UCRjb9pIsHnbkH5DzFT5V4SEgNL+cJiGppedU5A=
+MCowBQYDK2VwAyEAhhHJu8ggP3+GFeVGYBc30RsNqzT4jkz3epGOmtfi/Oc=
 -----END PUBLIC KEY-----"""
 
 _PUBLIC_KEY_PEM = os.environ.get("AION_LICENSE_PUBLIC_KEY", _EMBEDDED_PUBLIC_KEY)
