@@ -26,8 +26,8 @@ logger = logging.getLogger("aion.middleware")
 _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 # ── Admin paths ──
-_ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit", "/v1/approvals"}
-_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/", "/v1/approvals/")
+_ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit", "/v1/approvals", "/version"}
+_ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/", "/v1/approvals/", "/v1/collective/packs")
 
 # ── Roles whose service key is trusted to forward actor identity headers ──
 # Only these roles can set X-Aion-Actor-* headers that drive RBAC.

@@ -24,6 +24,32 @@ def _get_pipeline():
     return _main._pipeline
 
 
+def _get_trust_guard_health() -> dict | None:
+    """Load persisted TrustState and return a dict for the /health trust_guard section."""
+    try:
+        from aion.trust_guard.trust_state import load_trust_state
+        import datetime
+        state = load_trust_state()
+
+        def _fmt_ts(ts: float) -> str | None:
+            if not ts:
+                return None
+            return datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        return {
+            "trust_state": state.trust_state,
+            "license_id": state.license_id or None,
+            "integrity_status": state.integrity_status,
+            "entitlement_valid_until": _fmt_ts(state.entitlement_expires_at),
+            "last_heartbeat": _fmt_ts(state.last_heartbeat_at),
+            "restricted_features": state.restricted_features,
+            "grace_hours_remaining": state.grace_hours_remaining,
+            "heartbeat_required": state.heartbeat_required,
+        }
+    except Exception:
+        return None
+
+
 def _get_pipeline_ready():
     import aion.main as _main
     return _main._pipeline_ready
@@ -117,6 +143,18 @@ async def health():
     health_data["executes_llm"] = executes_llm
     health_data["telemetry_enabled"] = bool(settings.argos_telemetry_url)
     health_data["collective_enabled"] = settings.collective_enabled
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── Trust Guard status ────────────────────────────────────────────────────
+    trust_guard_data = _get_trust_guard_health()
+    if trust_guard_data:
+        health_data["trust_guard"] = trust_guard_data
+        # Reflect TAMPERED/INVALID in degraded_components (admin visibility)
+        tg_state = trust_guard_data.get("trust_state", "ACTIVE")
+        if tg_state in ("TAMPERED", "INVALID") and "trust_guard" not in degraded_components:
+            degraded_components.append("trust_guard")
+        if tg_state == "RESTRICTED" and "nemos_restricted" not in degraded_components:
+            degraded_components.append("nemos_restricted")
     # ─────────────────────────────────────────────────────────────────────────
 
     mode = health_data.get("mode", "unknown")
@@ -334,6 +372,41 @@ async def tenant_metrics(tenant_id: str):
 async def list_models():
     settings = get_settings()
     return {"models": [{"id": settings.default_model, "provider": settings.default_provider, "type": "default"}]}
+
+
+@router.get("/version", tags=["Observability"])
+async def version_info(request: Request):
+    """Build and license version info — trust_state, integrity, tenant. Requires operator auth."""
+    from aion import __version__
+    try:
+        from aion.trust_guard.trust_state import load_trust_state
+        state = load_trust_state()
+        try:
+            from aion.trust_guard.license_authority import get_license_claims
+            claims = get_license_claims()
+            license_tier = claims.get("tier", "")
+        except Exception:
+            license_tier = ""
+
+        return {
+            "aion_version": __version__,
+            "build_id": state.build_id or None,
+            "tenant_id": state.tenant_id or None,
+            "license_id": state.license_id or None,
+            "license_tier": license_tier,
+            "integrity_status": state.integrity_status,
+            "trust_state": state.trust_state,
+        }
+    except Exception:
+        return {
+            "aion_version": __version__,
+            "build_id": None,
+            "tenant_id": None,
+            "license_id": None,
+            "license_tier": None,
+            "integrity_status": "UNVERIFIED",
+            "trust_state": "ACTIVE",
+        }
 
 
 @router.get("/v1/recommendations/{tenant_id}", tags=["Observability"])

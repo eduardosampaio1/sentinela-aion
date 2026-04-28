@@ -35,6 +35,24 @@ from aion.nemos.store import NemosStore
 
 logger = logging.getLogger("aion.nemos")
 
+# ── Trust Guard: NEMOS write freeze ──────────────────────────────────────────
+# Set to True by EntitlementEngine in RESTRICTED/EXPIRED/TAMPERED/INVALID states.
+# Reads are never blocked — only learning/adaptation writes are frozen.
+_nemos_writes_frozen: bool = False
+
+
+def freeze_nemos_writes() -> None:
+    """Freeze NEMOS adaptation writes (Trust Guard entitlement)."""
+    global _nemos_writes_frozen
+    _nemos_writes_frozen = True
+
+
+def unfreeze_nemos_writes() -> None:
+    """Restore NEMOS adaptation writes (Trust Guard entitlement)."""
+    global _nemos_writes_frozen
+    _nemos_writes_frozen = False
+
+
 _MEMORY_TTL = 30 * 86400       # 30 days
 _DAILY_ECON_TTL = 30 * 86400   # 30 days
 _WEEKLY_ECON_TTL = 90 * 86400  # 90 days
@@ -58,6 +76,8 @@ class Nemos:
 
     async def record_outcome(self, record: OutcomeRecord) -> None:
         """Record a routing outcome. Updates ModelPerformance aggregates."""
+        if _nemos_writes_frozen:
+            return
         tier = _complexity_tier(record.complexity_score)
         key = f"aion:memory:{record.tenant}:{record.model}"
 
@@ -115,6 +135,8 @@ class Nemos:
         self, tenant: str, intent: str, decision: str,
         was_correct: bool, cost_if_forwarded: float,
     ) -> None:
+        if _nemos_writes_frozen:
+            return
         if not intent:
             return
         key = f"aion:estixe:{tenant}:intent:{intent}"
@@ -165,6 +187,8 @@ class Nemos:
         self, tenant: str, tokens_before: int, tokens_after: int,
         compression_applied: bool, had_followup: bool,
     ) -> None:
+        if _nemos_writes_frozen:
+            return
         key = f"aion:metis:{tenant}:optimization"
         mem = await self._load_optimization_memory(tenant)
         mem.record(tokens_before, tokens_after, compression_applied, had_followup)
@@ -189,6 +213,8 @@ class Nemos:
         self, tenant: str, model: str, intent: str, decision: str,
         actual_cost: float, default_cost: float, tokens: int, latency_ms: float,
     ) -> None:
+        if _nemos_writes_frozen:
+            return
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         key = f"aion:econ:{tenant}:daily:{today}"
 
@@ -221,6 +247,8 @@ class Nemos:
         self, tenant: str, latency_ms: float, cost: float, tokens: int,
         model: str, intent: str, complexity_tier: str, decision: str,
     ) -> None:
+        if _nemos_writes_frozen:
+            return
         baseline = self._baselines.get(tenant)
         if not baseline:
             data = await self._store.get_json(f"aion:baseline:{tenant}")

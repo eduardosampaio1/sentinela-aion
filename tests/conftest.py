@@ -13,6 +13,8 @@ os.environ.setdefault("AION_ESTIXE_ENABLED", "true")
 os.environ.setdefault("AION_NOMOS_ENABLED", "false")
 os.environ.setdefault("AION_METIS_ENABLED", "false")
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-key")
+os.environ.setdefault("AION_TRUST_GUARD_ENABLED", "false")
+os.environ.setdefault("AION_REQUIRE_CHAT_AUTH", "false")
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +50,17 @@ def _reset_global_state():
 
     # ── config singleton ─────────────────────────────────────────────────────
     import aion.config
+    aion.config._settings = None
+
+    # ── nemos write freeze (trust guard entitlement) ─────────────────────────
+    try:
+        import aion.nemos as _nemos_mod
+        _nemos_mod._nemos_writes_frozen = False
+    except Exception:
+        pass
+
+    # ── leaked env vars from tests that fail before their own cleanup ─────────
+    os.environ.pop("AION_ADMIN_KEY", None)
     aion.config._settings = None
 
 

@@ -90,6 +90,11 @@ class LicenseInfo:
 # ── Singleton ──────────────────────────────────────────────────────────────────
 _license_info: Optional[LicenseInfo] = None
 
+# Raw JWT claims — made available to Trust Guard for optional extended claims
+# (license_id, heartbeat_url, heartbeat_required, min_aion_version, etc.)
+# Populated by _validate_token(); empty dict when dev-bypass is active.
+_raw_claims: dict = {}
+
 
 def get_license() -> LicenseInfo:
     """Return the current license state. Call after validate_license_or_abort()."""
@@ -167,6 +172,10 @@ def _validate_token(token: str, public_key_pem: str) -> LicenseInfo:
         return LicenseInfo(state=LicenseState.INVALID, error=f"token malformado: {e}")
     except Exception as e:
         return LicenseInfo(state=LicenseState.INVALID, error=f"erro de validação: {e}")
+
+    # Save raw claims for Trust Guard extended fields (license_id, heartbeat_url, etc.)
+    global _raw_claims
+    _raw_claims = claims
 
     # Step 4: validate required claims
     tenant = claims.get("sub", "").strip()

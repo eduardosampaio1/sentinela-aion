@@ -215,7 +215,11 @@ class TestE2EAPI:
         """LGPD: delete tenant data requires admin auth."""
         resp = await admin_client.delete(
             "/v1/data/test-tenant",
-            headers={"Authorization": "Bearer test-e2e-admin"},
+            headers={
+                "Authorization": "Bearer test-e2e-admin",
+                "X-Aion-Tenant": "test-tenant",
+                "X-Aion-Actor-Reason": "e2e LGPD deletion test",
+            },
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"

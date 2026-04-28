@@ -140,14 +140,20 @@ class TestRBAC:
             resp = await client.put(
                 "/v1/killswitch",
                 json={"reason": "rbac-test"},
-                headers={"Authorization": "Bearer admin-key"},
+                headers={
+                    "Authorization": "Bearer admin-key",
+                    "X-Aion-Actor-Reason": "rbac-test",
+                },
             )
             assert resp.status_code == 200
             assert resp.json()["status"] == "safe_mode_active"
             # Cleanup: deactivate so other tests aren't affected
             await client.delete(
                 "/v1/killswitch",
-                headers={"Authorization": "Bearer admin-key"},
+                headers={
+                    "Authorization": "Bearer admin-key",
+                    "X-Aion-Actor-Reason": "cleanup",
+                },
             )
         os.environ.pop("AION_ADMIN_KEY", None)
         import aion.config
@@ -186,7 +192,10 @@ class TestRBAC:
         async with _make_client_with_key() as client:
             resp = await client.delete(
                 "/v1/data/any-tenant",
-                headers={"Authorization": "Bearer wrong-key"},
+                headers={
+                    "Authorization": "Bearer wrong-key",
+                    "X-Aion-Tenant": "any-tenant",
+                },
             )
         assert resp.status_code == 401
         os.environ.pop("AION_ADMIN_KEY", None)
@@ -201,7 +210,10 @@ class TestRBAC:
         async with _make_client_with_key() as client:
             resp = await client.delete(
                 "/v1/data/test-tenant",
-                headers={"Authorization": "Bearer operator-key"},
+                headers={
+                    "Authorization": "Bearer operator-key",
+                    "X-Aion-Tenant": "test-tenant",
+                },
             )
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "forbidden"
@@ -217,7 +229,11 @@ class TestRBAC:
         async with _make_client_with_key() as client:
             resp = await client.delete(
                 "/v1/data/rbac-test-tenant",
-                headers={"Authorization": "Bearer admin-key"},
+                headers={
+                    "Authorization": "Bearer admin-key",
+                    "X-Aion-Tenant": "rbac-test-tenant",
+                    "X-Aion-Actor-Reason": "rbac-test deletion",
+                },
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
