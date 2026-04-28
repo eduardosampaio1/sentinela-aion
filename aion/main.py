@@ -194,6 +194,11 @@ async def lifespan(app: FastAPI):
 
     await shutdown_telemetry()
     await shutdown_client()
+    try:
+        from aion.supabase_writer import shutdown as _sb_shutdown
+        await _sb_shutdown()
+    except Exception:
+        pass
     logger.info("AION shutdown complete")
 
 

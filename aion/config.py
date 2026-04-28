@@ -51,6 +51,12 @@ class AionSettings(BaseSettings):
     # During POC: leave unset. Zero data leaves the client environment.
     argos_telemetry_url: Optional[str] = Field(default=None, alias="ARGOS_TELEMETRY_URL")
 
+    # --- Supabase telemetry (optional) ---
+    # Set to persist decisions + audit events to Supabase for the console dashboard.
+    # AION_SUPABASE_URL and AION_SUPABASE_SERVICE_ROLE_KEY are read directly
+    # by aion.supabase_writer (not via AionSettings) to keep boot order simple.
+    # Listed here for documentation purposes only.
+
     # --- Auth ---
     admin_key: str = ""  # Comma-separated keys for rotation: "key1,key2"
 

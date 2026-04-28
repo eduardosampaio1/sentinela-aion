@@ -352,6 +352,23 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         request.method, request.url.path, entry["ip"], tenant, actor_info,
     )
 
+    # Supabase audit trail (fire-and-forget)
+    try:
+        import asyncio as _asyncio
+        from aion.supabase_writer import write_audit_event as _write_audit
+        _asyncio.create_task(_write_audit(
+            tenant=tenant,
+            event_type=action,
+            actor=actor_id or "",
+            target=str(request.url.path),
+            outcome="ok",
+            event_hash=entry.get("entry_hash", ""),
+            prev_hash=prev_hash,
+            details={"method": request.method, "ip": entry["ip"], "details": details} if details else None,
+        ))
+    except Exception:
+        pass
+
 
 async def get_audit_log(limit: int = 100, tenant: Optional[str] = None) -> list[dict]:
     """Read audit log. Redis first, local fallback."""

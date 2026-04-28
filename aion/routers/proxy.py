@@ -201,6 +201,37 @@ async def _record_all_outcomes(context: PipelineContext, response, settings) -> 
             except Exception:
                 logger.debug("Budget record_spend failed (non-critical)", exc_info=True)
 
+        try:
+            from aion.supabase_writer import write_decision
+            pii_violations = context.metadata.get("pii_violations") or []
+            pii_count = len(pii_violations) if isinstance(pii_violations, list) else 0
+            await write_decision(
+                tenant=context.tenant,
+                request_id=context.request_id,
+                decision=decision,
+                model_used=model_name,
+                detected_intent=intent,
+                complexity_score=complexity,
+                risk_category=context.metadata.get("detected_risk_category", ""),
+                tokens_input=prompt_tokens,
+                tokens_output=completion_tokens,
+                cost_actual=actual_cost,
+                cost_default=default_cost,
+                cost_saved=max(0.0, default_cost - actual_cost),
+                pii_detected=pii_count > 0,
+                pii_count=pii_count,
+                latency_ms=llm_latency,
+                cache_hit=bool(context.metadata.get("cache_hit")),
+                safe_mode=bool(context.metadata.get("safe_mode")),
+                metadata={
+                    k: context.metadata[k]
+                    for k in ("route_reason", "decision_source", "risk_level")
+                    if k in context.metadata
+                } or None,
+            )
+        except Exception:
+            logger.debug("Supabase decision write failed (non-critical)", exc_info=True)
+
     except Exception:
         logger.debug("NEMOS outcome recording failed (non-critical)", exc_info=True)
 
