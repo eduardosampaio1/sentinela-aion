@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from aion import __version__
-from aion.config import get_settings
+from aion.config import FailMode, get_settings
 from aion.middleware import AionSecurityMiddleware
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import forward_request, forward_request_stream, shutdown_client
@@ -127,6 +127,15 @@ async def lifespan(app: FastAPI):
         for _p in _env_problems:
             logger.warning("  ⚠  %s", _p)
         logger.warning("=" * 72)
+
+        if settings.fail_mode == FailMode.CLOSED:
+            import sys
+            logger.critical(
+                "AION startup aborted: AION_FAIL_MODE=closed requires all security "
+                "settings to be configured. Fix the warnings above or set "
+                "AION_FAIL_MODE=open for development environments."
+            )
+            sys.exit(1)
     # ───────────────────────────────────────────────────────────────────────────
 
     from aion.license import validate_license_or_abort, LicenseState

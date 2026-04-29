@@ -29,6 +29,14 @@ _TENANT_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _ADMIN_EXACT = {"/v1/killswitch", "/v1/behavior", "/v1/overrides", "/v1/audit", "/v1/approvals", "/version"}
 _ADMIN_PREFIXES = ("/v1/estixe/", "/v1/modules/", "/v1/data/", "/v1/audit/", "/v1/calibration/", "/v1/budget/", "/v1/threats/", "/v1/reports/", "/v1/admin/", "/v1/approvals/", "/v1/collective/packs")
 
+# ── Chat + decision endpoints (auth guard + rate limit apply) ──
+_CHAT_ENDPOINTS: frozenset[str] = frozenset({
+    "/v1/chat/completions",
+    "/v1/decide",
+    "/v1/chat/assisted",
+    "/v1/decisions",
+})
+
 # ── Roles whose service key is trusted to forward actor identity headers ──
 # Only these roles can set X-Aion-Actor-* headers that drive RBAC.
 # Any other caller's actor headers are ignored for authorization purposes.
@@ -676,8 +684,8 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
 
             await audit(f"{request.method} {path}", request, tenant, details=f"effective_role={effective_role}")
 
-        # Auth + rate limit for chat endpoint
-        if path == "/v1/chat/completions":
+        # Auth + rate limit for chat and decision endpoints
+        if path in _CHAT_ENDPOINTS:
             # Optional auth for chat (enterprise mode)
             if settings.require_chat_auth:
                 admin_key_str = getattr(settings, "admin_key", "") or ""

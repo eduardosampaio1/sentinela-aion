@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from collections import OrderedDict
 from typing import Optional
 
@@ -26,6 +27,7 @@ class EmbeddingModel:
     def __init__(self) -> None:
         self._model = None
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._lock = threading.Lock()
         self._loaded = False
         self._load_failed = False  # True if load was attempted but failed
         self._model_name: str = ""
@@ -96,27 +98,31 @@ class EmbeddingModel:
         text_lower = text.strip().lower()
         cache_key = hashlib.sha256(text_lower.encode()).hexdigest()
 
-        # Cache hit
-        if use_cache and cache_key in self._cache:
-            self._cache.move_to_end(cache_key)
-            return self._cache[cache_key]
+        # Cache hit (lock held only for dict access — not for encoding)
+        if use_cache:
+            with self._lock:
+                if cache_key in self._cache:
+                    self._cache.move_to_end(cache_key)
+                    return self._cache[cache_key]
 
-        # Encode
+        # Encode (slow — outside lock)
         embedding = self._model.encode(
             [text_lower], convert_to_numpy=True, normalize_embeddings=normalize,
         )[0]
 
         # Cache store
         if use_cache:
-            self._cache[cache_key] = embedding
-            while len(self._cache) > _LRU_MAX_SIZE:
-                self._cache.popitem(last=False)
+            with self._lock:
+                self._cache[cache_key] = embedding
+                while len(self._cache) > _LRU_MAX_SIZE:
+                    self._cache.popitem(last=False)
 
         return embedding
 
     def clear_cache(self) -> None:
         """Clear the embedding cache."""
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
 
 # ── Singleton ──

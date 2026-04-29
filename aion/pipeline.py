@@ -28,6 +28,14 @@ logger = logging.getLogger("aion.pipeline")
 _BG_TASKS: set[asyncio.Task] = set()
 
 
+async def _guarded_bg(coro, *, timeout: float = 10.0) -> None:
+    """Wrap a fire-and-forget coroutine with a timeout to prevent indefinite hangs."""
+    try:
+        await asyncio.wait_for(coro, timeout=timeout)
+    except (asyncio.TimeoutError, Exception):
+        pass
+
+
 @runtime_checkable
 class Module(Protocol):
     """Interface that every AION module must implement."""
@@ -301,10 +309,12 @@ class Pipeline:
         # Tenant isolation enforcement: ensure no module changed the tenant
         if context.tenant != _tenant_for_run:
             logger.error(
-                "TENANT ISOLATION VIOLATION: module changed tenant from '%s' to '%s' — reverting",
+                "TENANT ISOLATION VIOLATION: module changed tenant from '%s' to '%s' — blocking request",
                 _tenant_for_run, context.tenant,
             )
             context.tenant = _tenant_for_run
+            context.decision = Decision.BLOCK
+            context.metadata["block_reason"] = "tenant_isolation_violation"
 
         # ── Multi-turn context + session audit: save current turn (fire-and-forget) ──
         if settings.multi_turn_context and context.session_id:
@@ -336,7 +346,7 @@ class Pipeline:
                     session_id=context.session_id, tenant=context.tenant
                 )
                 turn_ctx.add_turn(turn)
-                _t1 = asyncio.create_task(get_turn_context_store().save(context.tenant, turn_ctx))
+                _t1 = asyncio.create_task(_guarded_bg(get_turn_context_store().save(context.tenant, turn_ctx)))
                 _BG_TASKS.add(_t1)
                 _t1.add_done_callback(_BG_TASKS.discard)
 
@@ -362,9 +372,9 @@ class Pipeline:
                     tokens_received=0,  # populated post-LLM if available
                     latency_ms=sum(context.module_latencies.values()),
                 )
-                _t2 = asyncio.create_task(
+                _t2 = asyncio.create_task(_guarded_bg(
                     get_session_audit_store().append_turn(context.tenant, context.session_id, audit_entry)
-                )
+                ))
                 _BG_TASKS.add(_t2)
                 _t2.add_done_callback(_BG_TASKS.discard)
             except Exception:
@@ -380,11 +390,11 @@ class Pipeline:
                 complexity = context.nomos_result.complexity_score if context.nomos_result else 0.0
                 decision = context.decision.value if context.decision else "continue"
                 from aion.nemos.global_model import get_global_contributor
-                _t3 = asyncio.create_task(
+                _t3 = asyncio.create_task(_guarded_bg(
                     get_global_contributor().record(
                         context.tenant, intent_cat, risk_tier, complexity, decision
                     )
-                )
+                ))
                 _BG_TASKS.add(_t3)
                 _t3.add_done_callback(_BG_TASKS.discard)
             except Exception:
