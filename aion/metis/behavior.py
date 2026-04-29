@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from aion.config import get_metis_settings
 from aion.shared.schemas import ChatCompletionRequest, ChatMessage
 
 logger = logging.getLogger("aion.metis.behavior")
 
-# In-memory fallback (used when Redis unavailable)
-_behavior_store: dict[str, "BehaviorConfig"] = {}
+# In-memory fallback (used when Redis unavailable) — bounded LRU by tenant
+# Max entries read from MetisSettings.behavior_store_max_entries at call time
+_behavior_store: OrderedDict[str, "BehaviorConfig"] = OrderedDict()
 _redis_client = None
 _redis_available = False
 
@@ -61,7 +64,7 @@ class BehaviorDial:
     """Manages behavior settings per tenant. Redis with local fallback."""
 
     _REDIS_PREFIX = "aion:behavior:"
-    _REDIS_TTL = 86400 * 7  # 7 days
+    # TTL read from MetisSettings.behavior_redis_ttl_seconds
 
     async def get(self, tenant: str = "default") -> Optional[BehaviorConfig]:
         r = await _get_redis()
@@ -77,15 +80,19 @@ class BehaviorDial:
         return _behavior_store.get(tenant)
 
     async def set(self, config: BehaviorConfig, tenant: str = "default") -> None:
-        # Always write to local (fallback)
+        ms = get_metis_settings()
+        # Always write to local (fallback) — maintain LRU order and size bound
         _behavior_store[tenant] = config
+        _behavior_store.move_to_end(tenant)
+        while len(_behavior_store) > ms.behavior_store_max_entries:
+            _behavior_store.popitem(last=False)
 
         r = await _get_redis()
         if r:
             try:
                 await r.setex(
                     f"{self._REDIS_PREFIX}{tenant}",
-                    self._REDIS_TTL,
+                    ms.behavior_redis_ttl_seconds,
                     json.dumps(config.model_dump()),
                 )
             except Exception:

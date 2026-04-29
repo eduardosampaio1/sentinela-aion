@@ -88,32 +88,39 @@ class TestCircuitBreaker:
     """Test the circuit breaker in proxy."""
 
     def test_circuit_breaker_opens_after_threshold(self):
+        import asyncio
         from aion.proxy import _record_failure, _check_circuit_breaker, _cb_failures, _cb_open_until
 
         provider = "test-provider"
         _cb_failures[provider] = 0
         _cb_open_until[provider] = 0
 
-        # Fail 5 times
-        for _ in range(5):
-            _record_failure(provider)
+        async def _run():
+            for _ in range(5):
+                await _record_failure(provider)
+            return await _check_circuit_breaker(provider)
 
-        # Circuit should be open
-        assert _check_circuit_breaker(provider) is True
+        result = asyncio.run(_run())
+        assert result is True
 
         # Cleanup
         _cb_failures.pop(provider, None)
         _cb_open_until.pop(provider, None)
 
     def test_circuit_breaker_closed_when_healthy(self):
+        import asyncio
         from aion.proxy import _record_success, _check_circuit_breaker, _cb_failures, _cb_open_until
 
         provider = "test-healthy"
         _cb_failures[provider] = 0
         _cb_open_until[provider] = 0
 
-        _record_success(provider)
-        assert _check_circuit_breaker(provider) is False
+        async def _run():
+            await _record_success(provider)
+            return await _check_circuit_breaker(provider)
+
+        result = asyncio.run(_run())
+        assert result is False
 
         # Cleanup
         _cb_failures.pop(provider, None)

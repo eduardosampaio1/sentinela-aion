@@ -28,6 +28,18 @@ logger = logging.getLogger("aion.pipeline")
 _BG_TASKS: set[asyncio.Task] = set()
 
 
+async def _guarded_bg(coro, *, timeout: float | None = None) -> None:
+    """Wrap a fire-and-forget coroutine with a timeout to prevent indefinite hangs."""
+    if timeout is None:
+        timeout = get_settings().bg_task_timeout_seconds
+    try:
+        await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.debug("_guarded_bg: coroutine timed out after %.1fs", timeout)
+    except Exception:
+        logger.debug("_guarded_bg: coroutine raised exception (swallowed)", exc_info=True)
+
+
 @runtime_checkable
 class Module(Protocol):
     """Interface that every AION module must implement."""
@@ -48,8 +60,9 @@ class ModuleStatus:
         self.name = name
         self.healthy = True
         self.consecutive_failures = 0
-        self.failure_threshold = 3  # degrade after N consecutive failures
         self.last_failure_reason: str = ""
+        # threshold is intentionally NOT cached here — read dynamically so that
+        # changes to AION_MODULE_FAILURE_THRESHOLD take effect without restart
 
     def record_success(self) -> None:
         self.consecutive_failures = 0
@@ -62,7 +75,8 @@ class ModuleStatus:
     def record_failure(self, reason: str) -> None:
         self.consecutive_failures += 1
         self.last_failure_reason = reason
-        if self.consecutive_failures >= self.failure_threshold and self.healthy:
+        threshold = get_settings().module_failure_threshold
+        if self.consecutive_failures >= threshold and self.healthy:
             self.healthy = False
             logger.warning(
                 '{"event":"module_degraded","module":"%s","failures":%d,"reason":"%s"}',
@@ -298,13 +312,20 @@ class Pipeline:
                 elapsed_ms = (time.perf_counter() - t0) * 1000
                 context.module_latencies[module.name] = round(elapsed_ms, 2)
 
-        # Tenant isolation enforcement: ensure no module changed the tenant
-        if context.tenant != _tenant_for_run:
-            logger.error(
-                "TENANT ISOLATION VIOLATION: module changed tenant from '%s' to '%s' — reverting",
-                _tenant_for_run, context.tenant,
-            )
-            context.tenant = _tenant_for_run
+            # Per-module tenant isolation check — stops subsequent modules from running
+            # with a compromised tenant value if a module attempted injection.
+            if context.tenant != _tenant_for_run:
+                logger.error(
+                    "TENANT ISOLATION VIOLATION: module '%s' changed tenant from '%s' to '%s' — blocking request",
+                    module.name, _tenant_for_run, context.tenant,
+                )
+                context.tenant = _tenant_for_run
+                context.decision = Decision.BLOCK
+                context.metadata["block_reason"] = "tenant_isolation_violation"
+                context.metadata["violating_module"] = module.name
+                break
+
+        # Note: tenant isolation is enforced per-module inside the loop above.
 
         # ── Multi-turn context + session audit: save current turn (fire-and-forget) ──
         if settings.multi_turn_context and context.session_id:
@@ -336,7 +357,7 @@ class Pipeline:
                     session_id=context.session_id, tenant=context.tenant
                 )
                 turn_ctx.add_turn(turn)
-                _t1 = asyncio.create_task(get_turn_context_store().save(context.tenant, turn_ctx))
+                _t1 = asyncio.create_task(_guarded_bg(get_turn_context_store().save(context.tenant, turn_ctx)))
                 _BG_TASKS.add(_t1)
                 _t1.add_done_callback(_BG_TASKS.discard)
 
@@ -362,9 +383,9 @@ class Pipeline:
                     tokens_received=0,  # populated post-LLM if available
                     latency_ms=sum(context.module_latencies.values()),
                 )
-                _t2 = asyncio.create_task(
+                _t2 = asyncio.create_task(_guarded_bg(
                     get_session_audit_store().append_turn(context.tenant, context.session_id, audit_entry)
-                )
+                ))
                 _BG_TASKS.add(_t2)
                 _t2.add_done_callback(_BG_TASKS.discard)
             except Exception:
@@ -380,11 +401,11 @@ class Pipeline:
                 complexity = context.nomos_result.complexity_score if context.nomos_result else 0.0
                 decision = context.decision.value if context.decision else "continue"
                 from aion.nemos.global_model import get_global_contributor
-                _t3 = asyncio.create_task(
+                _t3 = asyncio.create_task(_guarded_bg(
                     get_global_contributor().record(
                         context.tenant, intent_cat, risk_tier, complexity, decision
                     )
-                )
+                ))
                 _BG_TASKS.add(_t3)
                 _t3.add_done_callback(_BG_TASKS.discard)
             except Exception:

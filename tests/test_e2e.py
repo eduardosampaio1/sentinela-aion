@@ -126,10 +126,9 @@ class TestE2EAPI:
             yield c
 
     @pytest.fixture
-    async def admin_client(self):
+    async def admin_client(self, monkeypatch):
         """Client with AION_ADMIN_KEY configured for tests that hit destructive admin endpoints."""
-        import os
-        os.environ["AION_ADMIN_KEY"] = "test-e2e-admin:admin"
+        monkeypatch.setenv("AION_ADMIN_KEY", "test-e2e-admin:admin")
         import aion.config
         aion.config._settings = None
         import aion.middleware
@@ -144,7 +143,6 @@ class TestE2EAPI:
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
 
-        os.environ.pop("AION_ADMIN_KEY", None)
         aion.config._settings = None
 
     @pytest.mark.asyncio
@@ -194,7 +192,7 @@ class TestE2EAPI:
         assert isinstance(resp.json(), list)
 
     @pytest.mark.asyncio
-    async def test_module_toggle(self, client):
+    async def test_module_toggle(self, admin_client):
         """Feature flag: toggle module on/off at runtime."""
         import aion.main as main_mod
         # Ensure pipeline has modules registered
@@ -202,12 +200,24 @@ class TestE2EAPI:
             main_mod._pipeline.register_pre(TrackingModule("test_module"))
 
         module_name = list(main_mod._pipeline._module_status.keys())[0]
-        resp = await client.put(f"/v1/modules/{module_name}/toggle", json={"enabled": False})
+        _admin_headers = {
+            "Authorization": "Bearer test-e2e-admin",
+            "X-Aion-Actor-Reason": "e2e module toggle test",
+        }
+        resp = await admin_client.put(
+            f"/v1/modules/{module_name}/toggle",
+            json={"enabled": False},
+            headers=_admin_headers,
+        )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
 
         # Re-enable
-        resp = await client.put(f"/v1/modules/{module_name}/toggle", json={"enabled": True})
+        resp = await admin_client.put(
+            f"/v1/modules/{module_name}/toggle",
+            json={"enabled": True},
+            headers=_admin_headers,
+        )
         assert resp.json()["enabled"] is True
 
     @pytest.mark.asyncio

@@ -104,7 +104,7 @@ async def toggle_module(module_name: str, request: Request):
     enabled = body.get("enabled", not status.healthy)
     status.healthy = enabled
     if not enabled:
-        status.consecutive_failures = status.failure_threshold
+        status.consecutive_failures = get_settings().module_failure_threshold
     else:
         status.consecutive_failures = 0
 

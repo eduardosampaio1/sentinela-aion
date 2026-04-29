@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from aion import __version__
-from aion.config import get_settings
+from aion.config import FailMode, get_settings
 from aion.middleware import AionSecurityMiddleware
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import forward_request, forward_request_stream, shutdown_client
@@ -116,6 +116,12 @@ async def lifespan(app: FastAPI):
             "AION_ADMIN_KEY is not set — all admin/control-plane endpoints are "
             "unauthenticated. Set AION_ADMIN_KEY=yourkey:admin before production."
         )
+    if settings.require_chat_auth and not settings.admin_key:
+        _env_problems.append(
+            "AION_REQUIRE_CHAT_AUTH=true but AION_ADMIN_KEY is not set — "
+            "chat endpoints are configured to require auth but no keys exist to validate against. "
+            "Requests will pass unauthenticated. Set AION_ADMIN_KEY or disable AION_REQUIRE_CHAT_AUTH."
+        )
     if not os.environ.get("AION_SESSION_AUDIT_SECRET"):
         _env_problems.append(
             "AION_SESSION_AUDIT_SECRET is not set — audit trail HMAC signatures are "
@@ -127,6 +133,15 @@ async def lifespan(app: FastAPI):
         for _p in _env_problems:
             logger.warning("  ⚠  %s", _p)
         logger.warning("=" * 72)
+
+        if settings.fail_mode == FailMode.CLOSED:
+            import sys
+            logger.critical(
+                "AION startup aborted: AION_FAIL_MODE=closed requires all security "
+                "settings to be configured. Fix the warnings above or set "
+                "AION_FAIL_MODE=open for development environments."
+            )
+            sys.exit(1)
     # ───────────────────────────────────────────────────────────────────────────
 
     from aion.license import validate_license_or_abort, LicenseState

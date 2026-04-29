@@ -375,7 +375,8 @@ class TestEntitlementEngine:
         EntitlementEngine.apply(pipeline, state)
 
         nomos_status = pipeline._module_status["nomos"]
-        assert nomos_status.consecutive_failures >= nomos_status.failure_threshold
+        from aion.config import get_settings
+        assert nomos_status.consecutive_failures >= get_settings().module_failure_threshold
 
     def test_restore_active_zeroes_failure_count(self):
         from aion.trust_guard.entitlement_engine import EntitlementEngine

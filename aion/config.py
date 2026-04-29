@@ -96,6 +96,15 @@ class AionSettings(BaseSettings):
     # --- Data residency ---
     data_residency: str = ""  # e.g. "BR" (Brazil), "EU", "US" — informational for compliance
 
+    # --- Runtime limits ---
+    max_in_flight: int = 500                # max concurrent requests
+    max_rate_limit_keys: int = 50_000       # max tenants tracked in local rate limit store
+    rate_limit_window_seconds: int = 60     # sliding window width for rate limiting
+    max_chain_tips: int = 10_000            # max audit chain tips kept in memory
+    max_payload_bytes: int = 1_048_576      # 1 MB — request body size limit
+    module_failure_threshold: int = 3       # consecutive failures before degrading a module
+    bg_task_timeout_seconds: float = 10.0   # timeout for fire-and-forget background coroutines
+
     # --- Data retention ---
     telemetry_retention_hours: int = 168  # 7 days default
 
@@ -132,6 +141,7 @@ class EstixeSettings(BaseSettings):
     # no threshold original (rigoroso) — output eh mais tolerante por design.
     output_threshold_boost: float = 0.06
     embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_lru_cache_size: int = 5000    # max entries in the per-process embedding LRU cache
     max_tokens_per_request: int = 4096
     intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
     cache_embeddings: bool = True
@@ -229,6 +239,37 @@ class MetisSettings(BaseSettings):
     compression_enabled: bool = True
     max_history_turns: int = 10
     rewrite_level: str = "off"  # off | light | moderate
+    behavior_store_max_entries: int = 1_000     # bounded LRU size for behavior dial store
+    behavior_redis_ttl_seconds: int = 604_800   # 7 days
+    turn_context_max_turns: int = 3             # sliding window size for multi-turn context
+    turn_context_ttl_seconds: int = 600         # 10 min — abandoned sessions expire naturally
+
+
+class ProxySettings(BaseSettings):
+    """Settings for the LLM proxy — HTTP client, circuit breaker, and retry."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AION_PROXY_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # httpx client
+    http_connect_timeout: float = 10.0
+    http_read_timeout: float = 120.0
+    http_write_timeout: float = 10.0
+    http_pool_timeout: float = 10.0
+    http_max_connections: int = 100
+    http_max_keepalive_connections: int = 20
+
+    # Circuit breaker Redis client
+    cb_redis_socket_timeout: float = 0.5
+
+    # Retry / exponential backoff
+    max_retries: int = 3
+    retry_base_delay: float = 1.0   # seconds
+    retry_max_delay: float = 10.0   # seconds
 
 
 class TrustGuardSettings(BaseSettings):
@@ -273,6 +314,7 @@ _estixe_settings: Optional[EstixeSettings] = None
 _nomos_settings: Optional[NomosSettings] = None
 _metis_settings: Optional[MetisSettings] = None
 _cache_settings: Optional[CacheSettings] = None
+_proxy_settings: Optional[ProxySettings] = None
 _trust_guard_settings: Optional[TrustGuardSettings] = None
 
 
@@ -309,6 +351,13 @@ def get_cache_settings() -> CacheSettings:
     if _cache_settings is None:
         _cache_settings = CacheSettings()
     return _cache_settings
+
+
+def get_proxy_settings() -> ProxySettings:
+    global _proxy_settings
+    if _proxy_settings is None:
+        _proxy_settings = ProxySettings()
+    return _proxy_settings
 
 
 def get_trust_guard_settings() -> TrustGuardSettings:

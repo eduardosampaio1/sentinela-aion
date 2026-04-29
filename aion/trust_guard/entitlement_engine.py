@@ -18,6 +18,7 @@ Behavior per state:
 from __future__ import annotations
 
 import logging
+from aion.config import get_settings
 from enum import Enum
 
 logger = logging.getLogger("aion.trust_guard")
@@ -127,7 +128,7 @@ class EntitlementEngine:
                 return  # module not registered or not enabled
             status.healthy = healthy
             if not healthy:
-                status.consecutive_failures = status.failure_threshold
+                status.consecutive_failures = get_settings().module_failure_threshold
             else:
                 status.consecutive_failures = 0
 
