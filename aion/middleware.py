@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from collections import OrderedDict, deque
@@ -128,9 +129,13 @@ _redis_client = None
 _redis_available = False
 
 # ── Local fallback store (always available) ──
-_local_rate_limits: dict[str, list[float]] = {}
+_local_rate_limits: dict[str, deque] = {}  # key → deque of timestamps
+_MAX_RATE_LIMIT_KEYS = 50_000  # evict oldest-inserted when exceeded
 _local_audit_log: deque[dict] = deque(maxlen=10_000)
 _local_overrides: dict[str, dict] = {}  # tenant → overrides
+
+# ── Audit background tasks (strong refs prevent GC before Supabase write) ──
+_AUDIT_BG_TASKS: set = set()
 
 
 # ── File-based persistence fallback (when no Redis) ──
@@ -244,15 +249,24 @@ def _mark_redis_failure():
 # ════════════════════════════════════════════
 
 def _local_check_rate_limit(key: str, limit: int) -> bool:
-    """Local fallback rate limit (single-instance only)."""
+    """Local fallback rate limit. Uses deque for O(1) expiry removal."""
     now = time.time()
     window_start = now - 60
-    if key not in _local_rate_limits:
-        _local_rate_limits[key] = []
-    _local_rate_limits[key] = [t for t in _local_rate_limits[key] if t > window_start]
-    if len(_local_rate_limits[key]) >= limit:
+    dq = _local_rate_limits.get(key)
+    if dq is None:
+        if len(_local_rate_limits) >= _MAX_RATE_LIMIT_KEYS:
+            # Evict 5% of oldest-inserted keys to bound memory usage
+            to_evict = list(_local_rate_limits.keys())[:max(1, _MAX_RATE_LIMIT_KEYS // 20)]
+            for k in to_evict:
+                del _local_rate_limits[k]
+        dq = deque()
+        _local_rate_limits[key] = dq
+    # Remove expired timestamps from the left (oldest first)
+    while dq and dq[0] <= window_start:
+        dq.popleft()
+    if len(dq) >= limit:
         return False
-    _local_rate_limits[key].append(now)
+    dq.append(now)
     return True
 
 
@@ -292,12 +306,18 @@ async def _check_rate_limit(key: str, limit: int) -> bool:
 # ════════════════════════════════════════════
 
 # In-process chain tips per tenant (authoritative within one replica).
-_chain_tips: dict[str, str] = {}
+# Bounded to prevent unbounded growth in multi-tenant deployments.
+_chain_tips: OrderedDict[str, str] = OrderedDict()
+_MAX_CHAIN_TIPS = 10_000
 
 
 def _hash_entry(entry: dict) -> str:
     import hashlib
+    import hmac as _hmac
     serialized = json.dumps({k: v for k, v in entry.items() if k != "entry_hash"}, sort_keys=True, default=str)
+    secret = os.environ.get("AION_SESSION_AUDIT_SECRET", "")
+    if secret:
+        return _hmac.new(secret.encode(), serialized.encode(), hashlib.sha256).hexdigest()
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
@@ -340,6 +360,9 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
     }
     entry["entry_hash"] = _hash_entry(entry)
     _chain_tips[tenant] = entry["entry_hash"]
+    _chain_tips.move_to_end(tenant)
+    while len(_chain_tips) > _MAX_CHAIN_TIPS:
+        _chain_tips.popitem(last=False)
 
     # Always write to local buffer (fallback + fast read)
     _local_audit_log.append(entry)
@@ -360,11 +383,11 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         request.method, request.url.path, entry["ip"], tenant, actor_info,
     )
 
-    # Supabase audit trail (fire-and-forget)
+    # Supabase audit trail (fire-and-forget with GC protection)
     try:
         import asyncio as _asyncio
         from aion.supabase_writer import write_audit_event as _write_audit
-        _asyncio.create_task(_write_audit(
+        _audit_task = _asyncio.create_task(_write_audit(
             tenant=tenant,
             event_type=action,
             actor=actor_id or "",
@@ -374,6 +397,8 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
             prev_hash=prev_hash,
             details={"method": request.method, "ip": entry["ip"], "details": details} if details else None,
         ))
+        _AUDIT_BG_TASKS.add(_audit_task)
+        _audit_task.add_done_callback(_AUDIT_BG_TASKS.discard)
     except Exception:
         pass
 

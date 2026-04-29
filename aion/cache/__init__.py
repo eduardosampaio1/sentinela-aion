@@ -12,6 +12,7 @@ Design principles:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -61,6 +62,8 @@ class SemanticCache:
         self._stats = CacheStats()
         # Track followup signals per cache entry: entry_id -> {count, last_similarity}
         self._followup_tracker: dict[str, dict[str, Any]] = {}
+        # Protects _stats and _followup_tracker — both accessed from asyncio.to_thread()
+        self._lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -92,7 +95,8 @@ class SemanticCache:
 
         user_message = extract_user_message(request)
         if not user_message:
-            self._stats.misses += 1
+            with self._lock:
+                self._stats.misses += 1
             return None
 
         try:
@@ -100,7 +104,8 @@ class SemanticCache:
             store = mgr.get_store(f"cache:{context.tenant}")
 
             if store.count == 0:
-                self._stats.misses += 1
+                with self._lock:
+                    self._stats.misses += 1
                 return None
 
             query_embedding = model.encode_single(user_message, normalize=True)
@@ -111,7 +116,8 @@ class SemanticCache:
             )
 
             if not results:
-                self._stats.misses += 1
+                with self._lock:
+                    self._stats.misses += 1
                 return None
 
             hit = results[0]
@@ -124,13 +130,15 @@ class SemanticCache:
             if age > ttl:
                 # Expired — remove and miss
                 store.remove(hit.id)
-                self._stats.misses += 1
-                self._stats.evictions += 1
+                with self._lock:
+                    self._stats.misses += 1
+                    self._stats.evictions += 1
                 return None
 
             # Build response from cache
             response = self._build_response(metadata, request.model)
-            self._stats.hits += 1
+            with self._lock:
+                self._stats.hits += 1
 
             logger.info(
                 '{"event":"cache_hit","tenant":"%s","score":%.3f,"entry_id":"%s","age_s":%.0f}',
@@ -140,7 +148,8 @@ class SemanticCache:
 
         except Exception:
             logger.warning("Cache lookup failed — treating as miss", exc_info=True)
-            self._stats.misses += 1
+            with self._lock:
+                self._stats.misses += 1
             return None
 
     def store(
@@ -204,33 +213,36 @@ class SemanticCache:
         - followup + low similarity to cached response → invalidate
         """
         key = f"{tenant}:{previous_entry_id}"
-        if key not in self._followup_tracker:
-            self._followup_tracker[key] = {"count": 0, "low_similarity": False}
-
-        tracker = self._followup_tracker[key]
-        tracker["count"] += 1
-
-        if followup_similarity < 0.3:
-            tracker["low_similarity"] = True
-
-        # Multi-signal check
         should_invalidate = False
         reason = ""
 
-        if tracker["count"] >= self._settings.followup_threshold:
-            should_invalidate = True
-            reason = f"followup_count={tracker['count']}"
-        elif tracker["count"] >= 1 and tracker["low_similarity"]:
-            should_invalidate = True
-            reason = f"followup+low_similarity"
+        with self._lock:
+            if key not in self._followup_tracker:
+                self._followup_tracker[key] = {"count": 0, "low_similarity": False}
 
+            tracker = self._followup_tracker[key]
+            tracker["count"] += 1
+            if followup_similarity < 0.3:
+                tracker["low_similarity"] = True
+
+            if tracker["count"] >= self._settings.followup_threshold:
+                should_invalidate = True
+                reason = f"followup_count={tracker['count']}"
+            elif tracker["count"] >= 1 and tracker["low_similarity"]:
+                should_invalidate = True
+                reason = "followup+low_similarity"
+
+            if should_invalidate:
+                del self._followup_tracker[key]
+
+        # Vector store removal outside lock (I/O operation)
         if should_invalidate:
             try:
                 mgr = get_vector_store_manager()
                 store = mgr.get_store(f"cache:{tenant}")
                 store.remove(previous_entry_id)
-                del self._followup_tracker[key]
-                self._stats.invalidations += 1
+                with self._lock:
+                    self._stats.invalidations += 1
                 logger.info(
                     '{"event":"cache_invalidated","tenant":"%s","entry":"%s","reason":"%s"}',
                     tenant, previous_entry_id, reason,
@@ -242,11 +254,11 @@ class SemanticCache:
         """Delete all cache data for a tenant (LGPD)."""
         mgr = get_vector_store_manager()
         mgr.delete_tenant(f"cache:{tenant}")
-        # Clean followup tracker
         prefix = f"{tenant}:"
-        keys_to_remove = [k for k in self._followup_tracker if k.startswith(prefix)]
-        for k in keys_to_remove:
-            del self._followup_tracker[k]
+        with self._lock:
+            keys_to_remove = [k for k in self._followup_tracker if k.startswith(prefix)]
+            for k in keys_to_remove:
+                del self._followup_tracker[k]
 
     def _resolve_ttl(self, context: PipelineContext) -> int:
         """Determine cache TTL based on detected intent."""
@@ -288,10 +300,13 @@ class SemanticCache:
 # ── Singleton ──
 
 _instance: Optional[SemanticCache] = None
+_instance_lock = threading.Lock()
 
 
 def get_cache() -> SemanticCache:
     global _instance
     if _instance is None:
-        _instance = SemanticCache()
+        with _instance_lock:
+            if _instance is None:
+                _instance = SemanticCache()
     return _instance

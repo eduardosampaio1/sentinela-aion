@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -15,8 +16,9 @@ from aion.shared.schemas import ChatCompletionRequest, ChatMessage
 
 logger = logging.getLogger("aion.metis.behavior")
 
-# In-memory fallback (used when Redis unavailable)
-_behavior_store: dict[str, "BehaviorConfig"] = {}
+# In-memory fallback (used when Redis unavailable) — bounded LRU by tenant
+_MAX_BEHAVIOR_ENTRIES = 1_000
+_behavior_store: OrderedDict[str, "BehaviorConfig"] = OrderedDict()
 _redis_client = None
 _redis_available = False
 
@@ -77,8 +79,11 @@ class BehaviorDial:
         return _behavior_store.get(tenant)
 
     async def set(self, config: BehaviorConfig, tenant: str = "default") -> None:
-        # Always write to local (fallback)
+        # Always write to local (fallback) — maintain LRU order and size bound
         _behavior_store[tenant] = config
+        _behavior_store.move_to_end(tenant)
+        while len(_behavior_store) > _MAX_BEHAVIOR_ENTRIES:
+            _behavior_store.popitem(last=False)
 
         r = await _get_redis()
         if r:
