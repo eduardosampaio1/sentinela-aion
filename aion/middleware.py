@@ -6,11 +6,14 @@ Follows the same pattern as aion/metis/behavior.py.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
 import os
 import re
 import time
+import types
 from collections import OrderedDict, deque
 from typing import Any, Optional
 
@@ -99,27 +102,59 @@ _PATH_PERMISSIONS: list[tuple[str, str, str]] = [
 
 # ── Permissions that require auth even when AION_ADMIN_KEY is not configured ──
 # Fail-secure: destructive operations block unless a key is explicitly set.
-_CRITICAL_PERMISSIONS = {"killswitch:write", "data:delete"}
+_CRITICAL_PERMISSIONS = {
+    "killswitch:write",
+    "data:delete",
+    "overrides:write",
+    "behavior:write",
+    "modules:write",
+    "estixe:reload",
+    "calibration:promote",
+    "budget:write",
+    "approvals:resolve",
+    "keys:rotate",
+    "collective:install",
+}
+
+# ── Valid role values — defined before _parse_key_roles to avoid forward-reference risk ──
+_VALID_ROLES: frozenset[str] = frozenset(r.value for r in Role)
 
 # ── API key → role mapping (loaded from config) ──
 # Format in env: AION_ADMIN_KEY=key1:admin,key2:operator,key3:viewer
-def _parse_key_roles(admin_key_str: str) -> dict[str, str]:
+@functools.lru_cache(maxsize=64)
+def _parse_key_roles(admin_key_str: str) -> types.MappingProxyType:
     """Parse 'key1:admin,key2:operator' into {key1: admin, key2: operator}.
-    Keys without role default to 'admin' for backward compat."""
+    Returns an immutable MappingProxyType so callers cannot mutate the cached value.
+    Keys without explicit role default to admin for backward compat (deprecated — use key:role form)."""
     result = {}
     for part in admin_key_str.split(","):
         part = part.strip()
         if not part:
             continue
         if ":" in part:
-            key, role = part.rsplit(":", 1)
-            result[key.strip()] = role.strip()
+            key_raw, role = part.rsplit(":", 1)
+            key_str = key_raw.strip()
+            if not key_str:
+                logger.warning("AION_ADMIN_KEY: skipping entry with empty key (e.g. ':role') — check your key configuration")
+                continue
+            role_str = role.strip()
+            if role_str in _VALID_ROLES:
+                result[key_str] = Role(role_str)
+            else:
+                logger.warning(
+                    "AION_ADMIN_KEY: key '%.8s...' has unknown role %r — defaulting to viewer (least privilege). "
+                    "Valid roles: %s",
+                    key_str, role_str, ", ".join(sorted(_VALID_ROLES)),
+                )
+                result[key_str] = Role.VIEWER  # fail-secure: unknown role → least privilege
         else:
-            result[part] = Role.ADMIN  # backward compat
-    return result
-
-# ── Limits (defaults, overridable via AionSettings) ──
-_MAX_IN_FLIGHT = 500
+            logger.warning(
+                "AION_ADMIN_KEY: key '%.8s...' has no role suffix — defaulting to admin (deprecated). "
+                "Use 'key:role' format, e.g. '%s:admin'.",
+                part, part,
+            )
+            result[part] = Role.ADMIN  # backward compat: key without role = legacy admin key
+    return types.MappingProxyType(result)
 
 # ── In-flight counter ──
 _requests_in_flight = 0
@@ -129,8 +164,11 @@ _redis_client = None
 _redis_available = False
 
 # ── Local fallback store (always available) ──
+# NOTE: _local_rate_limits is process-local. In multi-worker deployments (gunicorn/uvicorn
+# with multiple workers), each worker enforces its own limit independently. For distributed
+# enforcement, configure REDIS_URL so the Redis sliding-window path is used instead.
 _local_rate_limits: dict[str, deque] = {}  # key → deque of timestamps
-_MAX_RATE_LIMIT_KEYS = 50_000  # evict oldest-inserted when exceeded
+# _MAX_RATE_LIMIT_KEYS and _MAX_IN_FLIGHT read from AionSettings at call time
 _local_audit_log: deque[dict] = deque(maxlen=10_000)
 _local_overrides: dict[str, dict] = {}  # tenant → overrides
 
@@ -183,6 +221,7 @@ def _load_overrides_from_disk() -> None:
 # _redis_retry_interval segundos. Evita timeout em cada call quando Redis cai.
 _redis_last_failure: float = 0.0
 _redis_retry_interval: float = 10.0  # segundos entre retries quando down
+_redis_lock: asyncio.Lock = asyncio.Lock()
 
 
 async def _get_redis():
@@ -192,42 +231,49 @@ async def _get_redis():
     """
     global _redis_client, _redis_available, _redis_last_failure
 
-    # Circuit breaker: se falhou recentemente, skip
+    # Circuit breaker: se falhou recentemente, skip (fast path, no lock needed)
     if _redis_last_failure > 0 and (time.time() - _redis_last_failure) < _redis_retry_interval:
         return None
 
     if _redis_client is not None and _redis_available:
         return _redis_client
 
-    settings = get_settings()
-    if not settings.redis_url:
-        _redis_available = False
-        return None
+    async with _redis_lock:
+        # Re-check under lock: another coroutine may have connected while we waited
+        if _redis_last_failure > 0 and (time.time() - _redis_last_failure) < _redis_retry_interval:
+            return None
+        if _redis_client is not None and _redis_available:
+            return _redis_client
 
-    try:
-        import redis.asyncio as aioredis
-        _redis_client = aioredis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_timeout=1.0,      # Agressivo: falhar rápido
-            socket_connect_timeout=1.0,
-        )
-        await _redis_client.ping()
-        _redis_available = True
-        _redis_last_failure = 0.0
-        logger.info("Middleware store: Redis connected")
-        return _redis_client
-    except Exception as e:
-        _redis_available = False
-        _redis_last_failure = time.time()
-        if _redis_client is not None:
-            try:
-                await _redis_client.aclose()
-            except Exception:
-                pass
-            _redis_client = None
-        logger.warning("Middleware store: Redis down (%s) — fallback local por %.0fs", type(e).__name__, _redis_retry_interval)
-        return None
+        settings = get_settings()
+        if not settings.redis_url:
+            _redis_available = False
+            return None
+
+        try:
+            import redis.asyncio as aioredis
+            _redis_client = aioredis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=1.0,      # Agressivo: falhar rápido
+                socket_connect_timeout=1.0,
+            )
+            await _redis_client.ping()
+            _redis_available = True
+            _redis_last_failure = 0.0
+            logger.info("Middleware store: Redis connected")
+            return _redis_client
+        except Exception as e:
+            _redis_available = False
+            _redis_last_failure = time.time()
+            if _redis_client is not None:
+                try:
+                    await _redis_client.aclose()
+                except Exception:
+                    pass
+                _redis_client = None
+            logger.warning("Middleware store: Redis down (%s) — fallback local por %.0fs", type(e).__name__, _redis_retry_interval)
+            return None
 
 
 def _mark_redis_failure():
@@ -250,13 +296,15 @@ def _mark_redis_failure():
 
 def _local_check_rate_limit(key: str, limit: int) -> bool:
     """Local fallback rate limit. Uses deque for O(1) expiry removal."""
+    s = get_settings()
     now = time.time()
-    window_start = now - 60
+    window_start = now - s.rate_limit_window_seconds
+    max_keys = s.max_rate_limit_keys
     dq = _local_rate_limits.get(key)
     if dq is None:
-        if len(_local_rate_limits) >= _MAX_RATE_LIMIT_KEYS:
+        if len(_local_rate_limits) >= max_keys:
             # Evict 5% of oldest-inserted keys to bound memory usage
-            to_evict = list(_local_rate_limits.keys())[:max(1, _MAX_RATE_LIMIT_KEYS // 20)]
+            to_evict = list(_local_rate_limits.keys())[:max(1, max_keys // 20)]
             for k in to_evict:
                 del _local_rate_limits[k]
         dq = deque()
@@ -308,7 +356,7 @@ async def _check_rate_limit(key: str, limit: int) -> bool:
 # In-process chain tips per tenant (authoritative within one replica).
 # Bounded to prevent unbounded growth in multi-tenant deployments.
 _chain_tips: OrderedDict[str, str] = OrderedDict()
-_MAX_CHAIN_TIPS = 10_000
+# _MAX_CHAIN_TIPS read from AionSettings.max_chain_tips at call time
 
 
 def _hash_entry(entry: dict) -> str:
@@ -321,6 +369,30 @@ def _hash_entry(entry: dict) -> str:
     return hashlib.sha256(serialized.encode()).hexdigest()
 
 
+async def _get_chain_tip_redis(tenant: str) -> Optional[str]:
+    """Recover an evicted chain tip from Redis.
+
+    Called only when the tenant is absent from the in-memory _chain_tips OrderedDict.
+    Allows the audit chain to continue unbroken even after in-memory eviction.
+    Returns None when Redis is unavailable or the key does not exist (genuinely new tenant).
+    """
+    try:
+        r = await _get_redis()
+        if r:
+            return await r.get(f"aion:audit:tip:{tenant}")
+    except Exception:
+        logger.debug("Chain tip Redis read failed for tenant '%s'", tenant, exc_info=True)
+    return None
+
+
+async def _guarded_audit_write(coro) -> None:
+    """Wrap a Supabase audit write with a timeout — same pattern as pipeline._guarded_bg."""
+    try:
+        await asyncio.wait_for(coro, timeout=get_settings().bg_task_timeout_seconds)
+    except Exception:
+        logger.debug("Audit Supabase write timed out or failed", exc_info=True)
+
+
 async def audit(action: str, request: Request, tenant: str, details: str = "") -> None:
     """Record audit event with hash chaining. Redis + local buffer.
 
@@ -331,7 +403,14 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
     comes from a trusted console proxy (request.state.trusted_proxy = True).
     Direct API callers cannot spoof these headers.
     """
-    prev_hash = _chain_tips.get(tenant, "0" * 64)
+    # In-memory first; fall back to Redis for evicted tips; genesis only when truly new.
+    prev_hash = _chain_tips.get(tenant)
+    chain_reset = False
+    if prev_hash is None:
+        prev_hash = await _get_chain_tip_redis(tenant)
+        if prev_hash is None:
+            prev_hash = "0" * 64
+            chain_reset = True  # genuinely new tenant — not an eviction gap
 
     # Actor headers are only trusted from console_proxy sources.
     # The middleware sets request.state.trusted_proxy before calling audit().
@@ -357,23 +436,27 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         "auth_source": auth_source if (trusted_source and auth_source) else None,
         "actor_reason": actor_reason if actor_reason else None,
         "actor_headers_trusted": trusted_source,
+        "chain_reset": chain_reset,  # True only for genuinely new tenants — helps SOC auditors
     }
     entry["entry_hash"] = _hash_entry(entry)
     _chain_tips[tenant] = entry["entry_hash"]
     _chain_tips.move_to_end(tenant)
-    while len(_chain_tips) > _MAX_CHAIN_TIPS:
+    max_tips = get_settings().max_chain_tips
+    while len(_chain_tips) > max_tips:
         _chain_tips.popitem(last=False)
 
     # Always write to local buffer (fallback + fast read)
     _local_audit_log.append(entry)
 
-    # Try Redis
+    # Try Redis: write log entry + persist chain tip (30-day TTL covers eviction window)
     r = await _get_redis()
     if r:
         redis_key = f"aion:audit:{tenant}"
+        tip_key = f"aion:audit:tip:{tenant}"
         try:
             await r.lpush(redis_key, json.dumps(entry, default=str))
             await r.ltrim(redis_key, 0, 9999)
+            await r.setex(tip_key, 86400 * 30, entry["entry_hash"])
         except Exception:
             logger.warning("Redis audit write failed")
 
@@ -383,11 +466,10 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
         request.method, request.url.path, entry["ip"], tenant, actor_info,
     )
 
-    # Supabase audit trail (fire-and-forget with GC protection)
+    # Supabase audit trail (fire-and-forget, timeout-guarded, with GC protection)
     try:
-        import asyncio as _asyncio
         from aion.supabase_writer import write_audit_event as _write_audit
-        _audit_task = _asyncio.create_task(_write_audit(
+        _audit_coro = _write_audit(
             tenant=tenant,
             event_type=action,
             actor=actor_id or "",
@@ -396,7 +478,8 @@ async def audit(action: str, request: Request, tenant: str, details: str = "") -
             event_hash=entry.get("entry_hash", ""),
             prev_hash=prev_hash,
             details={"method": request.method, "ip": entry["ip"], "details": details} if details else None,
-        ))
+        )
+        _audit_task = asyncio.create_task(_guarded_audit_write(_audit_coro))
         _AUDIT_BG_TASKS.add(_audit_task)
         _audit_task.add_done_callback(_AUDIT_BG_TASKS.discard)
     except Exception:
@@ -580,7 +663,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # In-flight limit
-        if _requests_in_flight >= _MAX_IN_FLIGHT:
+        if _requests_in_flight >= settings.max_in_flight:
             return JSONResponse(
                 status_code=503,
                 content={"error": {"message": "Server at capacity", "type": "capacity_exceeded", "code": "capacity_exceeded"}},
@@ -628,7 +711,8 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
 
             if admin_key_str:
                 auth_header = request.headers.get("Authorization", "")
-                provided_key = auth_header.removeprefix("Bearer ").strip()
+                _parts = auth_header.split(None, 1)
+                provided_key = _parts[1].strip() if len(_parts) == 2 and _parts[0].lower() == "bearer" else ""
 
                 key_roles = _parse_key_roles(admin_key_str)
                 if provided_key not in key_roles:
@@ -646,10 +730,10 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                 if service_role in _TRUSTED_PROXY_ROLES:
                     request.state.trusted_proxy = True
                     actor_role_hdr = request.headers.get("X-Aion-Actor-Role", "").strip()
-                    if actor_role_hdr:
+                    if actor_role_hdr and actor_role_hdr in _VALID_ROLES:
                         effective_role = actor_role_hdr
                     else:
-                        # Console proxy without SSO context — safe default for reads
+                        # Console proxy without SSO context, or unknown role — safe default for reads
                         effective_role = Role.VIEWER
                 else:
                     # Traditional service key: use key's own role for RBAC
@@ -739,7 +823,7 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
         content_length = request.headers.get("content-length")
         if content_length:
             try:
-                if int(content_length) > 1_048_576:
+                if int(content_length) > settings.max_payload_bytes:
                     return JSONResponse(
                         status_code=413,
                         content={"error": {"message": "Payload too large (max 1MB)", "type": "invalid_request", "code": "payload_too_large"}},

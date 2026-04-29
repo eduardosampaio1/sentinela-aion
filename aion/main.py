@@ -116,6 +116,12 @@ async def lifespan(app: FastAPI):
             "AION_ADMIN_KEY is not set — all admin/control-plane endpoints are "
             "unauthenticated. Set AION_ADMIN_KEY=yourkey:admin before production."
         )
+    if settings.require_chat_auth and not settings.admin_key:
+        _env_problems.append(
+            "AION_REQUIRE_CHAT_AUTH=true but AION_ADMIN_KEY is not set — "
+            "chat endpoints are configured to require auth but no keys exist to validate against. "
+            "Requests will pass unauthenticated. Set AION_ADMIN_KEY or disable AION_REQUIRE_CHAT_AUTH."
+        )
     if not os.environ.get("AION_SESSION_AUDIT_SECRET"):
         _env_problems.append(
             "AION_SESSION_AUDIT_SECRET is not set — audit trail HMAC signatures are "

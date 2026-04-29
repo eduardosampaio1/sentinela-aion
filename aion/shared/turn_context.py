@@ -18,13 +18,13 @@ from typing import Optional, TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from aion.config import get_metis_settings
+
 if TYPE_CHECKING:
     from aion.shared.schemas import ChatCompletionRequest
 
 logger = logging.getLogger("aion.turn_context")
-
-_MAX_TURNS = 3
-_TTL_SECONDS = 600  # 10 min — conversa abandonada expira naturalmente
+# _MAX_TURNS and _TTL_SECONDS read from MetisSettings at call time
 
 
 class TurnSummary(BaseModel):
@@ -46,9 +46,10 @@ class TurnContext(BaseModel):
     last_updated: float = 0.0
 
     def add_turn(self, turn: TurnSummary) -> None:
+        max_turns = get_metis_settings().turn_context_max_turns
         self.turns.append(turn)
-        if len(self.turns) > _MAX_TURNS:
-            self.turns = self.turns[-_MAX_TURNS:]
+        if len(self.turns) > max_turns:
+            self.turns = self.turns[-max_turns:]
         self.last_updated = time.time()
 
     @property
@@ -126,7 +127,7 @@ class TurnContextStore:
             return
         try:
             key = f"aion:session_ctx:{tenant}:{ctx.session_id}"
-            await r.setex(key, _TTL_SECONDS, ctx.model_dump_json())
+            await r.setex(key, get_metis_settings().turn_context_ttl_seconds, ctx.model_dump_json())
         except Exception:
             logger.debug("TurnContextStore.save failed (non-critical)", exc_info=True)
 

@@ -9,18 +9,27 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+_APPROVAL_TEST_KEY = "approval-test-admin"
+
 @pytest.fixture
 def client(monkeypatch):
+    import os
     from unittest.mock import MagicMock
     from aion.license import LicenseState
     mock_lic = MagicMock()
     mock_lic.state = LicenseState.ACTIVE
     monkeypatch.setattr("aion.license.validate_license_or_abort", lambda: mock_lic)
+    monkeypatch.setenv("AION_ADMIN_KEY", f"{_APPROVAL_TEST_KEY}:admin")
     from aion import config as cfg
     cfg._settings = None
     from aion.main import app
-    with TestClient(app, raise_server_exceptions=False) as c:
+    with TestClient(
+        app,
+        raise_server_exceptions=False,
+        headers={"Authorization": f"Bearer {_APPROVAL_TEST_KEY}"},
+    ) as c:
         yield c
+    cfg._settings = None
 
 
 @pytest.fixture
@@ -79,9 +88,14 @@ class TestApprovalEndpoints:
     @pytest.mark.asyncio
     async def test_resolve_approve(self, client: TestClient, approval_in_nemos):
         approval_id = await approval_in_nemos()
+        _resolve_headers = {
+            "Authorization": f"Bearer {_APPROVAL_TEST_KEY}",
+            "X-Aion-Actor-Reason": "test approval resolution",
+        }
         resp = client.post(
             f"/v1/approvals/{approval_id}/resolve",
             json={"status": "approved", "approver": "alice"},
+            headers=_resolve_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -100,6 +114,10 @@ class TestApprovalEndpoints:
         resp = client.post(
             f"/v1/approvals/{approval_id}/resolve",
             json={"status": "denied", "approver": "bob"},
+            headers={
+                "Authorization": f"Bearer {_APPROVAL_TEST_KEY}",
+                "X-Aion-Actor-Reason": "test denial",
+            },
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "denied"
@@ -110,19 +128,29 @@ class TestApprovalEndpoints:
         resp = client.post(
             f"/v1/approvals/{approval_id}/resolve",
             json={"status": "maybe", "approver": "x"},
+            headers={
+                "Authorization": f"Bearer {_APPROVAL_TEST_KEY}",
+                "X-Aion-Actor-Reason": "test invalid status",
+            },
         )
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
     async def test_resolve_twice_fails(self, client: TestClient, approval_in_nemos):
         approval_id = await approval_in_nemos()
+        _resolve_headers = {
+            "Authorization": f"Bearer {_APPROVAL_TEST_KEY}",
+            "X-Aion-Actor-Reason": "test double resolve",
+        }
         client.post(
             f"/v1/approvals/{approval_id}/resolve",
             json={"status": "approved", "approver": "alice"},
+            headers=_resolve_headers,
         )
         resp2 = client.post(
             f"/v1/approvals/{approval_id}/resolve",
             json={"status": "denied", "approver": "bob"},
+            headers=_resolve_headers,
         )
         assert resp2.status_code == 409  # already resolved
 

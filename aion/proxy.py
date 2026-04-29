@@ -16,6 +16,7 @@ from typing import AsyncIterator, Optional
 
 import httpx
 
+from aion.config import get_proxy_settings, get_settings
 from aion.shared.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -34,18 +35,19 @@ _PROVIDER_URLS = {
 
 # Shared httpx client for connection pooling
 _client: Optional[httpx.AsyncClient] = None
-_client_lock: Optional[asyncio.Lock] = None
+# Lock created at module load — safe in Python 3.10+ (no running event loop required)
+_client_lock: asyncio.Lock = asyncio.Lock()
 
 # ── Circuit breaker state (local + Redis-backed for cross-instance awareness) ──
 _cb_failures: dict[str, int] = {}  # provider → consecutive failures
 _cb_open_until: dict[str, float] = {}  # provider → timestamp when breaker closes
-_CB_THRESHOLD = 5
-_CB_RECOVERY_SECONDS = 30
 _CB_REDIS_PREFIX = "aion:cb:"
+# CB threshold/recovery read from AionSettings (circuit_breaker_threshold / circuit_breaker_recovery_seconds)
 
 # Redis for circuit breaker state (lazy init, separate from middleware Redis)
 _cb_redis_client = None
 _cb_redis_available = False
+_cb_redis_lock: asyncio.Lock = asyncio.Lock()
 
 
 async def _get_cb_redis():
@@ -53,33 +55,43 @@ async def _get_cb_redis():
     global _cb_redis_client, _cb_redis_available
     if _cb_redis_client is not None and _cb_redis_available:
         return _cb_redis_client
-    redis_url = os.environ.get("REDIS_URL")
+    redis_url = get_settings().redis_url
     if not redis_url:
         return None
-    try:
-        import redis.asyncio as aioredis
-        _cb_redis_client = aioredis.from_url(redis_url, decode_responses=True, socket_timeout=0.5)
-        await _cb_redis_client.ping()
-        _cb_redis_available = True
-        return _cb_redis_client
-    except Exception:
-        _cb_redis_available = False
-        _cb_redis_client = None
-        return None
+    async with _cb_redis_lock:
+        if _cb_redis_client is not None and _cb_redis_available:
+            return _cb_redis_client
+        try:
+            import redis.asyncio as aioredis
+            _cb_redis_client = aioredis.from_url(redis_url, decode_responses=True, socket_timeout=get_proxy_settings().cb_redis_socket_timeout)
+            await _cb_redis_client.ping()
+            _cb_redis_available = True
+            return _cb_redis_client
+        except Exception:
+            _cb_redis_available = False
+            _cb_redis_client = None
+            return None
 
 
 async def _get_client() -> httpx.AsyncClient:
     """Return shared httpx client. Creates it once under an asyncio lock."""
-    global _client, _client_lock
+    global _client
     if _client is not None:
         return _client
-    if _client_lock is None:
-        _client_lock = asyncio.Lock()
     async with _client_lock:
         if _client is None:
+            ps = get_proxy_settings()
             _client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0),
-                limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+                timeout=httpx.Timeout(
+                    connect=ps.http_connect_timeout,
+                    read=ps.http_read_timeout,
+                    write=ps.http_write_timeout,
+                    pool=ps.http_pool_timeout,
+                ),
+                limits=httpx.Limits(
+                    max_connections=ps.http_max_connections,
+                    max_keepalive_connections=ps.http_max_keepalive_connections,
+                ),
             )
     return _client
 
@@ -131,19 +143,20 @@ async def _record_success(provider: str) -> None:
 
 
 async def _record_failure(provider: str) -> None:
+    s = get_settings()
     _cb_failures[provider] = _cb_failures.get(provider, 0) + 1
-    if _cb_failures[provider] >= _CB_THRESHOLD:
-        _cb_open_until[provider] = time.time() + _CB_RECOVERY_SECONDS
+    if _cb_failures[provider] >= s.circuit_breaker_threshold:
+        _cb_open_until[provider] = time.time() + s.circuit_breaker_recovery_seconds
         logger.warning(
             "Circuit breaker OPEN for provider '%s' — %d failures, recovery in %ds",
-            provider, _cb_failures[provider], _CB_RECOVERY_SECONDS,
+            provider, _cb_failures[provider], s.circuit_breaker_recovery_seconds,
         )
         try:
             r = await _get_cb_redis()
             if r:
                 await r.setex(
                     f"{_CB_REDIS_PREFIX}{provider}:open_until",
-                    int(_CB_RECOVERY_SECONDS * 2),
+                    int(s.circuit_breaker_recovery_seconds * 2),
                     str(_cb_open_until[provider]),
                 )
         except Exception:
@@ -258,10 +271,7 @@ def _get_chat_url(base_url: str, provider: str) -> str:
 
 
 # ── Retry with exponential backoff ──
-
-_MAX_RETRIES = 3
-_RETRY_BASE_DELAY = 1.0  # seconds
-_RETRY_MAX_DELAY = 10.0
+# Max retries / delays read from ProxySettings (max_retries / retry_base_delay / retry_max_delay)
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -271,7 +281,6 @@ async def forward_request(
     settings,
 ) -> ChatCompletionResponse:
     """Forward request to LLM with circuit breaker and retry."""
-    from aion.config import get_settings
     s = settings or get_settings()
 
     provider = context.selected_provider or s.default_provider
@@ -292,16 +301,19 @@ async def forward_request(
     headers = _build_headers(provider, api_key)
     client = await _get_client()
 
-    last_error = None
-    for attempt in range(_MAX_RETRIES):
+    ps = get_proxy_settings()
+    last_resp: Optional[httpx.Response] = None
+    for attempt in range(ps.max_retries):
+        resp: Optional[httpx.Response] = None
         try:
             resp = await client.post(url, json=payload, headers=headers)
+            last_resp = resp
 
-            if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES - 1:
-                delay = min(_RETRY_BASE_DELAY * (2 ** attempt), _RETRY_MAX_DELAY)
+            if resp.status_code in _RETRYABLE_STATUS and attempt < ps.max_retries - 1:
+                delay = min(ps.retry_base_delay * (2 ** attempt), ps.retry_max_delay)
                 logger.warning(
                     "Retryable error %d from %s, attempt %d/%d, waiting %.1fs",
-                    resp.status_code, provider, attempt + 1, _MAX_RETRIES, delay,
+                    resp.status_code, provider, attempt + 1, ps.max_retries, delay,
                 )
                 await asyncio.sleep(delay)
                 continue
@@ -316,19 +328,22 @@ async def forward_request(
             return ChatCompletionResponse(**data)
 
         except httpx.HTTPStatusError:
-            last_error = resp
-            if resp.status_code not in _RETRYABLE_STATUS:
+            if resp is None or resp.status_code not in _RETRYABLE_STATUS:
                 await _record_failure(provider)
                 raise
-        except Exception as exc:
+            # retryable status on last attempt — fall through to post-loop handler
+        except Exception:
             await _record_failure(provider)
             raise
 
-    # All retries exhausted
+    # All retries exhausted with retryable errors — surface the real upstream response
     await _record_failure(provider)
-    if last_error:
-        last_error.raise_for_status()
-    raise httpx.HTTPStatusError("All retries exhausted", request=httpx.Request("POST", url), response=httpx.Response(502))
+    if last_resp is None:
+        raise RuntimeError("forward_request: all retries exhausted but no response was captured")
+    last_resp.raise_for_status()
+    # raise_for_status() always raises here (all _RETRYABLE_STATUS codes are >=400)
+    raise RuntimeError("forward_request: unreachable — raise_for_status did not raise")
+
 
 
 async def forward_request_stream(
@@ -337,7 +352,6 @@ async def forward_request_stream(
     settings,
 ) -> AsyncIterator[str]:
     """Forward request to LLM and yield SSE chunks (with circuit breaker)."""
-    from aion.config import get_settings
     s = settings or get_settings()
 
     provider = context.selected_provider or s.default_provider

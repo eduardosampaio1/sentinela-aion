@@ -17,8 +17,7 @@ import numpy as np
 from aion.config import get_estixe_settings
 
 logger = logging.getLogger("aion.shared.embeddings")
-
-_LRU_MAX_SIZE = 5000
+# LRU cache size read from EstixeSettings.embedding_lru_cache_size at call time
 
 
 class EmbeddingModel:
@@ -114,7 +113,7 @@ class EmbeddingModel:
         if use_cache:
             with self._lock:
                 self._cache[cache_key] = embedding
-                while len(self._cache) > _LRU_MAX_SIZE:
+                while len(self._cache) > get_estixe_settings().embedding_lru_cache_size:
                     self._cache.popitem(last=False)
 
         return embedding
