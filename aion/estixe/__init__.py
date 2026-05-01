@@ -150,6 +150,13 @@ class EstixeModule:
         # Invalida decision cache: taxonomy/intents mudaram, decisões cacheadas
         # podem estar stale (mesma query agora daria decisão diferente).
         self._decision_cache.invalidate_all()
+        # F-22: invalidate the contract-builder YAML version cache so the next
+        # contract reflects the new intents/policies versions in `provenance`.
+        try:
+            from aion.contract import clear_provenance_cache
+            clear_provenance_cache()
+        except Exception:
+            pass
         logger.info(
             "ESTIXE reloaded: intents=%d examples=%d | risk_categories=%d seeds=%d | decision_cache cleared",
             self._classifier.intent_count,

@@ -3,7 +3,7 @@
 AION padroniza a decisao, nao a execucao.
 """
 
-from aion.contract.builder import build_contract
+from aion.contract.builder import build_contract, clear_provenance_cache
 from aion.contract.capabilities import Capabilities, CapabilityState
 from aion.contract.decision import (
     Action,
@@ -14,6 +14,7 @@ from aion.contract.decision import (
     DecisionContract,
     ExtensionEntry,
     FinalOutput,
+    RequestProvenance,
     RetryPolicy,
     SideEffectLevel,
     default_retry_policy,
@@ -25,6 +26,7 @@ from aion.contract.idempotency import CachedResult, IdempotencyCache, get_idempo
 
 __all__ = [
     "build_contract",
+    "clear_provenance_cache",
     "Action",
     "Capabilities",
     "CapabilityState",
@@ -39,6 +41,7 @@ __all__ = [
     "ExtensionEntry",
     "FinalOutput",
     "IdempotencyCache",
+    "RequestProvenance",
     "RetryPolicy",
     "SideEffectLevel",
     "default_retry_policy",

@@ -2,10 +2,16 @@
 
 Events are stored locally (bounded deque) and optionally forwarded to ARGOS async.
 Business signals are tracked as counters for Prometheus export.
+
+F-06: user message text is NEVER persisted in raw form. The `input` field of an
+event is always a sanitized dict (`_sanitize_input`), never the original string.
+This is a hard product promise ("nothing leaves the customer's environment except
+metadata"); the binary must guarantee it regardless of operator configuration.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -89,6 +95,42 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in metadata.items() if k in _SAFE_METADATA_KEYS}
 
 
+# F-06: input must be one of these dict keys, never raw text.
+# Schema bumped to "1.1" so downstream consumers can detect the new shape.
+_SANITIZED_INPUT_VERSION = "1.1"
+
+
+def _sanitize_input(text: str) -> dict[str, Any]:
+    """Reduce a user message to non-recoverable metadata.
+
+    The output is intentionally lossy: a full SHA-256 hash (for cross-event
+    correlation / dedup) plus length and an ASCII-printable preview prefix
+    (first 8 chars, which is unlikely to contain a complete piece of PII —
+    e.g. "Olá, tu" reveals nothing operationally useful but lets engineers
+    tell apart "user said hi" from "user pasted a 500-char prompt").
+
+    NEVER include the full raw text. NEVER include the last 8 chars (those
+    are more likely to contain identifiers like "@example.com" tails).
+    """
+    if not text:
+        return {
+            "schema": _SANITIZED_INPUT_VERSION,
+            "length": 0,
+            "hash": None,
+            "preview": "",
+        }
+    raw = str(text)
+    digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+    # 8-char preview from the start, ASCII-only, no control chars.
+    preview = "".join(ch for ch in raw[:8] if ch.isprintable() and ord(ch) < 128)
+    return {
+        "schema": _SANITIZED_INPUT_VERSION,
+        "length": len(raw),
+        "hash": digest,
+        "preview": preview,
+    }
+
+
 def _get_argos_client() -> httpx.AsyncClient:
     global _argos_client
     if _argos_client is None:
@@ -125,7 +167,7 @@ class TelemetryEvent:
         metadata: Optional[dict[str, Any]] = None,
     ):
         self.data = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",  # bumped for F-06 sanitized-input shape
             "event_type": event_type,
             "module": module,
             "request_id": request_id,
@@ -136,7 +178,11 @@ class TelemetryEvent:
             "latency_ms": latency_ms,
             "response_time_ms": round(latency_ms),   # alias para o console
             "tenant": tenant,
-            "input": input_text,                      # texto da mensagem do usuário
+            # F-06: never store raw user text. `input` is a small dict with
+            # length/hash/preview only — the original text is unrecoverable
+            # from telemetry, so /v1/events, /v1/explain, and ARGOS forward
+            # never leak prompt content.
+            "input": _sanitize_input(input_text),
             "timestamp": time.time(),
             "metadata": _sanitize_metadata(metadata) if metadata else {},
         }
@@ -148,6 +194,14 @@ async def emit(event: TelemetryEvent) -> None:
     Com Redis disponível, também grava em lista Redis compartilhada entre replicas
     (aion:events) com TTL. Permite /v1/events retornar eventos de QUALQUER replica,
     não só do processo local.
+
+    F-07: cost_saved_total e tokens_saved_total são persistidos em Redis
+    (`aion:counters:global`) com TTL longa para sobreviver a restarts e
+    apresentar métricas históricas duráveis em /v1/economics e dashboards.
+
+    F-10: cada evento também é gravado em `aion:explain:{request_id}` (TTL
+    = telemetry_retention_hours) para que /v1/explain consiga reconstruir
+    decisões muito além do buffer in-memory.
     """
     # Annotate com replica_id para visibilidade
     import os
@@ -186,6 +240,19 @@ async def emit(event: TelemetryEvent) -> None:
 
     # Cross-replica: grava em lista Redis compartilhada (fire-and-forget)
     await _redis_emit(event.data)
+
+    # F-07: persist durable counters (fire-and-forget; counter survives restarts).
+    # F-10: persist per-request explain payload (fire-and-forget; TTL bounded).
+    await _redis_persist_counters_delta(
+        requests=1,
+        bypass=1 if decision == "bypass" else 0,
+        block=1 if decision == "block" else 0,
+        passthrough=1 if decision not in ("bypass", "block") else 0,
+        tokens_saved=tokens_saved if tokens_saved > 0 else 0,
+        cost_saved=cost_saved if cost_saved > 0 else 0.0,
+        fallback=1 if event.data.get("metadata", {}).get("failed_modules") else 0,
+    )
+    await _redis_persist_explain(event.data)
 
     # Forward to ARGOS (async, non-blocking, reusing client)
     settings = get_settings()
@@ -252,6 +319,149 @@ async def _redis_emit(event_data: dict) -> None:
     except Exception as e:
         _mark_events_redis_failure()
         logger.debug("Redis event write failed: %s", e)
+
+
+# ── F-07: durable counters (Redis-backed, surviving restarts) ────────────────
+_COUNTERS_REDIS_KEY = "aion:counters:global"
+_COUNTERS_TTL_SECONDS = 30 * 86400  # 30 days
+_counters_loaded_from_redis = False
+
+
+async def _redis_persist_counters_delta(
+    *,
+    requests: int = 0,
+    bypass: int = 0,
+    block: int = 0,
+    passthrough: int = 0,
+    fallback: int = 0,
+    tokens_saved: int = 0,
+    cost_saved: float = 0.0,
+) -> None:
+    """Increment durable counters in Redis. Fire-and-forget, no-op if Redis down.
+
+    Cost is stored as integer micro-USD (×1_000_000) to use HINCRBY atomically.
+    Reader divides back. Avoids floating-point drift across many small deltas.
+    """
+    r = await _get_events_redis()
+    if r is None:
+        return
+    try:
+        pipe = r.pipeline()
+        if requests:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "requests_total", requests)
+        if bypass:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "bypass_total", bypass)
+        if block:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "block_total", block)
+        if passthrough:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "passthrough_total", passthrough)
+        if fallback:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "fallback_total", fallback)
+        if tokens_saved:
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "tokens_saved_total", tokens_saved)
+        if cost_saved > 0:
+            # store cost in micro-USD (×1e6) for atomic integer ops
+            pipe.hincrby(_COUNTERS_REDIS_KEY, "cost_saved_micro_usd", int(round(cost_saved * 1_000_000)))
+        pipe.expire(_COUNTERS_REDIS_KEY, _COUNTERS_TTL_SECONDS)
+        await pipe.execute()
+    except Exception as e:
+        _mark_events_redis_failure()
+        logger.debug("Redis counter persist failed: %s", e)
+
+
+async def load_persistent_counters() -> bool:
+    """Restore counters from Redis at boot. Idempotent; only loads once.
+
+    Called from main.lifespan after Redis comes online. If Redis is missing
+    or empty, in-memory counters keep their (zero) defaults.
+    Returns True if state was loaded, False otherwise.
+    """
+    global _counters_loaded_from_redis, _cost_saved_total
+    if _counters_loaded_from_redis:
+        return False
+    r = await _get_events_redis()
+    if r is None:
+        return False
+    try:
+        raw = await r.hgetall(_COUNTERS_REDIS_KEY)
+        if not raw:
+            _counters_loaded_from_redis = True
+            return False
+        for k in ("requests_total", "bypass_total", "block_total", "passthrough_total",
+                  "fallback_total", "tokens_saved_total"):
+            if k in raw:
+                try:
+                    _counters[k] = int(raw[k])
+                except (TypeError, ValueError):
+                    pass
+        if "cost_saved_micro_usd" in raw:
+            try:
+                _cost_saved_total = int(raw["cost_saved_micro_usd"]) / 1_000_000
+            except (TypeError, ValueError):
+                pass
+        _counters_loaded_from_redis = True
+        logger.info(
+            "Telemetry counters restored from Redis: requests=%d bypass=%d block=%d cost_saved=$%.4f",
+            _counters.get("requests_total", 0),
+            _counters.get("bypass_total", 0),
+            _counters.get("block_total", 0),
+            _cost_saved_total,
+        )
+        return True
+    except Exception as e:
+        logger.debug("Redis counter load failed: %s", e)
+        return False
+
+
+# ── F-10: durable explain store (per-request payload with TTL) ───────────────
+_EXPLAIN_KEY_PREFIX = "aion:explain:"
+
+
+async def _redis_persist_explain(event_data: dict) -> None:
+    """Store the event payload under aion:explain:{request_id} for /v1/explain.
+
+    TTL = settings.telemetry_retention_hours (default 168h = 7 days). Operators
+    can extend this via env for longer audit retention.
+    """
+    request_id = event_data.get("request_id")
+    if not request_id:
+        return
+    r = await _get_events_redis()
+    if r is None:
+        return
+    try:
+        settings = get_settings()
+        ttl_seconds = max(60, int(getattr(settings, "telemetry_retention_hours", 168)) * 3600)
+        key = f"{_EXPLAIN_KEY_PREFIX}{request_id}"
+        await r.set(key, json.dumps(event_data, default=str), ex=ttl_seconds)
+    except Exception as e:
+        _mark_events_redis_failure()
+        logger.debug("Redis explain persist failed: %s", e)
+
+
+async def lookup_explain(request_id: str, tenant: Optional[str] = None) -> Optional[dict]:
+    """Find a single request's explain payload from durable Redis store.
+
+    Falls back to None if Redis is unavailable or the key is gone (TTL expired).
+    Caller (/v1/explain) should also check the in-memory buffer as final fallback.
+    """
+    if not request_id:
+        return None
+    r = await _get_events_redis()
+    if r is None:
+        return None
+    try:
+        raw = await r.get(f"{_EXPLAIN_KEY_PREFIX}{request_id}")
+        if not raw:
+            return None
+        ev = json.loads(raw)
+        if tenant and ev.get("tenant") != tenant:
+            return None
+        return ev
+    except Exception as e:
+        _mark_events_redis_failure()
+        logger.debug("Redis explain lookup failed: %s", e)
+        return None
 
 
 async def get_recent_events_redis(limit: int = 100, tenant: Optional[str] = None) -> list[dict]:

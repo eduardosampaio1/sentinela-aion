@@ -19,6 +19,38 @@ class FailMode(str, Enum):
     CLOSED = "closed"
 
 
+class Profile(str, Enum):
+    """Deployment profile — gates fail-secure behavior at boot.
+
+    development: warnings only on missing security settings (current legacy behavior).
+    staging: warnings + boot logs critical, but does not abort.
+    production: missing security settings ABORT boot. No fallbacks for license public key.
+    """
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
+
+
+# Modes that promise "AION never calls the LLM" (Decision-Only family).
+# F-37: when settings.mode ∈ this set, /v1/chat/completions and /v1/chat/assisted
+# must return 403, and any LLM credential in env must abort the boot in PRODUCTION
+# (warn in DEVELOPMENT/STAGING).
+DECISION_ONLY_MODES: frozenset[str] = frozenset({"poc_decision", "decision_only"})
+
+
+# Env vars that, if set when settings.mode ∈ DECISION_ONLY_MODES, indicate
+# the operator may have configured the deployment incorrectly (Decision-Only
+# is supposed to NEVER receive LLM credentials).
+LLM_CREDENTIAL_ENV_VARS: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AION_DEFAULT_API_KEY",
+    "AION_DEFAULT_BASE_URL",
+)
+
+
 class AionSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AION_",
@@ -32,6 +64,12 @@ class AionSettings(BaseSettings):
     fail_mode: FailMode = FailMode.OPEN
     log_level: str = "info"
     safe_mode: bool = False  # Kill switch: bypass all modules, pure passthrough
+
+    # --- Deployment profile (F-03/F-04/F-12/F-37 boot gates) ---
+    # development (default): legacy behavior — warnings on missing security settings.
+    # staging: log critical but do not abort.
+    # production: missing security settings ABORT boot (sys.exit). No license public-key fallback.
+    profile: Profile = Profile.DEVELOPMENT
 
     # --- Module toggles ---
     estixe_enabled: bool = True
@@ -104,6 +142,14 @@ class AionSettings(BaseSettings):
     max_payload_bytes: int = 1_048_576      # 1 MB — request body size limit
     module_failure_threshold: int = 3       # consecutive failures before degrading a module
     bg_task_timeout_seconds: float = 10.0   # timeout for fire-and-forget background coroutines
+
+    # F-15: streaming buffer caps. Streaming uses buffer-accumulate-flush so the
+    # output guard can inspect the full LLM response before flushing to the
+    # client. Without these caps, a runaway upstream (1M+ tokens) blows up the
+    # process memory before the timeout fires. Both limits are checked per
+    # chunk; whichever trips first aborts the stream with a structured error.
+    stream_max_buffered_chunks: int = 50_000        # ~hard ceiling on number of SSE chunks
+    stream_max_buffered_bytes: int = 16 * 1024 * 1024  # 16 MiB total accumulated bytes
 
     # --- Data retention ---
     telemetry_retention_hours: int = 168  # 7 days default

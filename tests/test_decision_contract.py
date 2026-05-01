@@ -202,7 +202,8 @@ class TestDecisionContract:
             action=Action.BYPASS,
             meta=self._minimal_meta(),
         )
-        assert c.contract_version == "1.0"
+        # contract_version bumped to 1.1 in F-22 (added `provenance` field).
+        assert c.contract_version == "1.1"
         assert c.side_effect_level == SideEffectLevel.NONE  # derived from BYPASS
 
     def test_side_effect_derived_from_action(self):

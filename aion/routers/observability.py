@@ -423,10 +423,35 @@ async def tenant_recommendations(tenant_id: str):
 
 @router.get("/v1/explain/{request_id}", tags=["Observability"])
 async def explain_decision(request_id: str, request: Request):
-    """Explainability — full trace of what AION decided for a specific request."""
+    """Explainability — full trace of what AION decided for a specific request.
+
+    F-10: prioriza store durável (Redis com TTL = telemetry_retention_hours).
+    Fallback para buffer in-memory só quando Redis indisponível ou chave expirou.
+    """
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
 
+    # 1. Durable store (Redis): sobrevive a restarts e cobre janela de retention.
+    from aion.shared.telemetry import lookup_explain
+    durable = await lookup_explain(request_id, tenant=tenant)
+    if durable is not None:
+        return {
+            "request_id": request_id,
+            "tenant": tenant,
+            "found": True,
+            "source": "durable",
+            "decision": durable.get("decision"),
+            "model_used": durable.get("model_used"),
+            "module": durable.get("module"),
+            "tokens_saved": durable.get("tokens_saved", 0),
+            "cost_saved": durable.get("cost_saved", 0.0),
+            "latency_ms": durable.get("latency_ms", 0.0),
+            "metadata": durable.get("metadata", {}),
+            "input_summary": durable.get("input"),  # F-06 sanitized dict, never raw text
+            "timestamp": durable.get("timestamp"),
+        }
+
+    # 2. Fallback: in-memory buffer (current process only, last ~10k events).
     events = get_recent_events(limit=1000, tenant=tenant)
     for event in events:
         if event.get("request_id") == request_id:
@@ -434,6 +459,7 @@ async def explain_decision(request_id: str, request: Request):
                 "request_id": request_id,
                 "tenant": tenant,
                 "found": True,
+                "source": "memory",
                 "decision": event.get("decision"),
                 "model_used": event.get("model_used"),
                 "module": event.get("module"),
@@ -441,7 +467,16 @@ async def explain_decision(request_id: str, request: Request):
                 "cost_saved": event.get("cost_saved", 0.0),
                 "latency_ms": event.get("latency_ms", 0.0),
                 "metadata": event.get("metadata", {}),
+                "input_summary": event.get("input"),
                 "timestamp": event.get("timestamp"),
             }
 
-    return {"request_id": request_id, "found": False, "message": "Request not found in recent events"}
+    return {
+        "request_id": request_id,
+        "found": False,
+        "message": (
+            "Request not found in durable store or recent events. "
+            "If you expect this request to be auditable, ensure REDIS_URL is configured "
+            "and AION_TELEMETRY_RETENTION_HOURS covers the lookback window."
+        ),
+    }

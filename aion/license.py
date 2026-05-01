@@ -32,14 +32,25 @@ _ALGORITHM = "EdDSA"
 # ── Grace period ───────────────────────────────────────────────────────────────
 _GRACE_SECONDS = 7 * 24 * 3600  # 7 days
 
-# ── Public key (embedded) ──────────────────────────────────────────────────────
-# Generated with tools/generate_keys.py. Replace with production key before shipping.
-# The matching private key is in tools/keys/private.pem (never commit to git).
+# ── Public key (embedded — DEV/TEST ONLY) ─────────────────────────────────────
+# F-04: this key is the dev/test pair (private key in tools/keys/ — never committed).
+# It is INTENTIONALLY published in source so the dev workflow stays simple.
+# Production deployments MUST override via AION_LICENSE_PUBLIC_KEY env var.
+# When AION_PROFILE=production, validate_license_or_abort() refuses to fall back
+# to this embedded key.
 _EMBEDDED_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAhhHJu8ggP3+GFeVGYBc30RsNqzT4jkz3epGOmtfi/Oc=
 -----END PUBLIC KEY-----"""
 
+# Sentinel marker so we can tell at runtime whether the embedded fallback is in use.
+_EMBEDDED_PUBLIC_KEY_FINGERPRINT = "dev-only-MCowBQYDK2VwAyEAhhHJu8gg"
+
 _PUBLIC_KEY_PEM = os.environ.get("AION_LICENSE_PUBLIC_KEY", _EMBEDDED_PUBLIC_KEY)
+
+
+def _is_using_embedded_dev_key() -> bool:
+    """Return True if the active public key is the embedded dev/test key."""
+    return _PUBLIC_KEY_PEM.strip() == _EMBEDDED_PUBLIC_KEY.strip()
 
 # ── Env var / file path ────────────────────────────────────────────────────────
 _LICENSE_ENV_VAR = "AION_LICENSE"          # inline JWT string
@@ -231,8 +242,23 @@ def validate_license_or_abort() -> LicenseInfo:
 
     public_key_pem = _PUBLIC_KEY_PEM.strip()
 
+    # F-04 + F-05: in production profile, refuse the dev key fallback and
+    # refuse the SKIP_VALIDATION shortcut. Both must come from env so the
+    # deployment is auditable.
+    try:
+        from aion.config import Profile, get_settings
+        _profile = get_settings().profile
+    except Exception:
+        _profile = None  # config unavailable → behave as development
+
     # Dev mode bypass: AION_LICENSE_SKIP_VALIDATION=true (dev/test only)
     if os.environ.get("AION_LICENSE_SKIP_VALIDATION", "").lower() == "true":
+        if _profile == Profile.PRODUCTION:
+            _abort(
+                "AION_LICENSE_SKIP_VALIDATION=true em produção",
+                "Esta variável só pode ser usada em AION_PROFILE=development.\n"
+                "Remova AION_LICENSE_SKIP_VALIDATION ou ajuste AION_PROFILE.",
+            )
         logger.warning("AVISO: validação de licença desabilitada (AION_LICENSE_SKIP_VALIDATION=true)")
         _license_info = LicenseInfo(
             state=LicenseState.ACTIVE,
@@ -247,6 +273,15 @@ def validate_license_or_abort() -> LicenseInfo:
     if not public_key_pem:
         _abort("chave pública não configurada",
                "Defina AION_LICENSE_PUBLIC_KEY com a chave pública Ed25519.")
+
+    # F-04: refuse to start in production with the embedded dev public key.
+    if _profile == Profile.PRODUCTION and _is_using_embedded_dev_key():
+        _abort(
+            "chave pública DEV em produção",
+            "AION_LICENSE_PUBLIC_KEY não está definida — o fallback embutido\n"
+            "é a chave de desenvolvimento. Em AION_PROFILE=production, defina\n"
+            "AION_LICENSE_PUBLIC_KEY com a chave Ed25519 oficial da Baluarte.",
+        )
 
     token = _load_token()
 
