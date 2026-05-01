@@ -28,6 +28,10 @@ class BudgetConfig(BaseModel):
     tenant: str
     daily_cap: Optional[float] = None       # USD; None = sem limite
     monthly_cap: Optional[float] = None
+    # F-16: ceiling for a SINGLE request (estimated cost). Rejects with 402 / 429
+    # before the LLM is invoked when the prompt would exceed this amount on the
+    # selected model. None = no per-request cap (legacy behavior).
+    per_request_max_cost_usd: Optional[float] = None
     alert_threshold: float = 0.80           # alerta em X% do cap
     on_cap_reached: str = "downgrade"       # "downgrade" | "block"
     fallback_model: Optional[str] = None    # modelo mais barato ao atingir cap
@@ -187,6 +191,10 @@ async def check_budget(tenant: str, context) -> None:
     Se cap atingido e on_cap_reached == 'block' → levanta BudgetExceededError.
     Se cap atingido e on_cap_reached == 'downgrade' → sobreescreve context.selected_model.
     Fail-open: se store falhar, permite request.
+
+    F-16: também rejeita 402 ANTES da chamada LLM se o custo estimado da request
+    individual exceder per_request_max_cost_usd — protege o cliente contra um
+    único prompt enorme consumir o cap mensal.
     """
     if os.environ.get("AION_BUDGET_ENABLED", "").lower() not in ("true", "1"):
         return
@@ -195,6 +203,18 @@ async def check_budget(tenant: str, context) -> None:
         config = await store.get_config(tenant)
         if config is None:
             return
+
+        # F-16: per-request cap — verificar antes do daily/monthly.
+        if config.per_request_max_cost_usd is not None:
+            est = float(context.metadata.get("estimated_cost", 0.0) or 0.0)
+            if est > config.per_request_max_cost_usd:
+                logger.warning(
+                    "Per-request cost cap reached: tenant=%s estimated=%.6f cap=%.6f",
+                    tenant, est, config.per_request_max_cost_usd,
+                )
+                raise BudgetExceededError(
+                    tenant, "per_request", est, config.per_request_max_cost_usd,
+                )
 
         today_spend = await store.get_today_spend(tenant)
 

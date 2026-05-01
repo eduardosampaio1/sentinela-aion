@@ -142,6 +142,41 @@ class FinalOutput(BaseModel):
 
 
 # ══════════════════════════════════════════════
+# Provenance (F-22 — replay anchors)
+# ══════════════════════════════════════════════
+
+
+class RequestProvenance(BaseModel):
+    """Cryptographic + version anchors that make a decision replayable.
+
+    F-22: in Decision-Only mode the contract IS the product. Without these
+    fields, an auditor reviewing a decision 30 days later cannot reconstruct
+    why AION decided what it did — they only see the final action and the
+    bypass response (if any), not the inputs and policies that produced it.
+
+    All fields are optional so the contract version bump is non-breaking;
+    older callers ignoring `provenance` continue to work.
+    """
+    # SHA-256 (hex) of the original request payload as received by AION.
+    # Lets the auditor confirm "yes, this is the exact request the customer
+    # claims to have sent" without storing the prompt itself.
+    original_request_hash: Optional[str] = None
+    # Hash of the request post-METIS compression (only populated when METIS
+    # actually changed the payload; otherwise None).
+    modified_request_hash: Optional[str] = None
+    # tokens_after / tokens_before (when METIS ran). 1.0 means no compression.
+    compression_ratio: Optional[float] = None
+    # Version strings from the YAMLs that drove the decision. Operators bump
+    # these whenever they change rules, so a contract referencing "1.0" can
+    # be replayed against a 1.0 snapshot of the YAMLs even after a 1.1 deploy.
+    policy_version: Optional[str] = None
+    intents_version: Optional[str] = None
+    models_version: Optional[str] = None
+    # Hash of the merged system prompt at decision time (when applicable).
+    prompt_template_hash: Optional[str] = None
+
+
+# ══════════════════════════════════════════════
 # Metrics + Meta
 # ══════════════════════════════════════════════
 
@@ -204,7 +239,7 @@ class DecisionContract(BaseModel):
     Emitted once per request. Consumed by the ExecutionAdapter (Transparent
     and Assisted modes) or returned as-is (Decision mode).
     """
-    contract_version: str = "1.0"
+    contract_version: str = "1.1"  # F-22: added `provenance`
     request_id: str
     idempotency_key: Optional[str] = None
 
@@ -215,6 +250,9 @@ class DecisionContract(BaseModel):
     capabilities: Capabilities = Field(default_factory=Capabilities)
     operating_mode: Literal["stateless", "learning", "adaptive", "stabilized"] = "stateless"
     decision_confidence: DecisionConfidence = Field(default_factory=DecisionConfidence)
+
+    # F-22: replay anchors. Optional so existing callers continue to work.
+    provenance: Optional[RequestProvenance] = None
 
     error: Optional[ContractError] = None
     meta: ContractMeta

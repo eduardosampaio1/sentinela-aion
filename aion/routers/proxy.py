@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from aion.config import FailMode, get_settings
+from aion.config import DECISION_ONLY_MODES, FailMode, get_settings
 from aion.middleware import get_overrides
 from aion.shared.budget import BudgetExceededError, check_budget
 from aion.shared.schemas import ChatCompletionRequest, Decision, PipelineContext
@@ -36,6 +36,32 @@ def _error_response(status: int, message: str, code: str, error_type: str = "api
         status_code=status,
         content={"error": {"message": message, "type": error_type, "code": code}},
     )
+
+
+def _enforce_decision_only_mode(settings, endpoint: str) -> JSONResponse | None:
+    """F-37: reject Transparent-mode endpoints when AION_MODE is Decision-Only.
+
+    Returns 403 JSONResponse if the request must be blocked, None otherwise.
+    The promise of POC Decision-Only is "AION never calls the LLM" — this
+    guard is the runtime enforcement of that promise. Boot-time enforcement
+    (refuse to start with LLM credentials in env) lives in aion.main.lifespan.
+    """
+    mode = (getattr(settings, "mode", "") or "").strip().lower()
+    if mode in DECISION_ONLY_MODES:
+        return JSONResponse(
+            status_code=403,
+            content={"error": {
+                "message": (
+                    f"Endpoint '{endpoint}' is disabled in AION_MODE='{mode}'. "
+                    "This deployment is configured as Decision-Only — AION must not "
+                    "call the LLM. Use POST /v1/decide or POST /v1/decisions instead, "
+                    "and call the LLM yourself with your own credentials."
+                ),
+                "type": "configuration_error",
+                "code": "decision_only_mode_violation",
+            }},
+        )
+    return None
 
 
 def _build_response_headers(context: PipelineContext) -> dict[str, str]:
@@ -360,6 +386,11 @@ async def chat_completions(request: Request):
 
     settings = get_settings()
 
+    # F-37: refuse Transparent-mode invocation when configured as Decision-Only.
+    _mode_block = _enforce_decision_only_mode(settings, "/v1/chat/completions")
+    if _mode_block is not None:
+        return _mode_block
+
     try:
         body = await request.json()
     except Exception:
@@ -490,8 +521,17 @@ async def chat_completions(request: Request):
     try:
         if chat_request.stream:
             async def stream_with_guard():
+                # F-15: bounded buffers. Without these, a runaway upstream (1M+
+                # tokens) inflates RAM before the stream timeout fires. We
+                # track both chunk count and total bytes; either trip aborts
+                # the stream with a structured error and a flushed [DONE].
                 buffered_chunks: list[str] = []
                 accumulated_content: list[str] = []
+                buffered_bytes_total = 0
+                stream_overflow = False
+                overflow_reason = ""
+                _max_chunks = settings.stream_max_buffered_chunks
+                _max_bytes = settings.stream_max_buffered_bytes
 
                 try:
                     async with asyncio.timeout(_STREAM_TIMEOUT):
@@ -500,7 +540,24 @@ async def chat_completions(request: Request):
                         async for chunk in _fwd_stream(
                             effective_request, context, settings
                         ):
+                            # F-15 cap check BEFORE appending — fail-fast.
+                            chunk_size = len(chunk) if isinstance(chunk, (str, bytes)) else 0
+                            if len(buffered_chunks) >= _max_chunks:
+                                stream_overflow = True
+                                overflow_reason = (
+                                    f"chunks_exceeded_max ({_max_chunks})"
+                                )
+                                break
+                            if buffered_bytes_total + chunk_size > _max_bytes:
+                                stream_overflow = True
+                                overflow_reason = (
+                                    f"bytes_exceeded_max ({_max_bytes // (1024*1024)}MiB)"
+                                )
+                                break
+
                             buffered_chunks.append(chunk)
+                            buffered_bytes_total += chunk_size
+
                             if chunk.startswith("data:"):
                                 payload = chunk[5:].strip()
                                 if payload and payload != "[DONE]":
@@ -516,6 +573,30 @@ async def chat_completions(request: Request):
                                         pass
                 except asyncio.TimeoutError:
                     logger.warning("Stream timeout after %ds (request_id=%s)", _STREAM_TIMEOUT, context.request_id)
+
+                # F-15: handle overflow before the output guard runs.
+                if stream_overflow:
+                    logger.warning(
+                        "STREAM ABORT (overflow): %s (request_id=%s)",
+                        overflow_reason, context.request_id,
+                    )
+                    context.metadata["stream_overflow"] = True
+                    context.metadata["stream_overflow_reason"] = overflow_reason
+                    import json as _json
+                    err_payload = _json.dumps({
+                        "error": {
+                            "message": (
+                                f"Stream aborted: output exceeded buffered cap ({overflow_reason}). "
+                                "Consider lowering max_tokens on the upstream request."
+                            ),
+                            "type": "policy_error",
+                            "code": "stream_overflow",
+                        }
+                    })
+                    yield f"data: {err_payload}\n\n"
+                    yield "data: [DONE]\n\n"
+                    await _pipeline.emit_telemetry(context)
+                    return
 
                 full_text = "".join(accumulated_content)
                 blocked_by_guard = False
@@ -660,6 +741,13 @@ async def chat_assisted(request: Request):
     from aion.contract import Action
 
     settings = get_settings()
+
+    # F-37: refuse executor mode when configured as Decision-Only (AION must not
+    # call the LLM through the adapter in poc_decision/decision_only).
+    _mode_block = _enforce_decision_only_mode(settings, "/v1/chat/assisted")
+    if _mode_block is not None:
+        return _mode_block
+
     body = await request.json()
 
     if len(body.get("messages", [])) > 100:

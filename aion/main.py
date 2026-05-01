@@ -19,7 +19,13 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from aion import __version__
-from aion.config import FailMode, get_settings
+from aion.config import (
+    DECISION_ONLY_MODES,
+    FailMode,
+    LLM_CREDENTIAL_ENV_VARS,
+    Profile,
+    get_settings,
+)
 from aion.middleware import AionSecurityMiddleware
 from aion.pipeline import Pipeline, build_pipeline
 from aion.proxy import forward_request, forward_request_stream, shutdown_client
@@ -110,23 +116,70 @@ async def lifespan(app: FastAPI):
     )
 
     # ── Fail-fast: warn loudly on missing critical secrets ─────────────────────
+    # Gated by AION_PROFILE:
+    #   development → log warnings, do not abort (legacy behavior)
+    #   staging → warnings + critical log
+    #   production → ABORT boot (sys.exit) on any unresolved security gap
     _env_problems: list[str] = []
     if not settings.admin_key:
         _env_problems.append(
             "AION_ADMIN_KEY is not set — all admin/control-plane endpoints are "
             "unauthenticated. Set AION_ADMIN_KEY=yourkey:admin before production."
         )
+    # F-12: chat endpoints silently pass through without validation when
+    # require_chat_auth=true but no admin_key is configured. In production,
+    # this MUST abort boot — otherwise auth is "theatre".
     if settings.require_chat_auth and not settings.admin_key:
         _env_problems.append(
             "AION_REQUIRE_CHAT_AUTH=true but AION_ADMIN_KEY is not set — "
             "chat endpoints are configured to require auth but no keys exist to validate against. "
             "Requests will pass unauthenticated. Set AION_ADMIN_KEY or disable AION_REQUIRE_CHAT_AUTH."
         )
+    # F-03: missing audit secret means audit chain falls back to plain SHA-256
+    # (no HMAC) — chain becomes forgeable. Must abort in production.
     if not os.environ.get("AION_SESSION_AUDIT_SECRET"):
         _env_problems.append(
             "AION_SESSION_AUDIT_SECRET is not set — audit trail HMAC signatures are "
             "disabled (tamper evidence theater). Set a 32+ char random secret."
         )
+    # F-04: production must override the embedded dev public key. The check
+    # itself lives in aion.license; here we surface the requirement explicitly.
+    if not os.environ.get("AION_LICENSE_PUBLIC_KEY"):
+        _env_problems.append(
+            "AION_LICENSE_PUBLIC_KEY is not set — license validation will fall back "
+            "to the dev/test public key embedded in aion/license.py. In production, "
+            "any JWT signed with the dev private key would be accepted. Set "
+            "AION_LICENSE_PUBLIC_KEY to the production public key (PEM)."
+        )
+    # F-37: Decision-Only modes promise "AION never calls the LLM, never receives
+    # LLM credentials". If any LLM credential env var is present, the operator
+    # likely misconfigured the deployment.
+    _aion_mode = (settings.mode or "").strip().lower()
+    if _aion_mode in DECISION_ONLY_MODES:
+        _leaked_creds = [v for v in LLM_CREDENTIAL_ENV_VARS if os.environ.get(v)]
+        if _leaked_creds:
+            _env_problems.append(
+                f"AION_MODE='{_aion_mode}' (Decision-Only) but LLM credentials "
+                f"are set in environment: {', '.join(_leaked_creds)}. "
+                "Decision-Only deployments must NOT receive LLM credentials. "
+                "Either unset these variables or switch to AION_MODE=poc_transparent / "
+                "full_transparent if AION should call the LLM."
+            )
+
+    # F-36: in Transparent modes (AION pays the LLM with the customer's keys),
+    # the cost-control promise requires AION_BUDGET_ENABLED=true. Without it,
+    # check_budget() is a no-op and a single runaway request can drain the
+    # customer's monthly LLM budget.
+    if _aion_mode and _aion_mode not in DECISION_ONLY_MODES:
+        if os.environ.get("AION_BUDGET_ENABLED", "").lower() not in ("true", "1"):
+            _env_problems.append(
+                f"AION_MODE='{_aion_mode}' (Transparent) but AION_BUDGET_ENABLED is not "
+                "set to 'true' — budget caps are disabled. The product's cost-control "
+                "promise is unenforceable; a single runaway request can exhaust the "
+                "customer's LLM budget. Set AION_BUDGET_ENABLED=true and configure a "
+                "BudgetConfig per tenant via PUT /v1/budget/{tenant}."
+            )
+
     if _env_problems:
         logger.warning("=" * 72)
         logger.warning("AION SECURITY WARNINGS — resolve before production:")
@@ -134,6 +187,17 @@ async def lifespan(app: FastAPI):
             logger.warning("  ⚠  %s", _p)
         logger.warning("=" * 72)
 
+        # Production profile: abort boot on any unresolved security gap.
+        if settings.profile == Profile.PRODUCTION:
+            import sys
+            logger.critical(
+                "AION startup ABORTED: AION_PROFILE=production requires all security "
+                "settings above to be configured. Fix the warnings or set "
+                "AION_PROFILE=development for non-production environments."
+            )
+            sys.exit(1)
+
+        # Legacy: AION_FAIL_MODE=closed also aborts (back-compat).
         if settings.fail_mode == FailMode.CLOSED:
             import sys
             logger.critical(
@@ -158,6 +222,14 @@ async def lifespan(app: FastAPI):
 
     from aion.middleware import _load_overrides_from_disk
     _load_overrides_from_disk()
+
+    # F-07: restore durable counters from Redis so /v1/economics shows
+    # historical totals across restarts (not just "since this pod started").
+    try:
+        from aion.shared.telemetry import load_persistent_counters
+        await load_persistent_counters()
+    except Exception as _ctr_err:
+        logger.warning("Telemetry counter restore failed (non-fatal): %s", _ctr_err)
 
     try:
         from aion.observability import setup_telemetry

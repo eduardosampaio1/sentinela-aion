@@ -1,6 +1,6 @@
 # AION — Relatório de Segurança
 
-Gerado em 2026-04-21.
+Gerado em 2026-04-21. Última atualização: 2026-04-30 (correções de referências obsoletas).
 
 ## SAST — bandit
 Varredura: `python -m bandit -r aion/ -ll`
@@ -30,10 +30,19 @@ No known vulnerabilities found
 
 ## Auth & Access Control
 
-- `AION_ADMIN_KEY` suporta rotação via comma-separated (`"key1,key2,key3"`)
+- `AION_ADMIN_KEY` suporta rotação e roles via formato `"chave1:admin,chave2:operator,chave3:viewer"`
+  - Roles válidas: `admin | operator | viewer | analyst | security | auditor | console_proxy`
+  - Sem `:role` = legado, default ADMIN (deprecated; logar warning e exigir `:role` em produção)
 - `AION_REQUIRE_CHAT_AUTH=true` força autenticação em `/v1/chat/completions`
 - `AION_REQUIRE_TENANT=true` força header `X-Aion-Tenant` em todos os requests
-- RBAC implementado em `aion/rbac.py` com permissões granulares (override:read, override:write, etc)
+- RBAC implementado em [aion/middleware.py](aion/middleware.py) (parsing + enforcement) e
+  [aion/shared/contracts.py](aion/shared/contracts.py) (`Role`, `Permission`, matriz de permissões).
+  Não existe um arquivo `aion/rbac.py` separado — toda a lógica RBAC vive nos dois arquivos acima.
+- **F-37**: quando `AION_MODE=poc_decision` ou `decision_only`, `/v1/chat/completions` e
+  `/v1/chat/assisted` retornam **403** mesmo se autenticados — Decision-Only é enforçado em runtime.
+- **AION_PROFILE=production** (gating de produção): boot aborta se faltar
+  `AION_SESSION_AUDIT_SECRET`, `AION_LICENSE_PUBLIC_KEY`, `AION_ADMIN_KEY`
+  (com `:role`), ou se houver credencial LLM em env quando `AION_MODE` é Decision-Only.
 
 ## CORS
 
@@ -55,9 +64,14 @@ No known vulnerabilities found
 
 ## Secrets
 
-- `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`: via env var, never logged
-- `AION_ADMIN_KEY`: via env var, comparação constant-time
-- `start.py` tem guard-rail: em sim, força fake key para não vazar key real do dev
+- `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`: via env var, never logged.
+- `AION_ADMIN_KEY`: via env var. Comparação atual via dict lookup
+  ([aion/middleware.py](aion/middleware.py)); roadmap (S3): trocar por `hmac.compare_digest`
+  para garantir constant-time bit-a-bit.
+- Entrypoint do binário é [aion/cli.py](aion/cli.py) (instalado como `aion` via
+  `pyproject.toml [project.scripts]`). **Não existe `start.py`.**
+- Em testes ([tests/conftest.py](tests/conftest.py)) `OPENAI_API_KEY=sk-test-key` é
+  setada explicitamente — guard contra vazamento de key real do dev.
 
 ## Container hardening
 

@@ -7,7 +7,10 @@ never build contracts themselves — always via ``build_contract``.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 from aion.contract.capabilities import Capabilities, CapabilityState
@@ -18,11 +21,139 @@ from aion.contract.decision import (
     DecisionConfidence,
     DecisionContract,
     FinalOutput,
+    RequestProvenance,
     default_retry_policy,
     target_type_for,
 )
 from aion.contract.errors import ContractError, ErrorType
 from aion.shared.schemas import Decision, PipelineContext
+
+logger = logging.getLogger("aion.contract.builder")
+
+
+# ── F-22: YAML version cache (loaded once, refreshed on hot-reload) ──────────
+# Operators reload YAMLs via /v1/estixe/intents/reload etc. — we read the
+# file once here per-process and let the operator clear the cache via
+# clear_provenance_cache() if they want to re-derive after a hot-reload.
+_yaml_version_cache: dict[str, Optional[str]] = {}
+
+
+def _read_yaml_version(path: Path) -> Optional[str]:
+    """Extract the top-level `version: "..."` from a YAML file.
+
+    We scan for the first non-comment line that starts with `version:` —
+    avoids importing the full YAML loader for a single-line lookup.
+    """
+    try:
+        if not path.exists():
+            return None
+        with path.open("r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("version:"):
+                    val = line.split(":", 1)[1].strip()
+                    # strip surrounding quotes if any
+                    if val.startswith(('"', "'")) and val.endswith(('"', "'")):
+                        val = val[1:-1]
+                    return val or None
+                # First non-version, non-comment line — version field absent.
+                break
+    except Exception as exc:
+        logger.debug("YAML version read failed for %s: %s", path, exc)
+    return None
+
+
+def _yaml_version_cached(key: str, path: Path) -> Optional[str]:
+    if key not in _yaml_version_cache:
+        _yaml_version_cache[key] = _read_yaml_version(path)
+    return _yaml_version_cache[key]
+
+
+def clear_provenance_cache() -> None:
+    """Clear the YAML version cache. Call after hot-reload of any policy/intents/models YAML."""
+    _yaml_version_cache.clear()
+
+
+def _hash_request(request_obj) -> Optional[str]:
+    """SHA-256 of the request payload JSON (None if unavailable)."""
+    if request_obj is None:
+        return None
+    try:
+        # Pydantic v2: model_dump_json with deterministic ordering for hash stability.
+        payload = request_obj.model_dump_json(exclude_none=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    except Exception as exc:
+        logger.debug("Request hash failed: %s", exc)
+        return None
+
+
+def _hash_system_prompts(request_obj) -> Optional[str]:
+    """SHA-256 of merged system messages (the "prompt template" used at decision time)."""
+    if request_obj is None or not getattr(request_obj, "messages", None):
+        return None
+    try:
+        sys_parts: list[str] = []
+        for m in request_obj.messages:
+            role = getattr(m, "role", "")
+            if role == "system":
+                content = getattr(m, "content", "") or ""
+                sys_parts.append(str(content))
+        if not sys_parts:
+            return None
+        merged = "\n".join(sys_parts)
+        return hashlib.sha256(merged.encode("utf-8")).hexdigest()
+    except Exception as exc:
+        logger.debug("System prompt hash failed: %s", exc)
+        return None
+
+
+def _build_provenance(context: PipelineContext) -> RequestProvenance:
+    """F-22: build the replay-anchors block for the contract.
+
+    Hashes are computed defensively — if any field fails to compute, we leave
+    it as None rather than aborting the contract. The presence of partial
+    provenance is still strictly better than the previous "no provenance" state.
+    """
+    try:
+        from aion.config import get_settings
+        cfg_dir = Path(get_settings().config_dir)
+    except Exception:
+        cfg_dir = Path("config")
+
+    # Original request hash — pre-pipeline payload.
+    original_hash = _hash_request(context.original_request)
+
+    # Modified request hash — only if METIS (or anyone) actually changed the payload.
+    modified_hash: Optional[str] = None
+    if context.modified_request is not None and context.modified_request is not context.original_request:
+        candidate = _hash_request(context.modified_request)
+        if candidate and candidate != original_hash:
+            modified_hash = candidate
+
+    # Compression ratio — only when METIS actually counted tokens.
+    compression_ratio: Optional[float] = None
+    tb = getattr(context, "tokens_before", 0) or 0
+    ta = getattr(context, "tokens_after", 0) or 0
+    if tb > 0 and ta > 0:
+        compression_ratio = round(ta / tb, 4)
+
+    # Prompt template hash — system messages only (the "instructions" anchor).
+    prompt_hash = _hash_system_prompts(context.original_request)
+
+    return RequestProvenance(
+        original_request_hash=original_hash,
+        modified_request_hash=modified_hash,
+        compression_ratio=compression_ratio,
+        policy_version=_yaml_version_cached("policies", cfg_dir / "policies.yaml"),
+        intents_version=_yaml_version_cached(
+            "intents",
+            Path(__file__).resolve().parent.parent / "estixe" / "data" / "intents.yaml",
+        ),
+        models_version=_yaml_version_cached("models", cfg_dir / "models.yaml"),
+        prompt_template_hash=prompt_hash,
+    )
 
 
 def _decision_to_action(context: PipelineContext) -> Action:
@@ -189,6 +320,7 @@ def build_contract(
         capabilities=_build_capabilities(context, active_modules or []),
         operating_mode=operating_mode,  # type: ignore[arg-type]
         decision_confidence=_build_confidence(context),
+        provenance=_build_provenance(context),  # F-22
         error=_build_error(context),
         meta=meta,
     )

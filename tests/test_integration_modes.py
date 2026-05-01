@@ -51,7 +51,8 @@ class TestTransparentMode:
         assert "choices" in body
         # New contract headers present
         assert resp.headers.get("X-Aion-Mode") == "transparent"
-        assert resp.headers.get("X-Aion-Contract-Version") == "1.0"
+        # contract_version bumped to 1.1 in F-22 (added `provenance`).
+        assert resp.headers.get("X-Aion-Contract-Version") == "1.1"
         assert resp.headers.get("X-Aion-Decision") == "bypass"
         assert resp.headers.get("X-Aion-Side-Effects-Possible") == "false"
 
@@ -75,7 +76,8 @@ class TestAssistedMode:
         body = resp.json()
         assert "response" in body
         assert "contract" in body
-        assert body["contract"]["contract_version"] == "1.0"
+        # contract_version bumped to 1.1 in F-22 (added `provenance`).
+        assert body["contract"]["contract_version"] == "1.1"
         assert body["contract"]["action"] == "BYPASS"
         assert body["contract"]["side_effect_level"] == "none"
         assert resp.headers.get("X-Aion-Mode") == "assisted"
@@ -112,7 +114,8 @@ class TestDecisionMode:
         resp = client.post("/v1/decisions", json=_greeting_body())
         assert resp.status_code == 200
         contract = resp.json()
-        assert contract["contract_version"] == "1.0"
+        # contract_version bumped to 1.1 in F-22 (added `provenance`).
+        assert contract["contract_version"] == "1.1"
         assert "action" in contract
         assert "final_output" in contract
         assert "capabilities" in contract

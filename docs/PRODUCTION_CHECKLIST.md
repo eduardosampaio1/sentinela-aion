@@ -106,7 +106,9 @@ Após rodar `python stress_test.py --workers 50 -n 100` em ambiente prod-like:
 
 ## 10. Pre-deploy
 
-- [ ] Rodar `pytest tests/` em staging — **702+ testes, 0 falhas**
+- [ ] Rodar `pytest tests/` em staging — **791 test cases coletados (216 funções `def test_*` + parametrize), 0 falhas**
+  - Conferir: `pytest tests/ --collect-only -q | tail -1`
+  - O número de **funções** (`grep -c "^def test_" tests/*.py`) é diferente do número de **test cases** (cada `@pytest.mark.parametrize` multiplica)
 - [ ] Rodar stress test em staging — **todos critérios OK**
 - [ ] Smoke test com traffic real sombreado (mirror produção por 24h)
 - [ ] Runbook de rollback documentado
@@ -127,6 +129,6 @@ Após rodar `python stress_test.py --workers 50 -n 100` em ambiente prod-like:
 | Trilha de auditoria hash-chained | ✅ implementado | `aion/middleware.py` — HMAC-SHA256 |
 | Budget cap por tenant | ✅ implementado | `PUT /v1/budget/{tenant}` |
 | Sessão de auditoria LGPD | ✅ implementado | `GET /v1/session/{id}/audit` |
-| Test suite | ✅ 702 testes | `pytest tests/` |
+| Test suite | ✅ 791 test cases (216 funções + parametrize) | `pytest tests/ --collect-only -q \| tail -1` |
 | Distributed tracing (OTel) | ❌ fora de escopo v1 | |
 | Offline embedding | ✅ bundled no Docker | `HF_HUB_OFFLINE=1`, modelo em `/opt/hf-model` |
