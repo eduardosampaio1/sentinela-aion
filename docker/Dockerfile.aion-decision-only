@@ -1,0 +1,116 @@
+# AION — Decision-Only image (F-38, qa-ceifador P2.B)
+#
+# Variant of docker/Dockerfile.aion that physically removes the LLM proxy
+# from the runtime binary. Defense-in-depth on top of F-37 (runtime guard
+# returning 403) and F-12 (boot abort if LLM creds present in
+# AION_MODE=poc_decision).
+#
+# What's different from the standard image:
+#   - aion/proxy.py is replaced with docker/proxy_decision_only_stub.py
+#     before installation. The stub raises DecisionOnlyImageError if any
+#     LLM-bound code (forward_request, forward_request_stream) is invoked
+#     at runtime.
+#
+# What's the same:
+#   - Same Python deps + same embedding model bundling.
+#   - aion/routers/proxy.py keeps both Decision (/v1/decide, /v1/decisions)
+#     and Transparent (/v1/chat/completions, /v1/chat/assisted) endpoints.
+#     F-37 still returns 403 on Transparent endpoints when AION_MODE=poc_decision.
+#     If F-37 ever misfired, the stub would catch the call.
+#
+# Build:
+#   docker build -t ghcr.io/eduardosampaio1/sentinela-aion:decision-only \
+#                -f docker/Dockerfile.aion-decision-only .
+#
+# Use:
+#   In docker-compose.poc-decision.yml replace the `image:` line with the tag
+#   above. AION_MODE=poc_decision must remain set to keep F-37 active.
+
+# ── Stage 1: install deps ──
+FROM python:3.11-slim AS deps
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY pyproject.toml README.md /build/
+COPY aion /build/aion
+
+# F-38: physically replace the proxy module with a build that refuses to
+# call the LLM. The stub keeps the same public API so import-time references
+# elsewhere in the codebase still resolve. Calls raise DecisionOnlyImageError.
+COPY docker/proxy_decision_only_stub.py /build/aion/proxy.py
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip wheel setuptools && \
+    pip install /build/ && \
+    pip install redis uvloop \
+                opentelemetry-api opentelemetry-sdk \
+                opentelemetry-instrumentation-fastapi \
+                opentelemetry-instrumentation-httpx \
+                opentelemetry-exporter-otlp-proto-grpc \
+                prometheus-client
+
+
+# ── Stage 2: cache embedding model in FLAT directory ──
+FROM deps AS model-cache
+
+RUN python -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download(repo_id='sentence-transformers/all-MiniLM-L6-v2', \
+                  local_dir='/opt/hf-model', \
+                  local_dir_use_symlinks=False); \
+print('model snapshot downloaded to /opt/hf-model')"
+
+
+# ── Stage 3: runtime (slim, non-root, offline-capable) ──
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    AION_RUNTIME_DIR=/var/aion/runtime \
+    ESTIXE_EMBEDDING_MODEL=/opt/hf-model \
+    AION_BUILD_VARIANT=decision_only
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -u 1000 aion \
+    && mkdir -p /var/aion/runtime \
+    && chown -R aion:aion /var/aion
+
+# Copy venv + model cache from previous stages
+COPY --from=deps /opt/venv /opt/venv
+COPY --from=model-cache /opt/hf-model /opt/hf-model
+
+WORKDIR /app
+
+USER aion
+
+EXPOSE 8080
+
+# Sanity check at boot: confirm proxy is the stub, not the full module.
+# If someone publishes the wrong tag, this fails before serving traffic.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+  CMD curl -fsS http://localhost:8080/ready || exit 1
+
+# Boot-time assertion: proxy must be the stub. If not, refuse to start.
+# This guards against accidental reuse of the wrong image in a Decision-Only
+# deploy (e.g. operator points docker-compose.poc-decision.yml at the
+# transparent image by mistake).
+ENTRYPOINT ["python", "-c", "\
+import sys; \
+from aion import proxy; \
+assert hasattr(proxy, 'DecisionOnlyImageError'), \
+    'F-38 violation: aion.proxy is the FULL module, not the Decision-Only stub. \
+This image must be built with docker/Dockerfile.aion-decision-only.'; \
+import aion.cli; aion.cli.main()"]
