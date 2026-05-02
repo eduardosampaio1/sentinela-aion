@@ -1,6 +1,9 @@
 """E2E tests — full pipeline flow, streaming, and determinism.
 
 These tests verify real behavior, not mocks.
+
+P1.B (qa-ceifador): pipeline-level E2E goes through ESTIXE which loads the
+embedding model. Marked `requires_embeddings` so lean CI runs skip the file.
 """
 
 import os
@@ -8,6 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+pytestmark = pytest.mark.requires_embeddings
 
 from aion.pipeline import Pipeline, build_pipeline
 from aion.shared.schemas import (

@@ -1,0 +1,105 @@
+{
+  "info": {
+    "name": "Sentinela AION",
+    "description": "5 calls essenciais para validar o AION em POC. Base URL: http://localhost:8080",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "tenant",
+      "value": "demo",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Verifica se o AION está rodando e quais módulos estão ativos. Deve retornar status: ok."
+      }
+    },
+    {
+      "name": "2. Chat Completion (OpenAI-compatible)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Aion-Tenant", "value": "{{tenant}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Olá, qual é o horário de atendimento?\" }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/chat/completions",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "chat", "completions"]
+        },
+        "description": "Proxy OpenAI-compatible. Troque apenas o base_url na sua aplicação. O header X-Aion-Tenant identifica o cliente."
+      }
+    },
+    {
+      "name": "3. Decide (sem chamar o LLM)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Aion-Tenant", "value": "{{tenant}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Meu CPF é 123.456.789-00, pode verificar meu saldo?\" }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/v1/decide",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "decide"]
+        },
+        "description": "Retorna a decisão do AION (BYPASS / CONTINUE / BLOCK) sem executar a chamada ao LLM. Útil para testar PII detection e políticas."
+      }
+    },
+    {
+      "name": "4. Stats (métricas agregadas)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Aion-Tenant", "value": "{{tenant}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/stats",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "stats"]
+        },
+        "description": "Retorna bypass_rate, custo estimado economizado, contagem de decisões e latência. Principal métrica da POC."
+      }
+    },
+    {
+      "name": "5. Events (últimos eventos em tempo real)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Aion-Tenant", "value": "{{tenant}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/events?limit=20",
+          "host": ["{{base_url}}"],
+          "path": ["v1", "events"],
+          "query": [{ "key": "limit", "value": "20" }]
+        },
+        "description": "Últimos 20 eventos do pipeline: decisão, módulo que agiu, latência, tenant. Útil para debugar durante a POC."
+      }
+    }
+  ]
+}

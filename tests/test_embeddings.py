@@ -5,6 +5,12 @@ import numpy as np
 
 from aion.shared.embeddings import EmbeddingModel, get_embedding_model
 
+# P1.B: tests in this file that use the `loaded_model` fixture pull the real
+# sentence-transformers/all-MiniLM-L6-v2 model from disk or HuggingFace.
+# Lean CI environments may skip with `pytest -m "not requires_embeddings"`.
+# Tests that don't load the model (e.g. test_model_not_loaded_by_default) keep
+# running unconditionally — the marker is applied per-test below, not file-wide.
+
 
 @pytest.fixture
 def fresh_model():
@@ -37,6 +43,7 @@ def test_encode_single_before_load_raises(fresh_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_load_model(fresh_model):
     await fresh_model.load()
@@ -46,6 +53,7 @@ async def test_load_model(fresh_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_load_is_idempotent(fresh_model):
     await fresh_model.load()
@@ -54,6 +62,7 @@ async def test_load_is_idempotent(fresh_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_encode_batch(loaded_model):
     result = loaded_model.encode(["hello", "world"])
@@ -62,6 +71,7 @@ async def test_encode_batch(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_encode_single_returns_vector(loaded_model):
     result = loaded_model.encode_single("hello world")
@@ -70,6 +80,7 @@ async def test_encode_single_returns_vector(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_encode_single_cached(loaded_model):
     v1 = loaded_model.encode_single("test query")
@@ -78,6 +89,7 @@ async def test_encode_single_cached(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_encode_single_cache_disabled(loaded_model):
     v1 = loaded_model.encode_single("test", use_cache=False)
@@ -86,6 +98,7 @@ async def test_encode_single_cache_disabled(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_clear_cache(loaded_model):
     loaded_model.encode_single("cached text")
@@ -95,6 +108,7 @@ async def test_clear_cache(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_normalized_embeddings(loaded_model):
     """Normalized embeddings should have unit norm."""
@@ -104,6 +118,7 @@ async def test_normalized_embeddings(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_similar_texts_high_similarity(loaded_model):
     """Semantically similar texts should have high cosine similarity."""
@@ -114,6 +129,7 @@ async def test_similar_texts_high_similarity(loaded_model):
 
 
 @pytest.mark.slow
+@pytest.mark.requires_embeddings
 @pytest.mark.asyncio
 async def test_dissimilar_texts_low_similarity(loaded_model):
     """Semantically different texts should have lower similarity."""

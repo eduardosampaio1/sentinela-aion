@@ -3,6 +3,9 @@
 Each risk is a documented security or quality gap that multi-turn context addresses.
 Tests verify both the data structures and the pipeline integration.
 
+P1.B (qa-ceifador): integration tests instantiate the real ESTIXE pipeline
+(embedding-backed). Marked `requires_embeddings`.
+
 R1 — Instruction injection via historical messages
      → ESTIXE tightens thresholds when prior turns had high risk.
 
@@ -31,6 +34,8 @@ from aion.nomos.registry import ModelConfig, ModelRegistry
 from aion.nomos.router import Router
 from aion.shared.schemas import ChatCompletionRequest, ChatMessage, PipelineContext
 from aion.shared.turn_context import TurnContext, TurnSummary
+
+pytestmark = pytest.mark.requires_embeddings
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────

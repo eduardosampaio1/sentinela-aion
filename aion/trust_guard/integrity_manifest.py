@@ -20,31 +20,38 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from aion.trust_guard.critical_files import resolve_files as _resolve_critical
+
 logger = logging.getLogger("aion.trust_guard")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-# Package root: aion/trust_guard/../  →  aion/
+# Package root: aion/trust_guard/../  →  aion/. The "project root" used by the
+# critical-files resolver is one level above (parent of the aion/ package).
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = _PACKAGE_ROOT.parent
 
 # Default manifest location (bundled in the Docker image)
 _MANIFEST_PATH = Path(__file__).resolve().parent / "integrity_manifest.json"
 
-# Critical files whose integrity is verified at startup
-_CRITICAL_FILES: tuple[str, ...] = (
-    "aion/license.py",
-    "aion/middleware.py",
-    "aion/pipeline.py",
-    "aion/nemos/__init__.py",
-    "aion/nomos/__init__.py",
-    "aion/estixe/__init__.py",
-    "aion/metis/__init__.py",
-)
-
 
 def get_critical_files() -> list[Path]:
-    """Return absolute paths to the critical files listed in _CRITICAL_FILES."""
-    return [_PACKAGE_ROOT / f for f in _CRITICAL_FILES]
+    """Return absolute paths to the critical files registered in critical_files.py.
+
+    Coverage was expanded in the qa-ceifador P1.A pass to include
+    aion/proxy.py, aion/routers/*.py, aion/contract/*.py, and the rest of
+    the Python core that drives request handling and security enforcement.
+    """
+    return [_PROJECT_ROOT / rel for rel in _resolve_critical(_PROJECT_ROOT)]
+
+
+# Backward compatibility for callers that imported _CRITICAL_FILES directly
+# (e.g. tests). Resolved lazily at first attribute access so file globbing
+# happens only when needed; avoids import-time fs work.
+def __getattr__(name: str):
+    if name == "_CRITICAL_FILES":
+        return tuple(_resolve_critical(_PROJECT_ROOT))
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -134,9 +141,16 @@ def verify_manifest(manifest_path: Optional[Path] = None) -> IntegrityResult:
         )
 
     # Step 3: compare per-file hashes
+    # Expansion (P1.A): manifest entries are now relative to the project root
+    # (e.g. "aion/routers/proxy.py"). Legacy manifests using paths relative
+    # to the aion/ package (e.g. "license.py") are still understood thanks to
+    # the fallback below.
     diverged: list[str] = []
     for rel_path, expected_hash in expected_files.items():
-        abs_path = _PACKAGE_ROOT / rel_path
+        abs_path = _PROJECT_ROOT / rel_path
+        if not abs_path.exists():
+            # Legacy fallback: path may have been relative to aion/.
+            abs_path = _PACKAGE_ROOT / rel_path
         actual_hash = _hash_single_file(abs_path)
         if actual_hash != expected_hash:
             diverged.append(rel_path)
