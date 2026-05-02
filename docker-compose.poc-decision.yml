@@ -9,8 +9,10 @@
 # AION nunca recebe credencial de LLM. Menor superfície de integração.
 # Menor fricção com CISO, jurídico e arquitetura de segurança.
 #
-# Setup (2 comandos):
-#   printf "AION_LICENSE=<jwt-fornecido-pela-baluarte>\nAION_ADMIN_KEY=chave-poc:admin\n" > .env
+# Setup:
+#   cp .env.poc-decision.example .env
+#   # Edite .env com AION_LICENSE, AION_ADMIN_KEY, AION_CONSOLE_PROXY_KEY,
+#   # AION_SESSION_AUDIT_SECRET e CONSOLE_AUTH_SECRET (todos obrigatórios)
 #   docker compose -f docker-compose.poc-decision.yml up -d
 #
 # Verificar:
@@ -47,9 +49,20 @@ services:
       # Gerada pela Baluarte (contato@baluarte.ai) — uma por cliente/ambiente
       AION_LICENSE: ${AION_LICENSE}
 
-      # Auth admin — obrigatório para endpoints /v1/admin/*
-      # Formato: "chave:role" — ex: "abc123poc:admin"
-      AION_ADMIN_KEY: ${AION_ADMIN_KEY}
+      # Profile: staging mantém warnings críticos no boot e fecha o ciclo dos
+      # gates de segurança (F-03/F-04/F-12/F-37). Para hard-abort, use
+      # AION_PROFILE=production e garanta TODAS as envs abaixo configuradas.
+      AION_PROFILE: ${AION_PROFILE:-staging}
+
+      # Auth admin + console proxy.
+      # AION_ADMIN_KEY combina (a) chave de operação humana e (b) chave do
+      # console como `console_proxy` — sem `console_proxy` o console retorna 401
+      # ao chamar /v1/admin/*. Formato: "chave1:admin,chave2:console_proxy".
+      AION_ADMIN_KEY: ${AION_ADMIN_KEY},${AION_CONSOLE_PROXY_KEY}:console_proxy
+
+      # Audit trail HMAC (F-03) — obrigatório. Sem este segredo a trilha de
+      # auditoria fica forjável (SHA-256 sem HMAC). Gere com: openssl rand -hex 32
+      AION_SESSION_AUDIT_SECRET: ${AION_SESSION_AUDIT_SECRET}
 
       # Modo: ESTIXE + NOMOS ativos para decisão completa
       # METIS desligado — compressão não se aplica em Decision-Only
@@ -57,7 +70,8 @@ services:
       AION_NOMOS_ENABLED: "true"
       AION_METIS_ENABLED: "false"
 
-      # Identificação do modo — exposto no /health
+      # Identificação do modo — F-37 enforça runtime: /v1/chat/completions e
+      # /v1/chat/assisted retornam 403; só /v1/decide e /v1/decisions respondem.
       AION_MODE: "poc_decision"
 
       # Comportamento em falha: fail-open (request passa, AION não bloqueia)
@@ -68,7 +82,8 @@ services:
       AION_REQUIRE_TENANT: "false"
       AION_DEFAULT_TENANT: "default"
 
-      # Redis local — velocity detection, decision cache
+      # Redis local — velocity detection, decision cache, durable counters,
+      # explain store (F-07/F-10).
       REDIS_URL: "redis://redis:6379/0"
 
       # Telemetria externa DESLIGADA — zero dados saem do ambiente
@@ -102,13 +117,19 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      # Segredo de sessão — defina em .env ou use o valor gerado
-      AUTH_SECRET: ${CONSOLE_AUTH_SECRET:-insecure-default-change-in-prod}
+      # Segredo de sessão (NextAuth v5). OBRIGATÓRIO. Sem fallback —
+      # se ${CONSOLE_AUTH_SECRET} estiver vazio o compose recusa a subir.
+      # Gere com: openssl rand -hex 32
+      AUTH_SECRET: ${CONSOLE_AUTH_SECRET:?CONSOLE_AUTH_SECRET is required (openssl rand -hex 32)}
       NEXT_PUBLIC_AION_TENANT: default
       NEXT_PUBLIC_DEMO_MODE: "false"
       AION_DEFAULT_ROLE: viewer
       # Aponta para o runtime na rede interna do compose
       AION_API_URL: http://aion:8080
+      # Chave de serviço usada pelo proxy server-side do console no header
+      # `Authorization: Bearer <AION_API_KEY>`. Tem que casar com a chave
+      # console_proxy declarada em AION_ADMIN_KEY no serviço `aion`.
+      AION_API_KEY: ${AION_CONSOLE_PROXY_KEY:?AION_CONSOLE_PROXY_KEY is required}
     depends_on:
       aion:
         condition: service_healthy

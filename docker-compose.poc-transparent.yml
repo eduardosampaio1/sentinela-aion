@@ -15,7 +15,9 @@
 #
 # Setup:
 #   cp .env.poc-transparent.example .env
-#   # Edite .env com AION_ADMIN_KEY e credencial do LLM
+#   # Edite .env com AION_ADMIN_KEY, AION_CONSOLE_PROXY_KEY,
+#   # AION_SESSION_AUDIT_SECRET, CONSOLE_AUTH_SECRET, OPENAI_API_KEY
+#   # (ou outra credencial LLM compatível). Todos obrigatórios.
 #   docker compose -f docker-compose.poc-transparent.yml up -d
 #
 # Verificar:
@@ -41,8 +43,27 @@ services:
       # Licença JWT — obrigatório para subir o servidor
       AION_LICENSE: ${AION_LICENSE}
 
-      # Auth admin — obrigatório para endpoints /v1/admin/*
-      AION_ADMIN_KEY: ${AION_ADMIN_KEY}
+      # Profile: staging mantém warnings críticos no boot e fecha o ciclo dos
+      # gates de segurança (F-03/F-04/F-12/F-36). Para hard-abort, use
+      # AION_PROFILE=production e garanta TODAS as envs abaixo configuradas.
+      AION_PROFILE: ${AION_PROFILE:-staging}
+
+      # Auth admin + console proxy.
+      # Em modo Transparent o chat é (ou pode ser) autenticado — F-12 exige
+      # AION_ADMIN_KEY com pelo menos uma chave para impedir pass-through.
+      # AION_CONSOLE_PROXY_KEY é opcional aqui (este compose não embute o
+      # console). Se setado, é anexado como `:console_proxy`. Se vazio, só
+      # AION_ADMIN_KEY é usado.
+      AION_ADMIN_KEY: "${AION_ADMIN_KEY}${AION_CONSOLE_PROXY_KEY:+,${AION_CONSOLE_PROXY_KEY}:console_proxy}"
+
+      # Audit trail HMAC (F-03) — obrigatório. Gere com: openssl rand -hex 32
+      AION_SESSION_AUDIT_SECRET: ${AION_SESSION_AUDIT_SECRET}
+
+      # Cost cap obrigatório (F-36) — Transparent significa que AION chama o
+      # LLM com a credencial do cliente; sem cap, uma request grande pode
+      # esgotar o orçamento. O cap por tenant é configurado via
+      # PUT /v1/budget/{tenant} depois do boot.
+      AION_BUDGET_ENABLED: "true"
 
       # LLM do cliente — configure conforme o provider utilizado
       # OpenAI:
@@ -72,7 +93,8 @@ services:
       AION_REQUIRE_TENANT: "false"
       AION_DEFAULT_TENANT: "default"
 
-      # Redis local — velocity detection, decision cache, session audit
+      # Redis local — velocity detection, decision cache, session audit,
+      # durable counters, explain store (F-07/F-10).
       REDIS_URL: "redis://redis:6379/0"
 
       # Telemetria externa DESLIGADA — zero dados saem do ambiente
