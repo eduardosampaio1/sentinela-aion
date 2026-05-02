@@ -2,6 +2,9 @@
 
 These tests use the real embedding model (sentence-transformers) to verify
 that semantic classification works correctly — NOT pattern matching.
+
+P1.B (qa-ceifador): the entire file is marked `requires_embeddings`, so
+lean CI environments can skip it with `pytest -m "not requires_embeddings"`.
 """
 
 import pytest
@@ -9,6 +12,8 @@ from pathlib import Path
 
 from aion.config import EstixeSettings
 from aion.estixe.classifier import SemanticClassifier
+
+pytestmark = pytest.mark.requires_embeddings
 
 
 @pytest.fixture

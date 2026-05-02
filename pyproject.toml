@@ -42,6 +42,13 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    # P1.B (qa-ceifador): explicit dependency markers so the suite can be
+    # sliced by infrastructure availability. Default `pytest` runs everything;
+    # use `-m "not requires_embeddings"` etc. on lean CI environments.
+    "requires_embeddings: test depends on sentence-transformers + a downloaded model (sentence-transformers/all-MiniLM-L6-v2). Skip in environments without the embedding model cached.",
+    "requires_redis: test depends on a reachable REDIS_URL. Skip if Redis is not provisioned.",
+    "requires_docker: test exercises the docker-compose stack end-to-end. Skip on hosts without docker.",
+    "requires_llm: test would issue a real LLM call (no mocks). Skip on CI without LLM credentials.",
 ]
 
 [tool.ruff]
