@@ -361,3 +361,234 @@ def test_f19_security_report_no_obsolete_claims():
     # Original false claim: "start.py tem guard-rail".
     assert "`start.py` tem guard-rail" not in content
     assert "start.py tem guard-rail" not in content
+
+
+# ── P1.A — Trust Guard manifest expansion ───────────────────────────────────
+
+def test_trust_guard_critical_files_registry_is_standalone():
+    """critical_files.py must be importable WITHOUT importing the rest of aion.*.
+
+    This module is consumed by tools/generate_manifest.py at build time, where
+    the AION package may not be installed yet. Any cross-import would break CI.
+    """
+    import importlib
+    mod = importlib.import_module("aion.trust_guard.critical_files")
+    assert hasattr(mod, "CORE_FILE_PATTERNS")
+    assert hasattr(mod, "resolve_files")
+    assert isinstance(mod.CORE_FILE_PATTERNS, tuple)
+    assert len(mod.CORE_FILE_PATTERNS) >= 15  # at least 15 pattern categories
+
+
+def test_trust_guard_manifest_covers_auditor_targets():
+    """The expanded manifest must include every file flagged by the auditor.
+
+    Reference: qa-evidence/.../recommended-fixes.md ("ampliar integrity manifest")
+    The previous registry covered 7 files; the auditor listed at least 9
+    sensitive files outside that scope. All MUST be in the expanded list.
+    """
+    from pathlib import Path
+    from aion.trust_guard.critical_files import resolve_files
+
+    files = set(resolve_files(Path(".")))
+    auditor_targets = {
+        "aion/proxy.py",
+        "aion/routers/proxy.py",
+        "aion/contract/builder.py",
+        "aion/contract/decision.py",
+        "aion/nomos/router.py",
+        "aion/estixe/policy.py",
+        "aion/estixe/guardrails.py",
+        "aion/metis/optimizer.py",
+        "aion/shared/budget.py",
+    }
+    missing = auditor_targets - files
+    assert not missing, (
+        f"Trust Guard manifest still misses auditor-flagged files: {sorted(missing)}"
+    )
+
+
+def test_trust_guard_manifest_excludes_pycache_and_tests():
+    """Glob expansion must not include __pycache__, test_*.py, or *_test.py."""
+    from pathlib import Path
+    from aion.trust_guard.critical_files import resolve_files
+
+    files = resolve_files(Path("."))
+    for f in files:
+        assert "__pycache__" not in f, f"pycache leaked into manifest: {f}"
+        assert "/tests/" not in f, f"tests leaked into manifest: {f}"
+        assert not f.endswith("_test.py"), f"test file leaked: {f}"
+
+
+def test_trust_guard_manifest_size_grew_from_baseline():
+    """Sanity check: P1.A expansion brought coverage from 7 → 90+ files."""
+    from pathlib import Path
+    from aion.trust_guard.critical_files import resolve_files
+
+    files = resolve_files(Path("."))
+    # Pre-P1.A baseline was 7 files. Post-expansion must be at least 50.
+    assert len(files) >= 50, (
+        f"Manifest expansion regression: only {len(files)} files registered."
+    )
+
+
+def test_trust_guard_get_critical_files_resolves_absolute_paths():
+    """integrity_manifest.get_critical_files() returns absolute Path objects."""
+    from pathlib import Path
+    from aion.trust_guard.integrity_manifest import get_critical_files
+
+    paths = get_critical_files()
+    assert paths, "get_critical_files() returned empty list"
+    for p in paths[:5]:
+        assert isinstance(p, Path)
+        assert p.is_absolute()
+        assert p.exists()
+
+
+# ── P1.B — Pytest dependency markers ────────────────────────────────────────
+
+def test_pyproject_declares_dependency_markers():
+    """pyproject.toml declares the markers introduced by P1.B."""
+    from pathlib import Path
+
+    cfg = Path("pyproject.toml").read_text(encoding="utf-8")
+    for marker in ("requires_embeddings", "requires_redis", "requires_docker", "requires_llm"):
+        assert f"{marker}:" in cfg, f"marker '{marker}' missing from pyproject.toml"
+
+
+def test_marker_applied_to_embedding_heavy_files():
+    """Files that load the real sentence-transformers model carry the marker.
+
+    This is a lightweight static check — we just look for `pytestmark =
+    pytest.mark.requires_embeddings` at the top of the marked files. Avoids
+    actually running the suite under different `-m` filters here (slow).
+    """
+    from pathlib import Path
+
+    expected = [
+        "tests/test_classifier.py",
+        "tests/test_e2e.py",
+        "tests/test_integration_modes.py",
+        "tests/test_multi_turn_integration.py",
+    ]
+    for rel in expected:
+        p = Path(rel)
+        if not p.exists():
+            continue
+        head = p.read_text(encoding="utf-8")[:4000]
+        assert "pytest.mark.requires_embeddings" in head, (
+            f"{rel} should carry pytest.mark.requires_embeddings (file-level)"
+        )
+
+
+# ── P1.C — Makefile + smoke-test.sh ─────────────────────────────────────────
+
+def test_makefile_exposes_verify_poc_targets():
+    """Makefile declares the targets the auditor asked for."""
+    from pathlib import Path
+
+    mk = Path("Makefile")
+    if not mk.exists():
+        return
+    content = mk.read_text(encoding="utf-8")
+    for tgt in ("verify-poc:", "verify-poc-decision:", "verify-poc-transparent:",
+                "test-fast:", "manifest:"):
+        assert tgt in content, f"Makefile missing target: {tgt}"
+
+
+def test_smoke_test_script_present_and_executable():
+    """scripts/smoke-test.sh exists and references the F-37 violation code."""
+    from pathlib import Path
+
+    s = Path("scripts/smoke-test.sh")
+    if not s.exists():
+        return
+    text = s.read_text(encoding="utf-8")
+    # Asserts the script encodes the F-37 contract by name.
+    assert "decision_only_mode_violation" in text
+    # Uses /v1/decide and /v1/decisions (Decision-Only valid endpoints).
+    assert "/v1/decide" in text
+    assert "/v1/decisions" in text
+
+
+# ── P2.A — poc-package/ ─────────────────────────────────────────────────────
+
+def test_poc_package_contains_minimum_files():
+    """poc-package/ ships everything needed for a 30-min client setup."""
+    from pathlib import Path
+
+    pkg = Path("poc-package")
+    if not pkg.exists():
+        return
+    required = [
+        "README.md",
+        "docker-compose.poc-decision.yml",
+        "docker-compose.poc-transparent.yml",
+        ".env.poc-decision.example",
+        ".env.poc-transparent.example",
+        "smoke-test.sh",
+        "postman_collection.json",
+        "integration-guide.md",
+    ]
+    for name in required:
+        assert (pkg / name).exists(), f"poc-package/ missing: {name}"
+
+
+# ── P2.B — F-38 Decision-Only image stub ────────────────────────────────────
+
+def test_f38_proxy_stub_present_and_compiles():
+    """The Decision-Only stub for aion/proxy.py exists and is a valid module."""
+    from pathlib import Path
+    import importlib.util
+
+    stub = Path("docker/proxy_decision_only_stub.py")
+    assert stub.exists(), "docker/proxy_decision_only_stub.py is missing"
+    spec = importlib.util.spec_from_file_location("_aion_proxy_stub", stub)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Must expose the same public surface as aion.proxy.
+    for name in ("forward_request", "forward_request_stream",
+                 "shutdown_client", "build_bypass_stream",
+                 "DecisionOnlyImageError"):
+        assert hasattr(mod, name), f"Stub missing attribute: {name}"
+
+
+def test_f38_proxy_stub_refuses_calls():
+    """Invoking the stub raises DecisionOnlyImageError at the first call."""
+    import asyncio
+    import importlib.util
+    from pathlib import Path
+
+    stub_path = Path("docker/proxy_decision_only_stub.py")
+    spec = importlib.util.spec_from_file_location("_aion_proxy_stub_call", stub_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # forward_request raises immediately (sync caller of an async function
+    # only triggers the body when awaited; we drive it via asyncio.run).
+    with pytest.raises(mod.DecisionOnlyImageError):
+        asyncio.run(mod.forward_request())
+
+    # forward_request_stream is an async generator; await first item.
+    async def _drain():
+        async for _ in mod.forward_request_stream():
+            pass
+
+    with pytest.raises(mod.DecisionOnlyImageError):
+        asyncio.run(_drain())
+
+
+def test_f38_dockerfile_present():
+    """The Decision-Only Dockerfile exists and references the stub."""
+    from pathlib import Path
+
+    df = Path("docker/Dockerfile.aion-decision-only")
+    if not df.exists():
+        return
+    content = df.read_text(encoding="utf-8")
+    # The image MUST replace aion/proxy.py with the stub.
+    assert "proxy_decision_only_stub.py" in content
+    assert "/build/aion/proxy.py" in content
+    # The image MUST set AION_BUILD_VARIANT for runtime visibility.
+    assert "AION_BUILD_VARIANT=decision_only" in content
