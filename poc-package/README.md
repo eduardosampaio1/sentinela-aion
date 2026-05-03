@@ -5,6 +5,14 @@ o operador precisa para colocar o stack de pé em ≤30 minutos. **Nada do
 código-fonte do AION está aqui** — o image GHCR e o license JWT são
 suficientes.
 
+> **Sobre o web console:** o `aion-console` (Next.js) **não está embutido**
+> neste pacote autocontido. Validação da POC vai por API + Postman +
+> `smoke-test.sh` (suficiente para CISO/banco). Razão: não há imagem GHCR
+> pública do console hoje (`publish.yml` só publica o backend), e duplicar
+> o source tree do Next.js dentro do package quebraria a promessa de
+> "nada do código-fonte do AION está aqui". Quem quiser o console
+> visual usa o `docker-compose.poc-decision.yml` da raiz do repositório.
+
 ## Conteúdo
 
 | Arquivo | Para quê |
@@ -23,11 +31,13 @@ suficientes.
 ```bash
 # 1) Variáveis de ambiente
 cp .env.poc-decision.example .env
-# Edite .env e preencha as 5 envs marcadas:
+# Edite .env e preencha as 3 envs obrigatórias:
 #   AION_LICENSE                  (JWT da Baluarte)
 #   AION_ADMIN_KEY                (chave humana :admin)
-#   AION_CONSOLE_PROXY_KEY        (openssl rand -hex 24)
 #   AION_SESSION_AUDIT_SECRET     (openssl rand -hex 32)
+#
+# Opcionais (apenas se você for rodar o console fora deste package):
+#   AION_CONSOLE_PROXY_KEY        (openssl rand -hex 24)
 #   CONSOLE_AUTH_SECRET           (openssl rand -hex 32)
 
 # 2) Subir
@@ -45,8 +55,9 @@ Esperado: todos os checks `[PASS]`, exit 0.
 2. Ler [`integration-guide.md`](integration-guide.md) para integrar a app
    do cliente com `POST /v1/decide` (Decision-Only) ou `POST /v1/chat/completions`
    (Transparent).
-3. Acessar console em http://localhost:3000 (POC Decision) — login SSO
-   conforme `.env` do console.
+3. (Opcional) Console visual: subir o stack do **repositório raiz**
+   (`docker-compose.poc-decision.yml` da raiz do repo) que inclui o
+   serviço `aion-console`. Esse compose precisa do source tree completo.
 
 ## Suporte
 
