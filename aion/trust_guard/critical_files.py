@@ -33,9 +33,16 @@ from pathlib import Path
 
 # ── Tier A: Python core file patterns ──────────────────────────────────────────
 # Globs are relative to the project root (folder containing the `aion/` package).
-# Resolved with Path.glob() — matches files only, not directories.
+# Resolved by `resolve_files()` — supports three pattern shapes:
+#   1. Literal file path (no glob char):    "aion/cli.py"
+#   2. Single-level glob (one `*`):         "aion/cli.py" / "aion/routers/__*.py"
+#   3. Recursive glob (`**`):               "aion/estixe/**/*.py"
+#
+# Codex pos-PR-10 review: the previous "aion/<module>/*.py" patterns missed
+# nested files like aion/estixe/tools/seed_quality.py. We now use **/*.py for
+# every module that has (or may have in the future) sub-packages.
 CORE_FILE_PATTERNS: tuple[str, ...] = (
-    # Top-level package
+    # Top-level package — flat files
     "aion/__init__.py",
     "aion/cli.py",
     "aion/config.py",
@@ -47,29 +54,29 @@ CORE_FILE_PATTERNS: tuple[str, ...] = (
     "aion/proxy.py",
     "aion/supabase_writer.py",
     # HTTP routers — entrypoints that handle every request
-    "aion/routers/*.py",
+    "aion/routers/**/*.py",
     # Decision contract — emitted on every request, central to the audit story
-    "aion/contract/*.py",
-    # ESTIXE — block / bypass / policy / guardrails / risk / threat
-    "aion/estixe/*.py",
+    "aion/contract/**/*.py",
+    # ESTIXE — block / bypass / policy / guardrails / risk / threat (+ tools/)
+    "aion/estixe/**/*.py",
     # NOMOS — model registry, complexity classifier, cost calc, router
-    "aion/nomos/*.py",
+    "aion/nomos/**/*.py",
     # METIS — compressor, behavior dial, optimizer
-    "aion/metis/*.py",
+    "aion/metis/**/*.py",
     # NEMOS — economics tracker, intent memory, baselines, recommendations
-    "aion/nemos/*.py",
+    "aion/nemos/**/*.py",
     # Shared core — schemas, RBAC contracts, budget store, telemetry, tokens
-    "aion/shared/*.py",
+    "aion/shared/**/*.py",
     # Cache layer (semantic cache, vector store)
-    "aion/cache/*.py",
+    "aion/cache/**/*.py",
     # Adapter layer (LLM connection abstraction)
-    "aion/adapter/*.py",
+    "aion/adapter/**/*.py",
     # Collective / marketplace / reports — feature surfaces
-    "aion/collective/*.py",
-    "aion/marketplace/*.py",
-    "aion/reports/*.py",
+    "aion/collective/**/*.py",
+    "aion/marketplace/**/*.py",
+    "aion/reports/**/*.py",
     # Trust Guard internals (manifest verifier, license authority, etc.)
-    "aion/trust_guard/*.py",
+    "aion/trust_guard/**/*.py",
 )
 
 # Files that exist as glob matches but should NEVER be included in the manifest.
@@ -102,16 +109,35 @@ def resolve_files(root: Path) -> list[str]:
     Returns:
         Sorted list of POSIX-style relative paths (e.g. "aion/routers/proxy.py").
         Each path corresponds to an existing file on disk; missing files are
-        skipped (so a glob like "aion/marketplace/*.py" that has no matches
+        skipped (so a glob like "aion/marketplace/**/*.py" that has no matches
         contributes nothing rather than appearing as MISSING).
+
+    Pattern shapes supported:
+        - Literal file path:   "aion/cli.py"
+        - Single-level glob:   "aion/routers/*.py"     (immediate children only)
+        - Recursive glob:      "aion/estixe/**/*.py"   (all descendants)
     """
     root = Path(root)
     seen: set[str] = set()
     for pattern in CORE_FILE_PATTERNS:
-        # Path.glob does not support arbitrary patterns from the start of a
-        # relative path; we split off the literal prefix before the first '*'.
-        if "*" in pattern:
-            # e.g. "aion/routers/*.py" → glob "*.py" inside "aion/routers"
+        if "**" in pattern:
+            # Recursive: "aion/estixe/**/*.py" → rglob("*.py") inside "aion/estixe".
+            # We use rglob (not Path.glob with **) for explicit recursion semantics
+            # across all supported Python versions and to avoid surprises if the
+            # pattern ever evolves beyond a simple "**/<glob>" tail.
+            prefix, _, tail = pattern.partition("/**/")
+            base = root / prefix
+            if not base.is_dir():
+                continue
+            for match in base.rglob(tail):
+                if not match.is_file():
+                    continue
+                rel = str(match.relative_to(root)).replace("\\", "/")
+                if _is_excluded(rel):
+                    continue
+                seen.add(rel)
+        elif "*" in pattern:
+            # Single level: "aion/routers/*.py" → glob "*.py" inside "aion/routers"
             prefix, _, glob = pattern.rpartition("/")
             base = root / prefix
             if not base.is_dir():
@@ -124,7 +150,7 @@ def resolve_files(root: Path) -> list[str]:
                     continue
                 seen.add(rel)
         else:
-            # Literal path
+            # Literal file path
             full = root / pattern
             if full.is_file():
                 rel = str(full.relative_to(root)).replace("\\", "/")
