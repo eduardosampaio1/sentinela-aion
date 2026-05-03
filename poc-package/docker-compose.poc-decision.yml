@@ -1,4 +1,4 @@
-# AION — POC Decision-Only
+# AION — POC Decision-Only (self-contained package)
 # ============================================================
 # MODO RECOMENDADO para banco, telecom e enterprise restritivo.
 #
@@ -11,8 +11,7 @@
 #
 # Setup:
 #   cp .env.poc-decision.example .env
-#   # Edite .env com AION_LICENSE, AION_ADMIN_KEY, AION_CONSOLE_PROXY_KEY,
-#   # AION_SESSION_AUDIT_SECRET e CONSOLE_AUTH_SECRET (todos obrigatórios)
+#   # Edite .env com AION_LICENSE, AION_ADMIN_KEY, AION_SESSION_AUDIT_SECRET
 #   docker compose -f docker-compose.poc-decision.yml up -d
 #
 # Verificar:
@@ -34,6 +33,9 @@
 #   continue → AION aprovado — chame seu próprio LLM normalmente
 #
 # Não inclui:
+#   - aion-console (web UI). Validação da POC vai por API + Postman + smoke-test.sh.
+#     O console roda no compose raiz do repositório (não está no pacote autocontido
+#     porque não há imagem GHCR pública do console hoje). Detalhes em README.md.
 #   - credencial de LLM (AION não chama LLM neste modo)
 #   - telemetria externa (Baluarte/ARGOS não são dependência desta POC)
 #   - Supabase ou qualquer serviço da Baluarte
@@ -54,11 +56,12 @@ services:
       # AION_PROFILE=production e garanta TODAS as envs abaixo configuradas.
       AION_PROFILE: ${AION_PROFILE:-staging}
 
-      # Auth admin + console proxy.
-      # AION_ADMIN_KEY combina (a) chave de operação humana e (b) chave do
-      # console como `console_proxy` — sem `console_proxy` o console retorna 401
-      # ao chamar /v1/admin/*. Formato: "chave1:admin,chave2:console_proxy".
-      AION_ADMIN_KEY: ${AION_ADMIN_KEY},${AION_CONSOLE_PROXY_KEY}:console_proxy
+      # Auth admin.
+      # Como o console não está embutido neste pacote autocontido, a chave de
+      # console_proxy é opcional. Se você for rodar o aion-console fora deste
+      # package (compose raiz ou render.yaml), defina AION_CONSOLE_PROXY_KEY
+      # no .env e ela é anexada como ":console_proxy" automaticamente.
+      AION_ADMIN_KEY: "${AION_ADMIN_KEY}${AION_CONSOLE_PROXY_KEY:+,${AION_CONSOLE_PROXY_KEY}:console_proxy}"
 
       # Audit trail HMAC (F-03) — obrigatório. Sem este segredo a trilha de
       # auditoria fica forjável (SHA-256 sem HMAC). Gere com: openssl rand -hex 32
@@ -109,35 +112,19 @@ services:
         limits:
           memory: 1G
 
-  aion-console:
-    build:
-      context: ./aion-console
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      NODE_ENV: production
-      # Segredo de sessão (NextAuth v5). OBRIGATÓRIO. Sem fallback —
-      # se ${CONSOLE_AUTH_SECRET} estiver vazio o compose recusa a subir.
-      # Gere com: openssl rand -hex 32
-      AUTH_SECRET: ${CONSOLE_AUTH_SECRET:?CONSOLE_AUTH_SECRET is required (openssl rand -hex 32)}
-      NEXT_PUBLIC_AION_TENANT: default
-      NEXT_PUBLIC_DEMO_MODE: "false"
-      AION_DEFAULT_ROLE: viewer
-      # Aponta para o runtime na rede interna do compose
-      AION_API_URL: http://aion:8080
-      # Chave de serviço usada pelo proxy server-side do console no header
-      # `Authorization: Bearer <AION_API_KEY>`. Tem que casar com a chave
-      # console_proxy declarada em AION_ADMIN_KEY no serviço `aion`.
-      AION_API_KEY: ${AION_CONSOLE_PROXY_KEY:?AION_CONSOLE_PROXY_KEY is required}
-    depends_on:
-      aion:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+  # NOTE: aion-console removed from this self-contained package.
+  # Reason: the console build (Next.js) requires the aion-console/ source tree,
+  # which is NOT bundled inside poc-package/ to avoid duplicating thousands of
+  # lines of frontend code. There is no public GHCR image for the console yet
+  # (the publish.yml workflow only releases the backend image
+  # ghcr.io/eduardosampaio1/sentinela-aion). Once a console image is published,
+  # this package can add it back as `image: ghcr.io/.../sentinela-aion-console:poc`.
+  #
+  # Until then, validate the POC via:
+  #   - smoke-test.sh decision http://localhost:8080  (this package)
+  #   - postman_collection.json                       (this package)
+  #   - the dev console served by the compose at the repo root
+  #     (docker-compose.poc-decision.yml at the repo root keeps the console)
 
   redis:
     image: redis:7-alpine
