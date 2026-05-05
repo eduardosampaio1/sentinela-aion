@@ -10,10 +10,11 @@ import logging
 from collections import OrderedDict
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from aion.config import get_metis_settings
 from aion.shared.schemas import ChatCompletionRequest, ChatMessage
+from aion.shared.strict_model import StrictModel
 
 logger = logging.getLogger("aion.metis.behavior")
 
@@ -24,13 +25,47 @@ _redis_client = None
 _redis_available = False
 
 
-class BehaviorConfig(BaseModel):
-    """Behavior dial settings."""
+class BehaviorConfig(StrictModel):
+    """Behavior dial settings.
+
+    Schema is the union of the dials used by Metis internally
+    (`density`, `cost_target`) and the dials exposed by the console UI
+    (`objectivity`, `verbosity`, `economy`, `confidence`, `safe_mode`).
+    Sharing a single Pydantic model keeps a single source of truth and lets
+    `extra="forbid"` (inherited from StrictModel) catch typos / contract
+    drift loudly instead of silently discarding fields (see C2 in
+    qa-evidence/console-backend-integration).
+
+    Note: `safe_mode` here is an INT 0–100 user-facing dial (how conservative
+    the model behavior should be). It is unrelated to the Kill Switch
+    `safe_mode` boolean in `AionSettings.safe_mode`. Different namespaces.
+
+    `version` is a monotonic counter incremented on every successful update.
+    The console reads it via GET and sends it back in PUT — a stale version
+    yields HTTP 409 from the router so concurrent edits don't last-write-wins
+    (N4 fix).
+    """
+
+    # ── Backend-internal dials (consumed by metis/optimizer.py) ──
     objectivity: int = Field(default=50, ge=0, le=100)
     density: int = Field(default=50, ge=0, le=100)
     explanation: int = Field(default=50, ge=0, le=100)
     cost_target: str = Field(default="medium")  # free | low | medium | high
     formality: int = Field(default=50, ge=0, le=100)
+
+    # ── Console UI dials (sent by routing-page slider, behavior-estimate) ──
+    # Stored alongside the internal dials so the UI can roundtrip its state
+    # without losing user intent. Future work can collapse `verbosity`/`density`
+    # and `economy`/`cost_target` once a single canonical name is chosen.
+    verbosity: int = Field(default=50, ge=0, le=100)
+    economy: int = Field(default=50, ge=0, le=100)
+    confidence: int = Field(default=50, ge=0, le=100)
+    safe_mode: int = Field(default=50, ge=0, le=100)
+
+    # ── Optimistic concurrency (N4 fix) ──
+    # Bumped by the router on each successful PUT. Clients send the version
+    # they last read in `if_version`; mismatch → 409.
+    version: int = Field(default=0, ge=0)
 
 
 async def _get_redis():

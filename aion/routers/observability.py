@@ -370,8 +370,72 @@ async def tenant_metrics(tenant_id: str):
 
 @router.get("/v1/models", tags=["Observability"])
 async def list_models():
+    """List configured models with their real, current status.
+
+    Source of truth: `config/models.yaml` (loaded by NOMOS ModelRegistry).
+    Status is derived live from:
+      - `inactive`: model is in the YAML but the env var named in `api_key_env`
+        is not set (no credential provisioned for that provider).
+      - `error`:    provider's circuit breaker is currently OPEN (see
+        `aion.proxy._cb_open_until`). Frontend renders this as "Indisponível".
+      - `fallback`: provider has credential AND circuit breaker is healthy,
+        but `enabled=False` in the YAML — operator opted to keep this model
+        as a backup option only.
+      - `active`:   credential present + circuit breaker healthy + enabled.
+
+    Field shape matches `aion-console/src/lib/types.ts:ModelInfo`:
+      id, name, provider, cost_input_per_1m, cost_output_per_1m,
+      max_tokens, latency_ms, capabilities[], status.
+
+    Cost is converted from `cost_per_1k_*` (YAML) to `cost_*_per_1m`
+    (frontend) by multiplying by 1000.
+
+    See N1+N2 fix in qa-evidence/console-backend-integration.
+    """
+    import time as _time
+    from aion.nomos import get_module as get_nomos_module
+    from aion.proxy import _cb_open_until  # process-local CB state
+
+    nomos = get_nomos_module()
+    # Lazy initialize so /v1/models works even if no chat traffic flowed yet.
+    if not nomos._initialized:
+        try:
+            await nomos.initialize()
+        except Exception as exc:
+            logger.warning("NOMOS registry load failed: %s", exc)
+            return {"models": [], "error": "registry_load_failed"}
+
     settings = get_settings()
-    return {"models": [{"id": settings.default_model, "provider": settings.default_provider, "type": "default"}]}
+    default_name = settings.default_model
+    now = _time.time()
+
+    out: list[dict] = []
+    for m in nomos._registry.all_models():
+        # Derive live status
+        if not m.has_api_key:
+            status = "inactive"
+        elif _cb_open_until.get(m.provider, 0) > now:
+            status = "error"
+        elif not m.enabled:
+            status = "fallback"
+        else:
+            status = "active"
+
+        out.append({
+            "id": m.name,
+            "name": m.name,
+            "provider": m.provider,
+            "cost_input_per_1m": round(m.cost_per_1k_input * 1000.0, 3),
+            "cost_output_per_1m": round(m.cost_per_1k_output * 1000.0, 3),
+            "max_tokens": m.max_tokens,
+            "latency_ms": m.latency_p50_ms,
+            "capabilities": list(m.capabilities),
+            "status": status,
+            # Convenience flag — lets the UI mark the configured default model.
+            "is_default": (m.name == default_name),
+        })
+
+    return {"models": out}
 
 
 @router.get("/version", tags=["Observability"])

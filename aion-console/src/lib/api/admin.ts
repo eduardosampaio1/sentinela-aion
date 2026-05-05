@@ -1,4 +1,4 @@
-import { fetchApi, getActiveTenant } from "./_core";
+import { fetchApi } from "./_core";
 
 // ─── Approvals (Human-in-the-loop) ───────────────────────────────────────────
 
@@ -60,16 +60,7 @@ export async function deleteTenantData(
 }
 
 // ─── Tenant settings ──────────────────────────────────────────────────────────
-
-export async function getTenantSettings(): Promise<Record<string, unknown>> {
-  return fetchApi(`/v1/tenant/${getActiveTenant()}/settings`);
-}
-
-export async function updateTenantSettings(
-  settings: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  return fetchApi(`/v1/tenant/${getActiveTenant()}/settings`, {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
-}
+// Removed in M1 fix: getTenantSettings / updateTenantSettings were dead code.
+// The backend never had GET/PUT /v1/tenant/{tenant}/settings, no component in
+// the console called these helpers. Kept this comment as a tombstone so a
+// future reviewer doesn't add the same broken pair back.

@@ -43,13 +43,21 @@ export interface BehaviorDial {
 export interface ModelInfo {
   id: string;
   provider: string;
-  name: string;
-  cost_input_per_1m: number;
-  cost_output_per_1m: number;
-  max_tokens: number;
-  latency_ms: number;
-  capabilities: string[];
-  status: "active" | "inactive" | "fallback";
+  // Below: optional so the UI gracefully handles a minimal {id, provider}
+  // payload (e.g. a backend that only knows the configured default model).
+  name?: string;
+  cost_input_per_1m?: number;
+  cost_output_per_1m?: number;
+  max_tokens?: number;
+  latency_ms?: number;
+  capabilities?: string[];
+  // "active"   — has credential + circuit breaker healthy
+  // "fallback" — has credential but enabled=false in YAML (opt-out backup)
+  // "inactive" — no credential provisioned for the provider
+  // "error"    — circuit breaker is currently OPEN
+  status?: "active" | "inactive" | "fallback" | "error";
+  /** True when this model matches the backend's `default_model` setting. */
+  is_default?: boolean;
 }
 
 export interface RoutingRule {

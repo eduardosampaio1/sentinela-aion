@@ -57,9 +57,35 @@ async function proxyRequest(
     forwardedHeaders["Authorization"] = `Bearer ${API_KEY}`;
   }
 
+  // ── Auth gate (C4/N6 fix) ───────────────────────────────────────────────
+  // FAIL-CLOSED by default. The AION_API_KEY is admin-level — anything that
+  // can hit /api/proxy/* without a session must be rejected before we inject
+  // the upstream credential.
+  //
+  // The only escape hatch is an explicit opt-in env var that does NOT match
+  // any common production config — `AION_PROXY_DEV_BYPASS=true`. This is
+  // checked alongside `NODE_ENV !== "production"` so a misconfigured prod
+  // (NODE_ENV undefined, PM2 without env file, etc.) still gates.
+  const session = await auth();
+  const allowDevBypass =
+    process.env.NODE_ENV !== "production" &&
+    process.env.AION_PROXY_DEV_BYPASS === "true";
+
+  if (!session?.user && !allowDevBypass) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized", reason: "no_session" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  if (!session?.user && allowDevBypass) {
+    // Dev opt-in is loud so we don't silently teach bad habits.
+    console.warn(
+      "[proxy] DEV BYPASS active (AION_PROXY_DEV_BYPASS=true) — request reaching backend without session",
+    );
+  }
+
   // Inject actor identity from the authenticated NextAuth session.
   // These headers let the AION backend record who performed each action.
-  const session = await auth();
   if (session?.user) {
     if (session.user.email) {
       forwardedHeaders["X-Aion-Actor-Id"] = session.user.email;

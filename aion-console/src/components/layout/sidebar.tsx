@@ -69,7 +69,7 @@ const navGroups = [
   {
     label: "Inteligência",
     items: [
-      { href: "/intelligence", label: "Inteligência NEMOS", icon: Brain },
+      { href: "/intelligence", label: "Inteligência", icon: Brain },
       { href: "/policies", label: "Comportamento", icon: SlidersHorizontal },
       { href: "/routing", label: "Roteamento", icon: GitBranch },
       { href: "/estixe", label: "Proteção", icon: Shield },
