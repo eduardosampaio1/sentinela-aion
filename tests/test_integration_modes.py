@@ -1,4 +1,11 @@
-"""End-to-end tests for the 3 integration modes: Transparent, Assisted, Decision."""
+"""End-to-end tests for the 3 integration modes: Transparent, Assisted, Decision.
+
+P1.B (qa-ceifador): tests in this file walk the full pipeline including
+ESTIXE bypass classification, which requires the sentence-transformers
+embedding model. Without it, the bypass classifier degrades to passthrough
+and CONTINUE-then-LLM-mock paths fail with 502 (auditor reproduced this).
+Marked `requires_embeddings` so lean CI runs can skip the file safely.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +14,8 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.requires_embeddings
 
 
 @pytest.fixture

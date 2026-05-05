@@ -20,6 +20,9 @@ import {
   Copy,
   Power,
 } from "lucide-react";
+// Note: activateKillswitch + toggleModule moved to /settings (Configurações).
+// This page keeps only the read-only deactivate path so emergencies can be
+// resolved fast from any context.
 import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import { Toggle } from "@/components/ui/toggle";
 import { Badge } from "@/components/ui/badge";
@@ -35,22 +38,18 @@ import {
   rejectSuggestion,
   getStats,
   getKillswitch,
-  activateKillswitch,
   deactivateKillswitch,
-  toggleModule,
 } from "@/lib/api";
 import { useApiData } from "@/lib/use-api-data";
 import type { IntentSuggestion, SuggestionApprovalResponse } from "@/lib/types";
 
 export function EstixePage() {
-  const [bypassEnabled, setBypassEnabled] = useState(true);
   const [intents, setIntents] = useState(mockIntents);
   const [securityRules, setSecurityRules] = useState(mockSecurityRules);
   const [bypassConfidence, setBypassConfidence] = useState(85);
   const [blockConfidence, setBlockConfidence] = useState(70);
   const [initialBypassConfidence] = useState(85);
   const [initialBlockConfidence] = useState(70);
-  const [showBypassWarning, setShowBypassWarning] = useState(false);
   const [showConfirmThreshold, setShowConfirmThreshold] = useState(false);
   const [thresholdSaved, setThresholdSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -99,19 +98,17 @@ export function EstixePage() {
     { intervalMs: 30_000 },
   );
 
-  // ─── Kill switch ──────────────────────────────────────────────────────────────
+  // ─── Kill switch — read-only on this page ────────────────────────────────────
+  // The activate control lives in /settings (Configurações → Controles avançados)
+  // to prevent accidental clicks. This page only surfaces the active warning
+  // banner with a fast-deactivate path for emergencies.
   const [ksActive, setKsActive] = useState(false);
   const [ksReason, setKsReason] = useState<string | null>(null);
   const [ksExpires, setKsExpires] = useState<number | null>(null);
   const [ksLoading, setKsLoading] = useState(true);
-  const [showKsModal, setShowKsModal] = useState(false);
-  const [ksReasonInput, setKsReasonInput] = useState("");
-  const [ksActivating, setKsActivating] = useState(false);
   const [ksDeactivating, setKsDeactivating] = useState(false);
   const [ksDeactivateError, setKsDeactivateError] = useState<string | null>(null);
   const [showKsDeactivateConfirm, setShowKsDeactivateConfirm] = useState(false);
-  const [bypassConfirmLoading, setBypassConfirmLoading] = useState(false);
-  const [bypassConfirmError, setBypassConfirmError] = useState<string | null>(null);
 
   useEffect(() => {
     getKillswitch()
@@ -123,23 +120,6 @@ export function EstixePage() {
       .catch(() => {})
       .finally(() => setKsLoading(false));
   }, []);
-
-  const handleActivateKs = async () => {
-    if (!ksReasonInput.trim()) return;
-    setKsActivating(true);
-    try {
-      const res = await activateKillswitch(ksReasonInput.trim());
-      setKsActive(true);
-      setKsReason(res.reason);
-      setKsExpires(res.expires_at);
-      setShowKsModal(false);
-      setKsReasonInput("");
-    } catch {
-      // silent — UI stays in modal, user can retry
-    } finally {
-      setKsActivating(false);
-    }
-  };
 
   const handleDeactivateKs = async (reason: string) => {
     setKsDeactivating(true);
@@ -242,29 +222,6 @@ export function EstixePage() {
     } catch {}
     setEditingIntent(null);
     setEditingResponse("");
-  };
-
-  const handleBypassToggle = (enabled: boolean) => {
-    if (!enabled) {
-      setShowBypassWarning(true);
-    } else {
-      setBypassEnabled(true);
-      toggleModule("estixe", true).catch(() => {});
-    }
-  };
-
-  const confirmDisableBypass = async (reason: string) => {
-    setBypassConfirmLoading(true);
-    setBypassConfirmError(null);
-    try {
-      await toggleModule("estixe", false, reason);
-      setBypassEnabled(false);
-      setShowBypassWarning(false);
-    } catch (err) {
-      setBypassConfirmError(err instanceof Error ? err.message : "Erro ao desativar bypass");
-    } finally {
-      setBypassConfirmLoading(false);
-    }
   };
 
   const toggleIntent = (id: string) => {
@@ -392,14 +349,14 @@ export function EstixePage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          <span className="text-teal-600">ESTIXE</span> — Proteção
+          Proteção
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
           Controle e proteção em tempo real. Cada bloqueio e desvio economiza custo e reduz risco.
         </p>
       </div>
 
-      {/* ═══ HERO — Impacto do ESTIXE ═══ */}
+      {/* HERO — Impacto da proteção */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-teal-800/50 bg-gradient-to-br from-teal-950/50 to-transparent p-4">
           <div className="flex items-center gap-2 text-xs font-medium text-teal-600">
@@ -443,110 +400,14 @@ export function EstixePage() {
         </div>
       </div>
 
-      {/* ═══ KILL SWITCH — Controle de emergência ═══ */}
-      {!ksLoading && !ksActive && (
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5">
-              <Power className="h-4.5 w-4.5 h-[18px] w-[18px] text-[var(--color-text-muted)]" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-[var(--color-text)]">Kill Switch</p>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Para todo o AION imediatamente. Use apenas em emergências.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowKsModal(true)}
-            className="shrink-0 cursor-pointer rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-1.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-900/40 hover:text-red-300"
-          >
-            Ativar Kill Switch
-          </button>
-        </div>
-      )}
-
-      {/* ═══ MASTER CONTROL — Bypass ═══ */}
-      <div className={`rounded-2xl border-2 p-6 transition-all duration-300 ${
-        bypassEnabled
-          ? "border-teal-600/50 bg-gradient-to-r from-teal-950/60 to-teal-900/20"
-          : "border-red-600/60 bg-gradient-to-r from-red-950/70 to-red-900/30"
-      }`}>
-        <div className="flex items-center justify-between gap-6">
-          {/* Left — status */}
-          <div className="flex items-center gap-5">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${
-              bypassEnabled ? "bg-teal-900/60" : "bg-red-900/60"
-            }`}>
-              <Zap className={`h-7 w-7 ${bypassEnabled ? "text-teal-300" : "text-red-400"}`} />
-            </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-base font-bold text-[var(--color-text)]">Desvio inteligente</h2>
-                <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider ${
-                  bypassEnabled
-                    ? "bg-teal-500/20 text-teal-300"
-                    : "bg-red-500/20 text-red-400"
-                }`}>
-                  {bypassEnabled ? "● Ativo" : "○ Desligado"}
-                </span>
-              </div>
-              <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                {bypassEnabled
-                  ? "Mensagens de baixo risco são respondidas sem chamar a IA"
-                  : "Bypass desativado — 100% das mensagens estão sendo enviadas para a IA"}
-              </p>
-            </div>
-          </div>
-
-          {/* Center — live metrics (only when active) */}
-          {bypassEnabled ? (
-            <div className="hidden flex-1 items-center justify-center gap-8 lg:flex">
-              <div className="text-center">
-                <p className="font-[family-name:var(--font-mono)] text-2xl font-bold text-teal-200">
-                  $ {(stats.cost_saved / 24 * new Date().getHours()).toFixed(2)}
-                </p>
-                <p className="text-xs text-teal-600">economizado hoje</p>
-              </div>
-              <div className="h-8 w-px bg-teal-800/50" />
-              <div className="text-center">
-                <p className="font-[family-name:var(--font-mono)] text-2xl font-bold text-teal-200">
-                  {stats.bypasses.toLocaleString("pt-BR")}
-                </p>
-                <p className="text-xs text-teal-600">chamadas desviadas hoje</p>
-              </div>
-              <div className="h-8 w-px bg-teal-800/50" />
-              <div className="text-center">
-                <p className="font-[family-name:var(--font-mono)] text-2xl font-bold text-teal-200">
-                  {(stats.tokens_saved / 1000).toFixed(0)}k
-                </p>
-                <p className="text-xs text-teal-600">tokens poupados</p>
-              </div>
-            </div>
-          ) : (
-            <div className="hidden flex-1 items-center justify-center lg:flex">
-              <div className="flex items-center gap-3 rounded-xl border border-red-700/50 bg-red-900/20 px-5 py-3">
-                <AlertTriangle className="h-5 w-5 shrink-0 text-red-400" />
-                <div>
-                  <p className="text-sm font-semibold text-red-300">Impacto ativo</p>
-                  <p className="text-xs text-red-400">
-                    +$ {stats.cost_saved.toFixed(2)}/dia em custo adicional estimado
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Right — toggle */}
-          <div className="flex shrink-0 flex-col items-center gap-2">
-            <Toggle enabled={bypassEnabled} onChange={handleBypassToggle} label="Desvio ativado" />
-            <span className={`text-[10px] font-medium uppercase tracking-wider ${
-              bypassEnabled ? "text-teal-600" : "text-red-500"
-            }`}>
-              {bypassEnabled ? "Desligar" : "Religar"}
-            </span>
-          </div>
-        </div>
+      {/* Hint: where the master toggles live */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-[var(--color-border)] bg-white/[0.02] px-4 py-2.5 text-xs text-[var(--color-text-muted)]">
+        <span>
+          Para <strong className="font-semibold text-[var(--color-text)]">ligar/desligar</strong> o módulo de proteção, vá em <a href="/operations" className="font-semibold text-[var(--color-primary)] hover:underline">Operação → Módulos ativos</a>.
+        </span>
+        <span className="hidden text-[var(--color-text-muted)]/70 sm:inline">
+          Kill Switch e controles avançados em <a href="/settings" className="font-semibold text-[var(--color-primary)] hover:underline">Configurações</a>.
+        </span>
       </div>
 
       {/* ═══ THREAT CATEGORIES ═══ */}
@@ -601,10 +462,9 @@ export function EstixePage() {
       </div>
 
       {/* Bypass Categories */}
-      {bypassEnabled && (
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--color-text)]">Categorias de desvio</h2>
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">Categorias de desvio</h2>
             <button
               onClick={async () => {
                 if (pendingReload.length === 0) return;
@@ -754,9 +614,8 @@ export function EstixePage() {
               </div>
               );
             })}
-          </div>
         </div>
-      )}
+      </div>
 
       {/* Suggestions — auto-discovery */}
       {suggestionsLoaded && suggestions.length > 0 && (
@@ -1034,7 +893,7 @@ export function EstixePage() {
         </div>
       </div>
 
-      {/* Block Suggestions — NEMOS auto-discovery */}
+      {/* Bloqueios sugeridos — auto-discovery */}
       {blockSuggestions.length > 0 && (
         <div className="rounded-xl border border-red-800/40 bg-gradient-to-br from-red-950/20 to-transparent p-5">
           <div className="mb-4 flex items-start justify-between">
@@ -1257,7 +1116,7 @@ export function EstixePage() {
           <div>
             <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Limites de decisão</h2>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Definem quando o ESTIXE age. Valores mais altos = menos falsos positivos, mais chamadas à IA.
+              Definem quando a proteção age. Valores mais altos = menos falsos positivos, mais chamadas à IA.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1328,69 +1187,6 @@ export function EstixePage() {
         </div>
       </div>
 
-      {/* Bypass Warning Modal */}
-      <ConfirmActionModal
-        open={showBypassWarning}
-        severity="warning"
-        title="Desativar bypass do ESTIXE?"
-        description="Todas as requisições passarão pelo pipeline completo e serão enviadas para a IA."
-        impact={[
-          `• Custo adicional estimado: +$${stats.cost_saved.toFixed(2)}/dia`,
-          `• Chamadas extras à IA: +${stats.bypasses.toLocaleString("pt-BR")}/dia`,
-          "• A mudança tem efeito imediato em produção",
-        ]}
-        actionLabel="Desativar mesmo assim"
-        loading={bypassConfirmLoading}
-        error={bypassConfirmError}
-        onConfirm={confirmDisableBypass}
-        onCancel={() => setShowBypassWarning(false)}
-      />
-
-      {/* Kill Switch — Activate Modal */}
-      {showKsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-2xl">
-            <div className="mb-5 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-900/40">
-                <Power className="h-5 w-5 text-red-400" />
-              </div>
-              <h3 className="text-lg font-bold text-[var(--color-text)]">Ativar Kill Switch?</h3>
-            </div>
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Esta ação para <strong className="text-[var(--color-text)]">imediatamente</strong> todo o tráfego processado pelo AION. Use apenas em situações de emergência.
-            </p>
-            <div className="mt-5">
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                Motivo (obrigatório)
-              </label>
-              <input
-                type="text"
-                value={ksReasonInput}
-                onChange={(e) => setKsReasonInput(e.target.value)}
-                placeholder="Ex: vazamento de dados detectado, ataque em andamento..."
-                autoFocus
-                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-red-600 placeholder:text-[var(--color-text-muted)]/50"
-              />
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => { setShowKsModal(false); setKsReasonInput(""); }}
-                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleActivateKs}
-                disabled={!ksReasonInput.trim() || ksActivating}
-                className="cursor-pointer rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {ksActivating ? "Ativando…" : "Confirmar — Parar AION"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Kill Switch — Deactivate Confirm */}
       <ConfirmActionModal
         open={showKsDeactivateConfirm}
@@ -1415,7 +1211,7 @@ export function EstixePage() {
           <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-xl">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">Alterar limites de decisão?</h3>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Esta mudança afetará como o ESTIXE avalia desvios e bloqueios a partir de agora.
+              Esta mudança afetará como a proteção avalia desvios e bloqueios a partir de agora.
             </p>
 
             {/* Impact summary in modal */}

@@ -24,7 +24,15 @@ def _get_pipeline():
 
 @router.put("/v1/killswitch", tags=["Control Plane"])
 async def activate_killswitch(request: Request):
-    """Activate SAFE_MODE — all modules bypassed, pure passthrough."""
+    """Activate SAFE_MODE — all modules bypassed, pure passthrough.
+
+    Body (all optional):
+        reason: str — human justification recorded for audit.
+        duration_seconds: int — TTL after which the killswitch auto-deactivates.
+
+    Response shape matches the console's expected `getKillswitch()` contract:
+    {killswitch_active, reason, expires_at}.
+    """
     _pipeline = _get_pipeline()
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
@@ -33,8 +41,16 @@ async def activate_killswitch(request: Request):
     except Exception:
         body = {}
     reason = body.get("reason", "manual")
-    _pipeline.activate_safe_mode(reason)
-    return {"status": "safe_mode_active", "reason": reason}
+    duration = body.get("duration_seconds")
+    expires_at: float | None = None
+    if isinstance(duration, (int, float)) and duration > 0:
+        expires_at = time.time() + float(duration)
+    _pipeline.activate_safe_mode(reason, expires_at=expires_at)
+    return {
+        "killswitch_active": True,
+        "reason": reason,
+        "expires_at": expires_at,
+    }
 
 
 @router.delete("/v1/killswitch", tags=["Control Plane"])
@@ -43,16 +59,24 @@ async def deactivate_killswitch():
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
     _pipeline.deactivate_safe_mode()
-    return {"status": "normal_mode_restored"}
+    return {
+        "killswitch_active": False,
+        "reason": None,
+        "expires_at": None,
+    }
 
 
 @router.get("/v1/killswitch", tags=["Control Plane"])
 async def get_killswitch():
+    """Return the current killswitch state with reason and TTL.
+
+    Uses the pipeline's `safe_mode_state` snapshot which lazily auto-deactivates
+    if the configured TTL has elapsed.
+    """
     _pipeline = _get_pipeline()
     if not _pipeline:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
-    settings = get_settings()
-    return {"safe_mode": settings.safe_mode}
+    return _pipeline.safe_mode_state
 
 
 @router.get("/v1/overrides", tags=["Control Plane"])
@@ -125,12 +149,61 @@ async def get_behavior(request: Request):
 
 @router.put("/v1/behavior", tags=["Control Plane"])
 async def set_behavior(request: Request):
+    """Update behavior dials.
+
+    Supports partial updates by merging with the existing tenant config —
+    fields not in the request body keep their previous value instead of
+    resetting to defaults (C2 fix).
+
+    Optimistic concurrency (N4 fix): the body may include `if_version: int`.
+    If present and it does not match the version currently stored, the PUT
+    fails with HTTP 409 and the latest version is returned in the response
+    body so the client can re-read and retry. If `if_version` is absent the
+    write is unconditional (preserves existing client behavior — opt-in).
+
+    `version` is excluded from the merged payload and is bumped server-side
+    on every successful update.
+    """
     from aion.metis.behavior import BehaviorConfig, BehaviorDial
     settings = get_settings()
     tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
     body = await request.json()
-    config = BehaviorConfig(**body)
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+    # `if_version` is a control field — extract before merge so it doesn't
+    # confuse the BehaviorConfig validator.
+    if_version = body.pop("if_version", None)
+    # `version` from the body is ignored — the server is the source of truth.
+    body.pop("version", None)
+
     dial = BehaviorDial()
+    existing = await dial.get(tenant)
+
+    # Optimistic concurrency check (only when client supplied if_version).
+    if if_version is not None:
+        current_version = existing.version if existing else 0
+        if int(if_version) != int(current_version):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "version_conflict",
+                    "current_version": current_version,
+                    "your_version": int(if_version),
+                    "behavior": existing.model_dump() if existing else None,
+                    "tenant": tenant,
+                },
+            )
+
+    merged = existing.model_dump() if existing else {}
+    merged.update(body)
+    # Bump version on every successful write so concurrent readers can detect.
+    merged["version"] = (existing.version if existing else 0) + 1
+
+    try:
+        config = BehaviorConfig(**merged)
+    except Exception as exc:  # pydantic ValidationError surfaces unknown fields
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await dial.set(config, tenant)
     return {"tenant": tenant, "behavior": config.model_dump(), "status": "active"}
 

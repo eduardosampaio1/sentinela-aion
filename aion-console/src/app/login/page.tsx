@@ -57,19 +57,12 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] px-4">
       <div className="w-full max-w-sm">
-        {/* Logo + título */}
+        {/* Logo Sentinela AION (lockup horizontal completo) */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-primary)]/10 ring-1 ring-[var(--color-primary)]/20">
-            <Image src="/logo.svg" alt="Sentinela" width={28} height={28} />
-          </div>
-          <div className="text-center">
-            <h1 className="font-[family-name:var(--font-heading)] text-xl font-bold text-[var(--color-text)]">
-              Sentinela AION
-            </h1>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              Acesse com sua conta corporativa
-            </p>
-          </div>
+          <Image src="/logo-full.svg" alt="Sentinela AION" width={220} height={124} priority />
+          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+            Acesse com sua conta corporativa
+          </p>
         </div>
 
         {/* Botões de provider */}

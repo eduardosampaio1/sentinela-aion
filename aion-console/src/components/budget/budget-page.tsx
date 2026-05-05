@@ -161,7 +161,7 @@ export function BudgetPage() {
         </p>
       </div>
 
-      {/* 2-col: Custo por modelo + Otimizações NOMOS */}
+      {/* 2-col: Custo por modelo + Otimizações de roteamento */}
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Custo por modelo */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
@@ -201,11 +201,11 @@ export function BudgetPage() {
           </p>
         </div>
 
-        {/* Otimizações automáticas NOMOS */}
+        {/* Otimizações automáticas de roteamento */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Sparkles className="h-4 w-4 text-[var(--color-primary)]" />
-            Otimizações automáticas do NOMOS
+            Otimizações automáticas de roteamento
           </h2>
           <p className="mb-4 text-xs text-[var(--color-text-muted)]">
             {totalNomosRequests.toLocaleString("pt-BR")} requests direcionados para o modelo mais eficiente —{" "}

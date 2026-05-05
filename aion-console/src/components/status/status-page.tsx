@@ -180,7 +180,7 @@ export function StatusPage() {
         </div>
       </div>
 
-      {/* ═══ RECOMENDAÇÃO NEMOS ═══ */}
+      {/* ═══ Recomendação operacional ═══ */}
       <NemosRecommendationCard />
 
       {/* ═══ GRÁFICOS ═══ */}
@@ -293,7 +293,7 @@ export function StatusPage() {
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Como o AION está decidindo agora</p>
 
           <div className="mt-5 space-y-3">
-            <DistributionBar label="Bypass (ESTIXE)" pct={dist.bypass_pct} color="bg-teal-500" />
+            <DistributionBar label="Bypass (Proteção)" pct={dist.bypass_pct} color="bg-teal-500" />
             <DistributionBar label="Modelo leve" pct={dist.light_model_pct} color="bg-sky-400" />
             <DistributionBar label="Modelo padrão" pct={dist.standard_model_pct} color="bg-blue-500" />
             <DistributionBar label="Modelo premium" pct={dist.premium_model_pct} color="bg-violet-500" />
@@ -345,7 +345,7 @@ export function StatusPage() {
               <GitBranch className="h-4 w-4 text-sky-400" />
             </div>
             <div>
-              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-sky-200">NOMOS</h3>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-sky-200">Roteamento</h3>
               <span className="text-xs text-sky-600">Roteamento inteligente</span>
             </div>
           </div>
@@ -382,7 +382,7 @@ export function StatusPage() {
               <Shield className="h-4 w-4 text-teal-400" />
             </div>
             <div>
-              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-teal-200">ESTIXE</h3>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-teal-200">Proteção</h3>
               <span className="text-xs text-teal-600">Controle e proteção</span>
             </div>
           </div>
@@ -419,7 +419,7 @@ export function StatusPage() {
               <Gauge className="h-4 w-4 text-violet-400" />
             </div>
             <div>
-              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-violet-200">METIS</h3>
+              <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-violet-200">Otimização</h3>
               <span className="text-xs text-violet-600">Otimização</span>
             </div>
           </div>
@@ -673,7 +673,7 @@ function NemosRecommendationCard() {
           <Brain className="h-5 w-5 text-amber-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-amber-200">Recomendação NEMOS</p>
+          <p className="text-sm font-semibold text-amber-200">Recomendação operacional</p>
           <p className="mt-0.5 text-sm text-amber-300/80">
             Intent{" "}
             <code className="font-[family-name:var(--font-mono)] text-amber-200">limite_cartao_faq</code>{" "}
@@ -709,7 +709,7 @@ function NemosRecommendationCard() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-[var(--color-text)]">Confirmar migração de modelo</h3>
-                  <p className="text-xs text-[var(--color-text-muted)]">NEMOS — 97% de confiança</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">IA — 97% de confiança</p>
                 </div>
               </div>
               <button onClick={() => setState("idle")} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">

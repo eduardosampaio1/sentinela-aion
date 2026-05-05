@@ -707,7 +707,7 @@ export function AdminPage() {
                   Exclusão de dados — LGPD Art. 18
                 </h3>
                 <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                  Remove todos os dados deste tenant: sessões, audit trail, memória NEMOS, budget.
+                  Remove todos os dados deste tenant: sessões, audit trail, memória operacional, budget.
                   Ação irreversível. Use apenas em atendimento a solicitação formal de titular de dados.
                 </p>
               </div>
@@ -739,7 +739,7 @@ export function AdminPage() {
 
             <div className="space-y-2 rounded-lg bg-red-950/30 p-4 text-xs text-[var(--color-text-muted)] mb-4">
               <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Todas as sessões e audit trail serão excluídos</p>
-              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Memória NEMOS (modelos aprendidos) será zerada</p>
+              <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Memória operacional (modelos aprendidos) será zerada</p>
               <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Configurações de budget e calibração serão removidas</p>
               <p className="flex items-start gap-2"><span className="text-red-400 mt-0.5">●</span> Esta ação <strong className="text-red-400">não pode ser desfeita</strong></p>
             </div>

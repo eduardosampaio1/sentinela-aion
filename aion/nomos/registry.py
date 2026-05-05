@@ -52,11 +52,29 @@ class ModelRegistry:
         self._models: list[ModelConfig] = []
 
     async def load(self, config_path: Optional[Path] = None) -> None:
-        """Load model configs from YAML."""
+        """Load model configs from YAML.
+
+        Path resolution order:
+          1. Explicit `config_path` argument (used by tests).
+          2. `NomosSettings.models_config_path` (defaults to `_PROJECT_DIR/config/models.yaml`).
+          3. Fallback to `<cwd>/config/models.yaml` — in a pip-installed
+             deployment `_PROJECT_DIR` resolves to site-packages/, which
+             does not contain config/. Containers typically WORKDIR=/app
+             which is where `COPY config/` lands.
+          4. Fallback to `/app/config/models.yaml` — explicit Docker default.
+        """
         path = config_path or self._settings.models_config_path
         if not path.exists():
-            logger.warning("Models config not found at %s", path)
-            return
+            tried = [str(path)]
+            for candidate in (Path.cwd() / "config" / "models.yaml", Path("/app/config/models.yaml")):
+                tried.append(str(candidate))
+                if candidate.exists():
+                    logger.info("Models config not at %s, using fallback %s", path, candidate)
+                    path = candidate
+                    break
+            else:
+                logger.warning("Models config not found (tried %s)", " | ".join(tried))
+                return
 
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -81,6 +99,15 @@ class ModelRegistry:
             self._models.append(model)
 
         logger.info("Loaded %d models from registry", len(self._models))
+
+    def all_models(self) -> list[ModelConfig]:
+        """Get all loaded models, regardless of credentials or enabled state.
+
+        Used by the console (`GET /v1/models`) to show every configured model
+        with its real status (inactive when missing credentials, error when
+        the circuit breaker is open, active otherwise).
+        """
+        return list(self._models)
 
     def get_available_models(self) -> list[ModelConfig]:
         """Get models that are enabled and have valid API keys."""

@@ -1,0 +1,133 @@
+# AION — POC Transparent (gateway/proxy completo)
+# ============================================================
+# MODO OPCIONAL — integração acelerada quando o cliente aceita
+# o AION como gateway entre a aplicação e o LLM.
+#
+# Fluxo:
+#   App do cliente → POST /v1/chat/completions → AION → LLM do cliente → AION → App
+#
+# AION recebe credencial/endpoint do LLM do cliente.
+# Integração zero-code: cliente apenas troca base_url.
+#
+# ATENÇÃO: Este modo requer que o cliente compartilhe credencial de LLM
+# com o AION. Discuta com CISO e jurídico antes de usar em ambiente restritivo.
+# Para primeiro contato com banco/telecom, prefira docker-compose.poc-decision.yml
+#
+# Setup:
+#   cp .env.poc-transparent.example .env
+#   # Edite .env com AION_ADMIN_KEY, AION_CONSOLE_PROXY_KEY,
+#   # AION_SESSION_AUDIT_SECRET, CONSOLE_AUTH_SECRET, OPENAI_API_KEY
+#   # (ou outra credencial LLM compatível). Todos obrigatórios.
+#   docker compose -f docker-compose.poc-transparent.yml up -d
+#
+# Verificar:
+#   curl http://localhost:8080/health
+#
+# Testar:
+#   curl -s http://localhost:8080/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -H "X-Aion-Tenant: poc" \
+#     -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Olá"}]}' | jq .
+#
+# Não inclui:
+#   - telemetria externa (Baluarte/ARGOS não são dependência desta POC)
+#   - Supabase ou qualquer serviço da Baluarte
+# ============================================================
+
+services:
+  aion:
+    image: ghcr.io/eduardosampaio1/sentinela-aion:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # Licença JWT — obrigatório para subir o servidor
+      AION_LICENSE: ${AION_LICENSE}
+
+      # Profile: staging mantém warnings críticos no boot e fecha o ciclo dos
+      # gates de segurança (F-03/F-04/F-12/F-36). Para hard-abort, use
+      # AION_PROFILE=production e garanta TODAS as envs abaixo configuradas.
+      AION_PROFILE: ${AION_PROFILE:-staging}
+
+      # Auth admin + console proxy.
+      # Em modo Transparent o chat é (ou pode ser) autenticado — F-12 exige
+      # AION_ADMIN_KEY com pelo menos uma chave para impedir pass-through.
+      # AION_CONSOLE_PROXY_KEY é opcional aqui (este compose não embute o
+      # console). Se setado, é anexado como `:console_proxy`. Se vazio, só
+      # AION_ADMIN_KEY é usado.
+      AION_ADMIN_KEY: "${AION_ADMIN_KEY}${AION_CONSOLE_PROXY_KEY:+,${AION_CONSOLE_PROXY_KEY}:console_proxy}"
+
+      # Audit trail HMAC (F-03) — obrigatório. Gere com: openssl rand -hex 32
+      AION_SESSION_AUDIT_SECRET: ${AION_SESSION_AUDIT_SECRET}
+
+      # Cost cap obrigatório (F-36) — Transparent significa que AION chama o
+      # LLM com a credencial do cliente; sem cap, uma request grande pode
+      # esgotar o orçamento. O cap por tenant é configurado via
+      # PUT /v1/budget/{tenant} depois do boot.
+      AION_BUDGET_ENABLED: "true"
+
+      # LLM do cliente — configure conforme o provider utilizado
+      # OpenAI:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Anthropic:
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Azure / vLLM / Ollama / qualquer OpenAI-compatible:
+      # AION_DEFAULT_BASE_URL: ${AION_DEFAULT_BASE_URL:-}
+      # AION_DEFAULT_API_KEY: ${AION_DEFAULT_API_KEY:-}
+
+      AION_DEFAULT_PROVIDER: ${AION_DEFAULT_PROVIDER:-openai}
+      AION_DEFAULT_MODEL: ${AION_DEFAULT_MODEL:-gpt-4o-mini}
+
+      # Modo: todos os módulos ativos (bypass, routing, compressão)
+      AION_ESTIXE_ENABLED: "true"
+      AION_NOMOS_ENABLED: "true"
+      AION_METIS_ENABLED: "true"
+
+      # Identificação do modo — exposto no /health
+      AION_MODE: "poc_transparent"
+
+      # Comportamento em falha: fail-open (request passa para LLM diretamente)
+      AION_FAIL_MODE: "open"
+      AION_PORT: "8080"
+
+      # Multi-tenancy
+      AION_REQUIRE_TENANT: "false"
+      AION_DEFAULT_TENANT: "default"
+
+      # Redis local — velocity detection, decision cache, session audit,
+      # durable counters, explain store (F-07/F-10).
+      REDIS_URL: "redis://redis:6379/0"
+
+      # Telemetria externa DESLIGADA — zero dados saem do ambiente
+      AION_CONTRIBUTE_GLOBAL_LEARNING: "false"
+
+      # Collective: catálogo editorial apenas
+      AION_COLLECTIVE_ENABLED: "true"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 320M

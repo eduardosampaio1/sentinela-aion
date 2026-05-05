@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApiData } from "@/lib/use-api-data";
-import { rotateKeys, getStats } from "@/lib/api";
+import {
+  rotateKeys,
+  getStats,
+  getKillswitch,
+  activateKillswitch,
+  deactivateKillswitch,
+} from "@/lib/api";
 import { mockStats } from "@/lib/mock-data";
 import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import {
@@ -23,9 +29,11 @@ import {
   TrendingDown,
   Activity,
   CalendarDays,
+  Power,
+  ShieldAlert,
 } from "lucide-react";
 
-type Tab = "geral" | "notificacoes" | "api";
+type Tab = "geral" | "notificacoes" | "api" | "controles";
 
 interface ToggleProps {
   checked: boolean;
@@ -78,6 +86,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "geral", label: "Geral" },
   { id: "notificacoes", label: "Notificações" },
   { id: "api", label: "API" },
+  { id: "controles", label: "Controles avançados" },
 ];
 
 export function SettingsPage() {
@@ -87,6 +96,62 @@ export function SettingsPage() {
   const [rotated, setRotated] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
   const [rotateConfirmError, setRotateConfirmError] = useState<string | null>(null);
+
+  // ─── Kill switch (moved here from /estixe) ────────────────────────────────
+  const [ksActive, setKsActive] = useState(false);
+  const [ksReason, setKsReason] = useState<string | null>(null);
+  const [ksExpires, setKsExpires] = useState<number | null>(null);
+  const [ksLoading, setKsLoading] = useState(true);
+  const [showKsActivateModal, setShowKsActivateModal] = useState(false);
+  const [ksReasonInput, setKsReasonInput] = useState("");
+  const [ksActivating, setKsActivating] = useState(false);
+  const [ksDeactivating, setKsDeactivating] = useState(false);
+  const [ksDeactivateError, setKsDeactivateError] = useState<string | null>(null);
+  const [showKsDeactivateConfirm, setShowKsDeactivateConfirm] = useState(false);
+
+  useEffect(() => {
+    getKillswitch()
+      .then((res) => {
+        setKsActive(res.killswitch_active);
+        setKsReason(res.reason ?? null);
+        setKsExpires(res.expires_at ?? null);
+      })
+      .catch(() => {})
+      .finally(() => setKsLoading(false));
+  }, []);
+
+  const handleActivateKs = async () => {
+    if (!ksReasonInput.trim()) return;
+    setKsActivating(true);
+    try {
+      const res = await activateKillswitch(ksReasonInput.trim());
+      setKsActive(true);
+      setKsReason(res.reason);
+      setKsExpires(res.expires_at);
+      setShowKsActivateModal(false);
+      setKsReasonInput("");
+    } catch {
+      // silent — UI stays in modal, user can retry
+    } finally {
+      setKsActivating(false);
+    }
+  };
+
+  const handleDeactivateKs = async (reason: string) => {
+    setKsDeactivating(true);
+    setKsDeactivateError(null);
+    try {
+      await deactivateKillswitch(reason);
+      setKsActive(false);
+      setKsReason(null);
+      setKsExpires(null);
+      setShowKsDeactivateConfirm(false);
+    } catch (err) {
+      setKsDeactivateError(err instanceof Error ? err.message : "Erro ao desativar Kill Switch");
+    } finally {
+      setKsDeactivating(false);
+    }
+  };
 
   // Notification toggles
   const [notifSecurity, setNotifSecurity] = useState(true);
@@ -537,6 +602,100 @@ export function SettingsPage() {
         </div>
       )}
 
+      {/* ── TAB: Controles avançados ─────────────────────────── */}
+      {activeTab === "controles" && (
+        <div className="space-y-5">
+          {/* Active warning — shown when KS is on */}
+          {!ksLoading && ksActive && (
+            <div className="flex items-center justify-between gap-4 rounded-2xl border-2 border-red-500/70 bg-gradient-to-r from-red-950/80 to-red-900/40 px-6 py-4 shadow-lg shadow-red-950/30">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-500/20">
+                  <Power className="h-6 w-6 animate-pulse text-red-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-widest text-red-300">
+                    ● KILL SWITCH ATIVO
+                  </p>
+                  <p className="mt-0.5 text-xs text-red-400">
+                    AION está parado — nenhum request está sendo processado
+                    {ksReason && <> · Motivo: <span className="font-semibold">&quot;{ksReason}&quot;</span></>}
+                    {ksExpires && <> · Expira: {new Date(ksExpires * 1000).toLocaleTimeString("pt-BR")}</>}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowKsDeactivateConfirm(true)}
+                disabled={ksDeactivating}
+                className="shrink-0 cursor-pointer rounded-lg border border-red-500/50 bg-red-900/50 px-4 py-2 text-sm font-semibold text-red-300 transition-colors hover:bg-red-800/50 disabled:opacity-50"
+              >
+                {ksDeactivating ? "Desativando…" : "Desativar"}
+              </button>
+            </div>
+          )}
+
+          {/* Kill switch — main control card */}
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-900/20 ring-1 ring-red-800/40">
+                <Power className="h-5 w-5 text-red-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-[var(--color-text)]">Kill Switch</h2>
+                  {!ksLoading && (
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      ksActive
+                        ? "bg-red-500/20 text-red-300"
+                        : "bg-emerald-500/15 text-emerald-300"
+                    }`}>
+                      {ksActive ? "● Ativo" : "○ Inativo"}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Para todo o AION imediatamente, recusando 100% das requisições. Use apenas em emergências —
+                  vazamentos confirmados, ataque ativo, comprometimento de credenciais.
+                </p>
+                <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-900/10 px-3 py-2">
+                  <div className="flex items-start gap-2 text-xs text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Após ativado, todo tráfego será respondido com erro até a desativação manual.
+                      Coordene com a equipe antes de acionar.
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {!ksLoading && !ksActive && (
+                <button
+                  onClick={() => setShowKsActivateModal(true)}
+                  className="shrink-0 cursor-pointer rounded-lg border border-red-800/50 bg-red-950/30 px-4 py-2 text-sm font-semibold text-red-400 transition-colors hover:bg-red-900/40 hover:text-red-300"
+                >
+                  Ativar Kill Switch
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Where to find module on/off */}
+          <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-white/[0.02] p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5">
+                <ShieldAlert className="h-4 w-4 text-[var(--color-text-muted)]" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-[var(--color-text)]">Liga/desliga de módulos</h3>
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Para ligar ou desligar Proteção, Roteamento ou Otimização individualmente, use os toggles em{" "}
+                  <a href="/operations" className="font-semibold text-[var(--color-primary)] hover:underline">Operação → Módulos ativos</a>.
+                  Cada toggle exige um motivo registrado.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmActionModal
         open={showRotateConfirm}
         severity="critical"
@@ -552,6 +711,69 @@ export function SettingsPage() {
         error={rotateConfirmError}
         onConfirm={handleRotateConfirm}
         onCancel={() => setShowRotateConfirm(false)}
+      />
+
+      {/* Kill Switch — Activate Modal */}
+      {showKsActivateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] p-8 shadow-2xl">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-900/40">
+                <Power className="h-5 w-5 text-red-400" />
+              </div>
+              <h3 className="text-lg font-bold text-[var(--color-text)]">Ativar Kill Switch?</h3>
+            </div>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Esta ação para <strong className="text-[var(--color-text)]">imediatamente</strong> todo o tráfego processado pelo AION. Use apenas em situações de emergência.
+            </p>
+            <div className="mt-5">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Motivo (obrigatório)
+              </label>
+              <input
+                type="text"
+                value={ksReasonInput}
+                onChange={(e) => setKsReasonInput(e.target.value)}
+                placeholder="Ex: vazamento de dados detectado, ataque em andamento..."
+                autoFocus
+                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-red-600 placeholder:text-[var(--color-text-muted)]/50"
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowKsActivateModal(false); setKsReasonInput(""); }}
+                className="cursor-pointer rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleActivateKs}
+                disabled={!ksReasonInput.trim() || ksActivating}
+                className="cursor-pointer rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {ksActivating ? "Ativando…" : "Confirmar — Parar AION"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kill Switch — Deactivate Confirm */}
+      <ConfirmActionModal
+        open={showKsDeactivateConfirm}
+        severity="critical"
+        title="Desativar Kill Switch?"
+        description="O AION voltará a processar requisições normalmente. Confirme que a situação de emergência foi resolvida."
+        impact={[
+          "• Todo tráfego voltará a fluir pelo pipeline imediatamente",
+          "• As proteções de emergência do Kill Switch serão removidas",
+          "• Registre no motivo a confirmação de que o incidente foi resolvido",
+        ]}
+        actionLabel="Retomar operação"
+        loading={ksDeactivating}
+        error={ksDeactivateError}
+        onConfirm={handleDeactivateKs}
+        onCancel={() => setShowKsDeactivateConfirm(false)}
       />
     </div>
   );

@@ -108,7 +108,7 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
           {turn.metis_compressed && (
             <span className="flex items-center gap-1 rounded bg-violet-900/30 px-1.5 py-0.5 text-[10px] font-medium text-violet-400">
               <Minimize2 className="h-3 w-3" />
-              METIS
+              Otimização
             </span>
           )}
         </div>
@@ -176,7 +176,7 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
           </div>
           <div className="flex-1 rounded-xl rounded-tl-none border border-sky-800/30 bg-sky-950/20 px-3 py-2">
             <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-sky-600">
-              {turn.model_used ?? "LLM"} — via NOMOS
+              {turn.model_used ?? "LLM"} — via Roteamento
             </p>
             <p className="text-sm text-[var(--color-text)] leading-relaxed whitespace-pre-line">{turn.llm_response}</p>
           </div>
@@ -190,7 +190,7 @@ function TurnDetail({ turn }: { turn: SessionTurn }) {
             <Ban className="h-3.5 w-3.5 text-red-400" />
           </div>
           <div className="flex-1 rounded-xl rounded-tl-none border border-red-800/40 bg-red-950/30 px-3 py-2">
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-red-500">ESTIXE — bloqueado</p>
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-red-500">Proteção — bloqueado</p>
             <p className="text-sm text-red-300 leading-relaxed">{turn.block_reason}</p>
           </div>
         </div>

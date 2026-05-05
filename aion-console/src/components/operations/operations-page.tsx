@@ -70,21 +70,21 @@ const latencyColor = (ms: number) => {
 const MODULE_CONFIG = [
   {
     name: "estixe" as const,
-    label: "ESTIXE",
+    label: "Proteção",
     desc: "Classificação, desvio e bloqueio semântico",
     Icon: Shield,
     color: { ring: "border-teal-800/40", bg: "bg-teal-900/20", icon: "text-teal-400", badge: "text-teal-300" },
   },
   {
     name: "nomos" as const,
-    label: "NOMOS",
+    label: "Roteamento",
     desc: "Inteligência adaptativa de roteamento",
     Icon: GitBranch,
     color: { ring: "border-sky-800/40", bg: "bg-sky-900/20", icon: "text-sky-400", badge: "text-sky-300" },
   },
   {
     name: "metis" as const,
-    label: "METIS",
+    label: "Otimização",
     desc: "Compressão e otimização de contexto",
     Icon: Gauge,
     color: { ring: "border-violet-800/40", bg: "bg-violet-900/20", icon: "text-violet-400", badge: "text-violet-300" },
@@ -507,17 +507,17 @@ export function OperationsPage() {
                     <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-[var(--color-text)]">Input</span>
                     <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                     <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("ESTIXE")}`}>
-                      ESTIXE
+                      Proteção
                     </span>
                     <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                     {selectedEvent.decision !== "bypass" && selectedEvent.decision !== "block" ? (
                       <>
                         <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("NOMOS")}`}>
-                          NOMOS
+                          Roteamento
                         </span>
                         <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                         <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("METIS")}`}>
-                          METIS
+                          Otimização
                         </span>
                         <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                       </>

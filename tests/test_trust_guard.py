@@ -148,25 +148,30 @@ class TestIntegrityManifest:
         assert result.reason == "manifest_missing"
 
     def test_valid_manifest_returns_verified(self, tmp_path):
-        from aion.trust_guard.integrity_manifest import verify_manifest, _PACKAGE_ROOT
+        # P1.A: paths in the registry are relative to the project root
+        # (e.g. "aion/license.py"), not the aion/ package. The helper now
+        # receives _PROJECT_ROOT.
+        from aion.trust_guard.integrity_manifest import verify_manifest, _PROJECT_ROOT
         manifest_path = tmp_path / "manifest.json"
-        _write_manifest(manifest_path, _PACKAGE_ROOT)
+        _write_manifest(manifest_path, _PROJECT_ROOT)
         result = verify_manifest(manifest_path=manifest_path)
         assert result.verified
         assert result.build_id == "build_test"
 
     def test_missing_signature_returns_tampered(self, tmp_path):
-        from aion.trust_guard.integrity_manifest import verify_manifest, _PACKAGE_ROOT
+        from aion.trust_guard.integrity_manifest import verify_manifest, _PROJECT_ROOT
         manifest_path = tmp_path / "manifest.json"
-        _write_manifest(manifest_path, _PACKAGE_ROOT, signature="")  # empty signature
+        _write_manifest(manifest_path, _PROJECT_ROOT, signature="")  # empty signature
         result = verify_manifest(manifest_path=manifest_path)
         assert not result.verified
         assert "signature" in result.reason
 
     def test_altered_file_hash_returns_tampered(self, tmp_path):
-        from aion.trust_guard.integrity_manifest import verify_manifest, _PACKAGE_ROOT, _CRITICAL_FILES
+        from aion.trust_guard.integrity_manifest import (
+            verify_manifest, _PROJECT_ROOT, _CRITICAL_FILES,
+        )
         manifest_path = tmp_path / "manifest.json"
-        _write_manifest(manifest_path, _PACKAGE_ROOT)
+        _write_manifest(manifest_path, _PROJECT_ROOT)
 
         # Corrupt one hash in the manifest
         manifest = json.loads(manifest_path.read_text())
@@ -188,9 +193,9 @@ class TestIntegrityManifest:
         assert "parse_error" in result.reason
 
     def test_signature_fails_when_key_is_not_ed25519(self, tmp_path):
-        from aion.trust_guard.integrity_manifest import verify_manifest, _PACKAGE_ROOT
+        from aion.trust_guard.integrity_manifest import verify_manifest, _PROJECT_ROOT
         manifest_path = tmp_path / "manifest.json"
-        _write_manifest(manifest_path, _PACKAGE_ROOT)
+        _write_manifest(manifest_path, _PROJECT_ROOT)
 
         # Provide a real PEM key that is RSA (not Ed25519) — should return False
         try:
@@ -208,9 +213,11 @@ class TestIntegrityManifest:
         assert not result.verified
 
     def test_multiple_diverged_files_all_listed(self, tmp_path):
-        from aion.trust_guard.integrity_manifest import verify_manifest, _PACKAGE_ROOT, _CRITICAL_FILES
+        from aion.trust_guard.integrity_manifest import (
+            verify_manifest, _PROJECT_ROOT, _CRITICAL_FILES,
+        )
         manifest_path = tmp_path / "manifest.json"
-        _write_manifest(manifest_path, _PACKAGE_ROOT)
+        _write_manifest(manifest_path, _PROJECT_ROOT)
 
         manifest = json.loads(manifest_path.read_text())
         for rel in _CRITICAL_FILES[:3]:

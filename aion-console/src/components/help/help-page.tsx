@@ -62,7 +62,7 @@ const changelog: Array<{
     items: [
       "Mapa de topologia de roteamento com fluxo visual",
       "Página Economia com comparativo de custo vs. baseline",
-      "ESTIXE: Master Control com bypass global de emergência",
+      "Proteção: Master Control com bypass global de emergência",
     ],
   },
 ];
@@ -106,7 +106,7 @@ export function HelpPage() {
             {
               icon: Layers,
               title: "Conceitos do AION",
-              desc: "ESTIXE, NOMOS, METIS e o pipeline",
+              desc: "Proteção, Roteamento, Otimização e o pipeline",
               href: "#",
               color: "text-violet-400",
               bg: "bg-violet-900/20",

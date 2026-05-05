@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from aion.config import FailMode, get_settings
 from aion.shared.schemas import (
@@ -128,12 +128,19 @@ def _build_telemetry_metadata(context) -> dict:
 class Pipeline:
     """Dynamically assembles and runs the module chain."""
 
+    # Redis key for the persisted kill switch state (N5 fix). Survives process
+    # restarts so an active killswitch isn't silently dropped on deploy/crash.
+    _KILLSWITCH_REDIS_KEY = "aion:pipeline:killswitch"
+
     def __init__(self) -> None:
         self._pre_modules: list[Module] = []
         self._post_modules: list[Module] = []
         self._module_status: dict[str, ModuleStatus] = {}
         self._safe_mode = False
         self._safe_mode_reason: str = ""
+        # Unix timestamp (seconds) when the kill switch should auto-deactivate.
+        # None = no TTL, killswitch stays active until manually deactivated.
+        self._safe_mode_expires_at: Optional[float] = None
 
     def register_pre(self, module: Module) -> None:
         self._pre_modules.append(module)
@@ -150,8 +157,20 @@ class Pipeline:
     def active_modules(self) -> list[str]:
         return [m.name for m in self._pre_modules + self._post_modules]
 
+    def _expire_safe_mode_if_needed(self) -> None:
+        """Internal: lazy TTL check — invoked by is_safe_mode and safe_mode_state.
+
+        Single source of truth for the auto-deactivate logic so we don't
+        diverge between `is_safe_mode()` (called on hot path) and the read of
+        `safe_mode_state` (called by the /v1/killswitch GET handler).
+        """
+        if self._safe_mode and self._safe_mode_expires_at is not None:
+            if time.time() >= self._safe_mode_expires_at:
+                self.deactivate_safe_mode()
+
     @property
     def is_safe_mode(self) -> bool:
+        self._expire_safe_mode_if_needed()
         return self._safe_mode
 
     def _log_mode_transition(self, from_mode: str, to_mode: str, reason: str, actor: str = "system") -> None:
@@ -161,18 +180,122 @@ class Pipeline:
             from_mode, to_mode, reason, actor,
         )
 
-    def activate_safe_mode(self, reason: str = "manual") -> None:
-        """Kill switch — disable all modules, pure passthrough."""
+    def activate_safe_mode(self, reason: str = "manual", expires_at: Optional[float] = None) -> None:
+        """Kill switch — disable all modules, pure passthrough.
+
+        Args:
+            reason: free-text reason recorded for auditing.
+            expires_at: optional Unix timestamp (seconds since epoch) when the
+                kill switch should auto-deactivate. The pipeline checks this on
+                every `is_safe_mode()` call. None = stays active until manual
+                deactivation.
+
+        State is persisted to Redis (fire-and-forget) so a process restart
+        doesn't silently lose the killswitch (N5 fix). On boot, call
+        `restore_safe_mode_from_redis()` to rehydrate.
+        """
         prev_mode = "degraded" if any(not s.healthy for s in self._module_status.values()) else "normal"
         self._safe_mode = True
         self._safe_mode_reason = reason
+        self._safe_mode_expires_at = expires_at
         self._log_mode_transition(prev_mode, "safe", reason)
+        # Persist to Redis without blocking the caller. Best-effort — failures
+        # are logged at debug to avoid breaking the kill switch UX if Redis
+        # is unavailable (the in-memory state still works for this process).
+        asyncio.create_task(self._persist_safe_mode_to_redis())
 
     def deactivate_safe_mode(self) -> None:
         """Recover from safe mode."""
         self._safe_mode = False
         self._safe_mode_reason = ""
+        self._safe_mode_expires_at = None
         self._log_mode_transition("safe", "normal", "manual_recovery")
+        asyncio.create_task(self._clear_safe_mode_in_redis())
+
+    @property
+    def safe_mode_state(self) -> dict:
+        """Snapshot of the kill switch state for the /v1/killswitch endpoint.
+
+        Reads `is_safe_mode` (which triggers the lazy TTL check) so the
+        snapshot reflects whatever state the next pipeline pass would see.
+        """
+        active = self.is_safe_mode  # honors TTL via _expire_safe_mode_if_needed
+        return {
+            "killswitch_active": active,
+            "reason": self._safe_mode_reason or None,
+            "expires_at": self._safe_mode_expires_at,
+        }
+
+    # ── Redis persistence (N5 fix) ──────────────────────────────────────────
+    async def _persist_safe_mode_to_redis(self) -> None:
+        """Best-effort write of the current killswitch state to Redis."""
+        try:
+            from aion.metis.behavior import _get_redis  # reuse existing client
+            r = await _get_redis()
+            if not r:
+                return
+            import json as _json
+            payload = _json.dumps({
+                "reason": self._safe_mode_reason,
+                "expires_at": self._safe_mode_expires_at,
+            })
+            # If a TTL was configured, mirror it on the Redis key so a stale
+            # process never restores an already-expired state.
+            if self._safe_mode_expires_at is not None:
+                ttl_seconds = int(self._safe_mode_expires_at - time.time())
+                if ttl_seconds > 0:
+                    await r.setex(self._KILLSWITCH_REDIS_KEY, ttl_seconds, payload)
+                else:
+                    await r.delete(self._KILLSWITCH_REDIS_KEY)
+            else:
+                await r.set(self._KILLSWITCH_REDIS_KEY, payload)
+        except Exception:
+            logger.debug("Killswitch persist to Redis failed (non-fatal)", exc_info=True)
+
+    async def _clear_safe_mode_in_redis(self) -> None:
+        """Best-effort delete of the persisted killswitch state."""
+        try:
+            from aion.metis.behavior import _get_redis
+            r = await _get_redis()
+            if r:
+                await r.delete(self._KILLSWITCH_REDIS_KEY)
+        except Exception:
+            logger.debug("Killswitch clear in Redis failed (non-fatal)", exc_info=True)
+
+    async def restore_safe_mode_from_redis(self) -> None:
+        """Rehydrate the killswitch state on boot.
+
+        Called once during application startup. If Redis is unavailable this
+        is a no-op and the pipeline starts in normal mode (matching legacy
+        behavior). If a TTL had been configured and has already elapsed during
+        downtime, we clear the stale key and stay in normal mode.
+        """
+        try:
+            from aion.metis.behavior import _get_redis
+            r = await _get_redis()
+            if not r:
+                return
+            raw = await r.get(self._KILLSWITCH_REDIS_KEY)
+            if not raw:
+                return
+            import json as _json
+            data = _json.loads(raw)
+            expires_at = data.get("expires_at")
+            if expires_at is not None and time.time() >= float(expires_at):
+                await r.delete(self._KILLSWITCH_REDIS_KEY)
+                logger.info("Killswitch state in Redis was already expired — discarded")
+                return
+            self._safe_mode = True
+            self._safe_mode_reason = str(data.get("reason") or "")
+            self._safe_mode_expires_at = float(expires_at) if expires_at is not None else None
+            self._log_mode_transition("normal", "safe", f"restored_from_redis: {self._safe_mode_reason}")
+            logger.warning(
+                "Killswitch RESTORED from Redis on boot — reason=%r expires_at=%s",
+                self._safe_mode_reason,
+                self._safe_mode_expires_at,
+            )
+        except Exception:
+            logger.warning("Failed to restore killswitch state from Redis (non-fatal)", exc_info=True)
 
     def get_health(self) -> dict:
         """Get health status per module."""

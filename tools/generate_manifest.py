@@ -30,15 +30,10 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-_CRITICAL_FILES: tuple[str, ...] = (
-    "aion/license.py",
-    "aion/middleware.py",
-    "aion/pipeline.py",
-    "aion/nemos/__init__.py",
-    "aion/nomos/__init__.py",
-    "aion/estixe/__init__.py",
-    "aion/metis/__init__.py",
-)
+# Single source of truth for the critical-file registry. critical_files.py is
+# standalone (no aion.* imports) so this script can run in a CI step that
+# has not installed the AION package.
+from aion.trust_guard.critical_files import resolve_files as _resolve_critical_files
 
 
 def _hash_file(path: Path) -> str:
@@ -114,10 +109,16 @@ def main() -> None:
 
     files_root = Path(args.files_root)
 
+    # Resolve the registered patterns into concrete files. The resolver only
+    # returns paths that exist on disk, so glob patterns covering features
+    # not yet present (e.g. aion/marketplace/*.py while the module is empty)
+    # contribute zero entries instead of MISSING markers.
+    critical_files = _resolve_critical_files(files_root)
+
     # Compute per-file hashes
     files: dict[str, str] = {}
     missing: list[str] = []
-    for rel in _CRITICAL_FILES:
+    for rel in critical_files:
         h = _hash_file(files_root / rel)
         files[rel] = h
         if h == "MISSING":
