@@ -299,7 +299,7 @@ function TabShadow() {
         <div className="border-b border-[var(--color-border)] px-5 py-4">
           <h2 className="text-sm font-semibold text-[var(--color-text)]">Categorias em observação</h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-            Histórico de confiança por categoria de intent — ESTIXE aprende os thresholds ideais
+            Histórico de confiança por categoria de intent — a Proteção aprende os thresholds ideais
           </p>
         </div>
 

@@ -95,9 +95,9 @@ function ExecTab({ timeRange }: { timeRange: TimeRange }) {
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">Performance por módulo</h3>
         <div className="space-y-3">
           {[
-            { name: "ESTIXE", requests: 847240, bypassed: 579710, pct: 68.4, color: "bg-teal-500" },
-            { name: "NOMOS", requests: 267530, routed: 241600, pct: 90.3, color: "bg-sky-500" },
-            { name: "METIS", requests: 241600, compressed: 55568, pct: 23.0, color: "bg-violet-500" },
+            { name: "Proteção", requests: 847240, bypassed: 579710, pct: 68.4, color: "bg-teal-500" },
+            { name: "Roteamento", requests: 267530, routed: 241600, pct: 90.3, color: "bg-sky-500" },
+            { name: "Otimização", requests: 241600, compressed: 55568, pct: 23.0, color: "bg-violet-500" },
           ].map((m) => (
             <div key={m.name} className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">

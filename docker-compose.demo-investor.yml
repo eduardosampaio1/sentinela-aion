@@ -1,0 +1,40 @@
+# Override file — APENAS PARA DEMO INTERNA (investidor pitch).
+# Use junto com docker-compose.poc-decision.yml:
+#   docker compose -f docker-compose.poc-decision.yml -f docker-compose.demo-investor.yml up -d
+#
+# 1. Sobrepõe a chave pública Ed25519 embutida pela chave demo.
+# 2. Adiciona nginx-mock que intercepta endpoints faltantes na imagem GHCR
+#    0.1.0 (ex: /v1/intelligence/{tenant}/intents) e proxia o resto para o
+#    AION real. Console aponta para nginx-mock.
+# 3. NextAuth + DEMO_MODE para o console pular SSO e usar mocks.
+#
+# NÃO COMMITAR e NÃO USAR EM PRODUÇÃO.
+
+services:
+  aion:
+    environment:
+      AION_LICENSE_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MCowBQYDK2VwAyEAVoGnreIkhmuLR9NECt3amTqSWsnonwUkIML5+k32Ov4=
+        -----END PUBLIC KEY-----
+
+  aion-mock:
+    image: nginx:alpine
+    container_name: sentinela-aion-main-aion-mock-1
+    depends_on:
+      aion:
+        condition: service_healthy
+    volumes:
+      - ./docker/nginx-mock.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+  aion-console:
+    environment:
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_DEMO_MODE: "true"
+      # Aponta para nginx-mock que intercepta endpoints faltantes
+      # na imagem GHCR 0.1.0 antes de proxiar tudo para o AION real.
+      AION_API_URL: http://aion-mock:8080
+    depends_on:
+      aion-mock:
+        condition: service_started

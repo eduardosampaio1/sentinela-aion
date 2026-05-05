@@ -250,6 +250,14 @@ async def lifespan(app: FastAPI):
                     logger.exception("Cold start: ESTIXE initialization failed")
                 break
 
+    # ── Restore killswitch state from Redis (N5 fix) ─────────────────────────
+    # If a previous process was running with the killswitch active, rehydrate
+    # so deploys/restarts don't silently drop the operator's intent.
+    try:
+        await _pipeline.restore_safe_mode_from_redis()
+    except Exception as _ks_err:
+        logger.warning("Killswitch restore failed (non-fatal): %s", _ks_err)
+
     _pipeline_ready.set()
     logger.info("AION pipeline ready")
 

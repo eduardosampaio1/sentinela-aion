@@ -269,7 +269,7 @@ export function IntelligencePage() {
             Inteligência
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            O que o AION aprendeu sobre o seu ambiente — dados reais do NEMOS
+            O que o AION aprendeu sobre o seu ambiente — dados reais da memória operacional
           </p>
         </div>
         <button
@@ -357,21 +357,21 @@ export function IntelligencePage() {
           <div className="grid gap-4 sm:grid-cols-3">
             {[
               {
-                name: "ESTIXE",
+                name: "Proteção",
                 icon: <Shield className="h-5 w-5" />,
                 key: "estixe",
                 defaultMaturity: "stable",
                 defaultDecisions: 847240,
               },
               {
-                name: "NOMOS",
+                name: "Roteamento",
                 icon: <GitBranch className="h-5 w-5" />,
                 key: "nomos",
                 defaultMaturity: "stable",
                 defaultDecisions: 267530,
               },
               {
-                name: "METIS",
+                name: "Otimização",
                 icon: <Layers className="h-5 w-5" />,
                 key: "metis",
                 defaultMaturity: "learning",
@@ -497,13 +497,13 @@ export function IntelligencePage() {
               <Activity className="mb-3 h-10 w-10 text-[var(--color-text-muted)] opacity-40" />
               <p className="text-sm font-medium text-[var(--color-text)]">Sem dados de intent ainda</p>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Os intents aparecem aqui conforme o NEMOS registra decisões
+                Os intents aparecem aqui conforme o AION registra decisões
               </p>
             </div>
           ) : (
             <>
               <p className="text-xs text-[var(--color-text-muted)]">
-                {intents.length} padrões de intent detectados e aprendidos pelo NEMOS
+                {intents.length} padrões de intent detectados e aprendidos pelo AION
               </p>
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
                 <table className="w-full text-sm">
@@ -576,7 +576,7 @@ export function IntelligencePage() {
                     <p className="text-sm font-medium text-sky-400">Lock-in por dados acumulados</p>
                     <p className="mt-1 text-xs text-[var(--color-text-muted)]">
                       Cada intent aprendido representa horas de calibração acumulada.
-                      O NEMOS usa esses padrões para melhorar o roteamento e reduzir custo
+                      O AION usa esses padrões para melhorar o roteamento e reduzir custo
                       progressivamente — quanto mais dados, maior a precisão.
                     </p>
                   </div>

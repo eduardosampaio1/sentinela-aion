@@ -43,7 +43,13 @@ const modelDistribution = [
 ];
 
 export function RoutingPage() {
-  const { data: models, isDemo, refetch } = useApiData(getModels, mockModels);
+  // M3 fix: treat empty array as demo so the <DemoBanner> surfaces when the
+  // backend responded 200 but with zero usable models (e.g. registry failed
+  // to load, or no model passed `isModelInfoLike`). Otherwise we'd render an
+  // empty grid silently.
+  const { data: models, isDemo, refetch } = useApiData(getModels, mockModels, {
+    treatEmptyAsDemo: (d) => d.length === 0,
+  });
   const liveData = useAionData(5000);
   const { data: rawIntents, isDemo: intentsDemo } = useApiData(
     getIntelligenceIntents,
@@ -128,8 +134,9 @@ export function RoutingPage() {
   const statusBadge = (status: string) => {
     switch (status) {
       case "active": return <Badge variant="success">Ativo</Badge>;
-      case "inactive": return <Badge variant="muted">Inativo</Badge>;
+      case "inactive": return <Badge variant="muted">Sem credencial</Badge>;
       case "fallback": return <Badge variant="warning">Apenas fallback</Badge>;
+      case "error": return <Badge variant="error">Indisponível</Badge>;
       default: return null;
     }
   };
@@ -141,14 +148,14 @@ export function RoutingPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          <span className="text-sky-600">NOMOS</span> — Roteamento
+          Roteamento
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
           Inteligência de seleção de modelos. Cada decisão otimiza custo sem perder qualidade.
         </p>
       </div>
 
-      {/* ═══ HERO — Impacto do NOMOS ═══ */}
+      {/* HERO — Impacto do roteamento */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-sky-800/50 bg-gradient-to-br from-sky-950/50 to-transparent p-4">
           <div className="flex items-center gap-2 text-xs font-medium text-sky-600">
@@ -195,14 +202,14 @@ export function RoutingPage() {
       {/* ═══ Topology map ═══ */}
       <RoutingTopologyMap />
 
-      {/* ═══ Distribuição de modelos — onde o NOMOS manda ═══ */}
+      {/* Distribuição de modelos */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
           <Gauge className="h-4 w-4 text-sky-600" />
           Distribuição de modelos
         </h2>
         <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Como o NOMOS está distribuindo as chamadas entre modelos hoje.
+          Como as chamadas estão sendo distribuídas entre os modelos hoje.
         </p>
 
         {/* Stacked bar */}
@@ -239,7 +246,7 @@ export function RoutingPage() {
           <div className="flex-1">
             <h2 className="mb-1 text-sm font-semibold text-[var(--color-text)]">Prioridade de decisão</h2>
             <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-              Define como o NOMOS escolhe entre modelos. Mais à esquerda = mais barato. Mais à direita = mais inteligente.
+              Define como o sistema escolhe entre modelos. Mais à esquerda = mais barato. Mais à direita = mais inteligente.
             </p>
           </div>
           {hasChanges && (
@@ -271,7 +278,7 @@ export function RoutingPage() {
         {priority < 30 && (
           <div className="mt-3 flex items-center gap-1.5 text-xs text-green-600">
             <TrendingDown className="h-3.5 w-3.5" />
-            Modo econômico — NOMOS vai priorizar modelos leves sempre que possível.
+            Modo econômico — o sistema vai priorizar modelos leves sempre que possível.
           </div>
         )}
         {priority > 70 && (
@@ -303,7 +310,8 @@ export function RoutingPage() {
         <h2 className="mb-3 text-sm font-semibold text-[var(--color-text)]">Modelos disponíveis</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {models.map((model) => {
-            const dist = modelDistribution.find((m) => m.model === model.name);
+            const displayName = model.name ?? model.id;
+            const dist = modelDistribution.find((m) => m.model === displayName);
             return (
               <div
                 key={model.id}
@@ -312,11 +320,11 @@ export function RoutingPage() {
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="font-[family-name:var(--font-mono)] text-sm font-semibold text-[var(--color-text)]">
-                      {model.name}
+                      {displayName}
                     </div>
                     <div className="text-xs text-[var(--color-text-muted)]">{model.provider}</div>
                   </div>
-                  {statusBadge(model.status)}
+                  {model.status && statusBadge(model.status)}
                 </div>
                 {/* Usage indicator */}
                 {dist && (
@@ -330,19 +338,25 @@ export function RoutingPage() {
                 <div className="mt-3 space-y-1.5 text-xs text-[var(--color-text-muted)]">
                   <div className="flex justify-between">
                     <span>Entrada</span>
-                    <span className="font-[family-name:var(--font-mono)]">${model.cost_input_per_1m}/1M</span>
+                    <span className="font-[family-name:var(--font-mono)]">
+                      {model.cost_input_per_1m != null ? `$${model.cost_input_per_1m}/1M` : "—"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Saída</span>
-                    <span className="font-[family-name:var(--font-mono)]">${model.cost_output_per_1m}/1M</span>
+                    <span className="font-[family-name:var(--font-mono)]">
+                      {model.cost_output_per_1m != null ? `$${model.cost_output_per_1m}/1M` : "—"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Latência</span>
-                    <span className="font-[family-name:var(--font-mono)]">{model.latency_ms}ms</span>
+                    <span className="font-[family-name:var(--font-mono)]">
+                      {model.latency_ms != null ? `${model.latency_ms}ms` : "—"}
+                    </span>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1">
-                  {model.capabilities.map((cap) => (
+                  {(model.capabilities ?? []).map((cap) => (
                     <Badge key={cap} variant="muted">{cap}</Badge>
                   ))}
                 </div>
@@ -352,13 +366,13 @@ export function RoutingPage() {
         </div>
       </div>
 
-      {/* ═══ Provedores — o que o NOMOS enxerga ═══ */}
+      {/* Provedores configurados */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <div className="mb-4 flex items-center gap-2">
           <Server className="h-4 w-4 text-sky-600" />
           <h2 className="text-sm font-semibold text-[var(--color-text)]">Provedores</h2>
           <span className="ml-auto text-xs text-[var(--color-text-muted)]">
-            leitura do NOMOS — atualiza automaticamente
+            leitura em tempo real — atualiza automaticamente
           </span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -431,7 +445,7 @@ export function RoutingPage() {
         </div>
         <p className="mt-3 text-[10px] text-[var(--color-text-muted)]/60">
           Provedores são configurados via <code className="font-[family-name:var(--font-mono)]">models.yaml</code>.
-          O status reflete o circuit breaker do NOMOS em tempo real.
+          O status reflete o circuit breaker em tempo real.
         </p>
       </div>
 
@@ -440,7 +454,7 @@ export function RoutingPage() {
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
           <div>
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Regras de roteamento</h2>
-            <p className="text-xs text-[var(--color-text-muted)]">Quando o NOMOS encontra um padrão, aplica a regra automaticamente.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Quando um padrão é encontrado, a regra é aplicada automaticamente.</p>
           </div>
           <button
             disabled
@@ -490,7 +504,7 @@ export function RoutingPage() {
           <div>
             <h2 className="text-sm font-semibold text-[var(--color-text)]">Cadeia de fallback</h2>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Se o modelo principal falhar, o NOMOS tenta o próximo automaticamente.
+              Se o modelo principal falhar, o sistema tenta o próximo automaticamente.
             </p>
           </div>
           <button
@@ -523,7 +537,7 @@ export function RoutingPage() {
         <div className="border-b border-[var(--color-border)] px-6 py-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Sparkles className="h-4 w-4 text-amber-400" />
-            Performance por intent — aprendizado NEMOS
+            Performance por intent — aprendizado contínuo
           </h2>
           <p className="text-xs text-[var(--color-text-muted)]">
             Taxa de bypass, custo médio e confiança acumulada por padrão de intenção
@@ -605,7 +619,7 @@ export function RoutingPage() {
           <p className="text-xs text-[var(--color-text-muted)]">
             {intentsDemo
               ? "Dados de demonstração — conecte o backend para ver intents reais"
-              : `${intents.length} intents aprendidos · dados acumulados pelo NEMOS`}
+              : `${intents.length} intents aprendidos · dados acumulados pelo AION`}
           </p>
         </div>
       </div>
