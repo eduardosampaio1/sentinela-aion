@@ -29,3 +29,4 @@ export * from "./intelligence";
 export * from "./admin";
 export * from "./reports";
 export * from "./collective";
+export * from "./gains";

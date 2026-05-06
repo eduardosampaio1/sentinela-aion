@@ -39,7 +39,7 @@ import { useAionData } from "@/lib/use-aion-data";
 import { mockSpendTrend, mockModelCostDistribution } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
 
-const fmtBRL = (n: number) => `R$ ${n.toFixed(2)}`;
+const fmtUSD = (n: number) => `US$ ${n.toFixed(2)}`;
 const fmtPct = (n: number) => `${Math.round(n)}%`;
 const fmtInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
@@ -125,7 +125,7 @@ export function StatusPage() {
             </div>
             <AnimatedNumber
               value={stats.cost_saved}
-              format={fmtBRL}
+              format={fmtUSD}
               className="mt-2 block font-[family-name:var(--font-mono)] text-2xl font-bold text-green-400"
             />
             <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
@@ -191,7 +191,7 @@ export function StatusPage() {
             <TrendingDown className="h-4 w-4 text-green-400" />
             Gasto vs. Custo evitado (abril)
           </h2>
-          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">R$ por dia</p>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">US$ por dia</p>
           <div className="mt-4 h-48">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={mockSpendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -229,7 +229,7 @@ export function StatusPage() {
                   labelFormatter={(v: any) => `Dia ${String(v).slice(8)}/04`}
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   formatter={(v: any, name: any) => [
-                    `R$ ${Number(v).toLocaleString("pt-BR")}`,
+                    `US$ ${Number(v).toFixed(2)}`,
                     name === "spend" ? "Gasto" : "Evitado",
                   ]}
                 />
@@ -357,7 +357,7 @@ export function StatusPage() {
             </div>
             <div>
               <div className="text-xs text-sky-600">Custo otimizado</div>
-              <AnimatedNumber value={modules.nomos.cost_optimized} format={fmtBRL} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
+              <AnimatedNumber value={modules.nomos.cost_optimized} format={fmtUSD} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
             </div>
             <div>
               <div className="text-xs text-sky-600">→ Modelo leve</div>
@@ -394,7 +394,7 @@ export function StatusPage() {
             </div>
             <div>
               <div className="text-xs text-teal-600">Custo evitado</div>
-              <AnimatedNumber value={modules.estixe.cost_avoided} format={fmtBRL} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
+              <AnimatedNumber value={modules.estixe.cost_avoided} format={fmtUSD} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
             </div>
             <div>
               <div className="text-xs text-teal-600">Bloqueios</div>
@@ -431,7 +431,7 @@ export function StatusPage() {
             </div>
             <div>
               <div className="text-xs text-violet-600">Custo reduzido</div>
-              <AnimatedNumber value={modules.metis.cost_saved} format={fmtBRL} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
+              <AnimatedNumber value={modules.metis.cost_saved} format={fmtUSD} className="font-[family-name:var(--font-mono)] text-lg font-bold text-green-400" />
             </div>
             <div>
               <div className="text-xs text-violet-600">Tokens comprimidos</div>
@@ -447,7 +447,7 @@ export function StatusPage() {
 
           <div className="mt-3 flex items-center gap-1.5 text-xs text-violet-400">
             <TrendingDown className="h-3 w-3" />
-            Economia acumulada: <strong><AnimatedNumber value={totalEconomy} format={fmtBRL} /></strong>
+            Economia acumulada: <strong><AnimatedNumber value={totalEconomy} format={fmtUSD} /></strong>
           </div>
         </div>
       </div>
@@ -570,7 +570,7 @@ export function StatusPage() {
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Economia total: </span>
-            <AnimatedNumber value={stats.cost_saved} format={fmtBRL} className="font-[family-name:var(--font-mono)] font-bold text-green-400" />
+            <AnimatedNumber value={stats.cost_saved} format={fmtUSD} className="font-[family-name:var(--font-mono)] font-bold text-green-400" />
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Erros: </span>
@@ -660,7 +660,7 @@ function NemosRecommendationCard() {
         <Check className="h-4 w-4 shrink-0 text-green-400" />
         <p className="text-sm text-green-300">
           Recomendação aplicada — <code className="font-[family-name:var(--font-mono)]">limite_cartao_faq</code> migrado para{" "}
-          <strong>gpt-4o-mini</strong>. Economia de <strong>R$ 12,40/dia</strong> ativa.
+          <strong>gpt-4o-mini</strong>. Economia de <strong>US$ 2.48/dia</strong> ativa.
         </p>
       </div>
     );
@@ -678,7 +678,7 @@ function NemosRecommendationCard() {
             Intent{" "}
             <code className="font-[family-name:var(--font-mono)] text-amber-200">limite_cartao_faq</code>{" "}
             pode migrar de <strong>gpt-4o → gpt-4o-mini</strong> com 97% de confiança. Economia estimada:{" "}
-            <strong className="text-green-400">R$ 12,40/dia</strong>.
+            <strong className="text-green-400">US$ 2.48/dia</strong>.
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -737,7 +737,7 @@ function NemosRecommendationCard() {
               </div>
               <div className="flex justify-between px-4 py-3 text-sm">
                 <span className="text-[var(--color-text-muted)]">Economia estimada</span>
-                <span className="font-semibold text-green-400">R$ 12,40/dia · R$ 372/mês</span>
+                <span className="font-semibold text-green-400">US$ 2.48/dia · US$ 74.40/mês</span>
               </div>
               <div className="flex justify-between px-4 py-3 text-sm">
                 <span className="text-[var(--color-text-muted)]">Qualidade esperada</span>

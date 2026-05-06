@@ -18,6 +18,7 @@ import type {
   AnnotationItem,
   CollectivePolicy,
   InstalledCollectivePolicy,
+  GainReport,
 } from "./types";
 
 
@@ -382,7 +383,7 @@ export const mockSuggestions: IntentSuggestion[] = [
     ],
     suggested_intent_name: "intent_horario",
     suggested_response: "Edite esta resposta",
-    estimated_daily_savings: 12.4,
+    estimated_daily_savings: 2.48,
     avg_response_length: 180,
     confidence: 0.912,
   },
@@ -397,7 +398,7 @@ export const mockSuggestions: IntentSuggestion[] = [
     ],
     suggested_intent_name: "intent_rastreio",
     suggested_response: "Edite esta resposta",
-    estimated_daily_savings: 8.2,
+    estimated_daily_savings: 1.64,
     avg_response_length: 220,
     confidence: 0.874,
   },
@@ -411,7 +412,7 @@ export const mockSuggestions: IntentSuggestion[] = [
     ],
     suggested_intent_name: "intent_cadastro",
     suggested_response: "Edite esta resposta",
-    estimated_daily_savings: 4.1,
+    estimated_daily_savings: 0.82,
     avg_response_length: 310,
     confidence: 0.831,
   },
@@ -719,17 +720,17 @@ export const mockSessions: Session[] = [
 ];
 
 export const mockBudgetSummary: BudgetSummary = {
-  monthly_budget: 50000,
-  used_brl: 31240,
+  monthly_budget: 10000,
+  used_usd: 6248,
   used_pct: 62.48,
-  avoided_cost: 18760,
+  avoided_cost: 3752,
   alerts: 2,
   downgrades: 14,
   caps: [
-    { department: "Atendimento", cap_brl: 15000, used_brl: 12300, used_pct: 82, mode: "alert_only", alert_sent: true },
-    { department: "Engenharia", cap_brl: 20000, used_brl: 11200, used_pct: 56, mode: "downgrade", alert_sent: false },
-    { department: "Dados & Analytics", cap_brl: 10000, used_brl: 5900, used_pct: 59, mode: "downgrade", alert_sent: false },
-    { department: "Produto", cap_brl: 5000, used_brl: 1840, used_pct: 36.8, mode: "hard_stop", alert_sent: false },
+    { department: "Atendimento", cap_usd: 3000, used_usd: 2460, used_pct: 82, mode: "alert_only", alert_sent: true },
+    { department: "Engenharia", cap_usd: 4000, used_usd: 2240, used_pct: 56, mode: "downgrade", alert_sent: false },
+    { department: "Dados & Analytics", cap_usd: 2000, used_usd: 1180, used_pct: 59, mode: "downgrade", alert_sent: false },
+    { department: "Produto", cap_usd: 1000, used_usd: 368, used_pct: 36.8, mode: "hard_stop", alert_sent: false },
   ],
 };
 
@@ -861,11 +862,11 @@ export const mockMonitors: Monitor[] = [
     id: "mon_cost_hour",
     name: "Custo por hora",
     description: "Spike indica roteamento inesperado para modelo premium",
-    metric: "cost_per_hour_brl",
-    unit: "R$/h",
-    threshold: 80,
+    metric: "cost_per_hour_usd",
+    unit: "USD/h",
+    threshold: 16,
     threshold_direction: "above",
-    current_value: 51.4,
+    current_value: 10.28,
     status: "ok",
     last_triggered: null,
     alert_history: okHistory,
@@ -1092,5 +1093,56 @@ export const mockCollectivePolicies: CollectivePolicy[] = [
     },
   },
 ];
+
+// ─── Gain Report mock ─────────────────────────────────────────────────────────
+
+export const mockGainReport: GainReport = {
+  schema_version: "1.0",
+  summary: {
+    window_start: "2026-04-05T00:00:00Z",
+    window_end: "2026-05-05T00:00:00Z",
+    total_requests: 1_247,
+    llm_calls_avoided: 834,
+    llm_calls_avoided_pct: 0.669,
+    tokens_saved: 42_890,
+    estimated_cost_avoided_usd: 3.82,
+    estimated_latency_avoided_ms: 648_880,
+  },
+  breakdowns: {
+    top_saving_drivers: [
+      { name: "saldo_conta", calls_avoided: 312, cost_avoided_usd: 1.43, pct_of_total_savings: 37.4, source: "intent_bypass_proxy", is_estimated: true },
+      { name: "horario_atendimento", calls_avoided: 198, cost_avoided_usd: 0.91, pct_of_total_savings: 23.8, source: "intent_bypass_proxy", is_estimated: true },
+      { name: "segunda_via_boleto", calls_avoided: 145, cost_avoided_usd: 0.66, pct_of_total_savings: 17.3, source: "intent_bypass_proxy", is_estimated: true },
+      { name: "limite_cartao", calls_avoided: 89, cost_avoided_usd: 0.41, pct_of_total_savings: 10.7, source: "intent_bypass_proxy", is_estimated: true },
+      { name: "desbloqueio_cartao", calls_avoided: 54, cost_avoided_usd: 0.24, pct_of_total_savings: 6.3, source: "intent_bypass_proxy", is_estimated: true },
+    ],
+    top_intents: [
+      { intent: "saldo_conta", calls_avoided: 312, cost_avoided_usd: 1.43, bypass_accuracy: 0.97, source: "events" },
+      { intent: "horario_atendimento", calls_avoided: 198, cost_avoided_usd: 0.91, bypass_accuracy: 0.99, source: "events" },
+      { intent: "segunda_via_boleto", calls_avoided: 145, cost_avoided_usd: 0.66, bypass_accuracy: 0.94, source: "events" },
+      { intent: "limite_cartao", calls_avoided: 89, cost_avoided_usd: 0.41, bypass_accuracy: 0.96, source: "events" },
+      { intent: "desbloqueio_cartao", calls_avoided: 54, cost_avoided_usd: 0.24, bypass_accuracy: 0.92, source: "events" },
+    ],
+    top_models: [
+      { model_used: "gpt-4o-mini", calls_routed: 287, cost_avoided_usd: 2.14 },
+      { model_used: "claude-haiku-4-5", calls_routed: 126, cost_avoided_usd: 1.08 },
+    ],
+    top_strategies: [
+      { strategy: "cache_hit", label: "Cache de decisão", count: 421, cost_avoided_usd: 1.93 },
+      { strategy: "policy_bypass", label: "Bypass por política", count: 413, cost_avoided_usd: 1.89 },
+      { strategy: "compression", label: "Compressão de prompt (METIS)", count: 203, cost_avoided_usd: 0.0 },
+      { strategy: "model_downgrade", label: "Roteamento para modelo mais eficiente", count: 413, cost_avoided_usd: 3.22 },
+    ],
+  },
+  confidence: "high",
+  limitations: [],
+  data_sources: ["economics_bucket", "telemetry_events", "metis_optimization"],
+  calculation_notes: [
+    "estimated_cost_avoided from economics_bucket (30 days with data)",
+    "tokens_saved sourced from METIS optimization only",
+    "estimated_latency_avoided is estimated: llm_calls_avoided × (avg_llm_latency_ms − 20ms)",
+  ],
+  generated_at: "2026-05-05T12:00:00Z",
+};
 
 export const mockInstalledPolicies: InstalledCollectivePolicy[] = [];
