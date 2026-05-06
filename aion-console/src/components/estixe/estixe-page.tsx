@@ -648,7 +648,7 @@ export function EstixePage() {
                       </code>
                       <Badge variant="muted">{s.cluster_size} requests</Badge>
                       <Badge variant="success">
-                        ~R$ {s.estimated_daily_savings.toFixed(2)}/dia
+                        ~US$ {s.estimated_daily_savings.toFixed(2)}/dia
                       </Badge>
                       <span className="text-[10px] text-[var(--color-text-muted)]">
                         confiança: {(s.confidence * 100).toFixed(0)}%

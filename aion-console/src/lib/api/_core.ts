@@ -158,7 +158,7 @@ export function transformBudgetStatus(raw: RawBudgetStatus, avoidedCost = 0): Bu
 
   return {
     monthly_budget: monthlyBudget,
-    used_brl: usedAmount,
+    used_usd: usedAmount,
     used_pct: usedPct,
     avoided_cost: avoidedCost,
     alerts: raw.alert_active ? 1 : 0,
