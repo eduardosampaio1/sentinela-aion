@@ -87,9 +87,9 @@ const NODES: NodeDef[] = [
     type: "output",
     stats: {
       "Req / dia": "9.136",
-      "Custo": "R$ 0",
+      "Custo": "US$ 0",
       "Latência": "8ms",
-      "Economia / dia": "R$ 420",
+      "Economia / dia": "US$ 84",
     },
   },
   {
@@ -123,7 +123,7 @@ const NODES: NodeDef[] = [
       "Rotas / dia": "10.278",
       "Acurácia": "94%",
       "Latência": "18ms",
-      "Economia / dia": "R$ 82",
+      "Economia / dia": "US$ 16",
     },
   },
   {

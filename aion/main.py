@@ -273,7 +273,7 @@ async def _handle_request_validation_error(request: Request, exc: RequestValidat
 
 
 # Register routers
-from aion.routers import proxy, observability, control_plane, budget, sessions, approvals, intelligence, reports, data_mgmt, global_feed, collective  # noqa: E402
+from aion.routers import proxy, observability, control_plane, budget, sessions, approvals, intelligence, reports, data_mgmt, global_feed, collective, gain  # noqa: E402
 
 app.include_router(proxy.router)
 app.include_router(observability.router)
@@ -286,3 +286,4 @@ app.include_router(reports.router)
 app.include_router(data_mgmt.router)
 app.include_router(global_feed.router)
 app.include_router(collective.router)
+app.include_router(gain.router)

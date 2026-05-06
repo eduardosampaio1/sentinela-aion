@@ -1,24 +1,83 @@
 "use client";
 
-import { TrendingDown, Zap, BarChart3, Cpu, ArrowRight, Sparkles, DollarSign } from "lucide-react";
+import { Zap, BarChart3, Cpu, ArrowRight, DollarSign, Sparkles } from "lucide-react";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useApiData } from "@/lib/use-api-data";
 import { getBudgetStatus } from "@/lib/api";
+import { getGainReport } from "@/lib/api/gains";
 import { DemoBanner } from "@/components/ui/demo-banner";
-import { mockBudgetSummary, mockIntentPerformance } from "@/lib/mock-data";
+import { mockBudgetSummary, mockIntentPerformance, mockGainReport } from "@/lib/mock-data";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtNum(n: number) { return n.toLocaleString("pt-BR"); }
+function fmtCost(usd: number) {
+  if (usd === 0) return "US$ 0,00";
+  if (usd < 0.01) return `US$ ${usd.toFixed(4)}`;
+  return `US$ ${usd.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function fmtPct(pct: number) { return `${(pct * 100).toFixed(1)}%`; }
+
+// ─── RankTable ────────────────────────────────────────────────────────────────
+
+function RankTable<T>({
+  title,
+  rows,
+  columns,
+  rowKey,
+}: {
+  title: string;
+  rows: T[];
+  columns: { label: string; render: (row: T) => React.ReactNode; align?: "left" | "right" }[];
+  rowKey: (row: T) => string;
+}) {
+  return (
+    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="border-b border-[var(--color-border)] px-4 py-3">
+        <h3 className="text-sm font-semibold text-[var(--color-text)]">{title}</h3>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-[var(--color-text-muted)]">Nenhum dado disponível</p>
+      ) : (
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
+              {columns.map((col) => (
+                <th key={col.label} className={`px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] ${col.align === "right" ? "text-right" : "text-left"}`}>
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={rowKey(row)} className="border-b border-[var(--color-border)] last:border-0 hover:bg-white/[0.02] transition-colors">
+                {columns.map((col) => (
+                  <td key={col.label} className={`px-4 py-2.5 text-sm text-[var(--color-text)] ${col.align === "right" ? "text-right font-[family-name:var(--font-mono)]" : ""}`}>
+                    {col.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 const modelBreakdown = [
-  { model: "gpt-4o", provider: "OpenAI", requests: 2840, cost_brl: 18400, pct: 58.9, color: "bg-sky-500" },
-  { model: "gpt-4o-mini", provider: "OpenAI", requests: 8920, cost_brl: 8200, pct: 26.3, color: "bg-sky-400/60" },
-  { model: "claude-3-sonnet", provider: "Anthropic", requests: 1240, cost_brl: 3100, pct: 9.9, color: "bg-violet-500" },
-  { model: "claude-haiku", provider: "Anthropic", requests: 3120, cost_brl: 1540, pct: 4.9, color: "bg-violet-400/60" },
+  { model: "gpt-4o", provider: "OpenAI", requests: 2840, cost_usd: 3680, pct: 58.9, color: "bg-sky-500" },
+  { model: "gpt-4o-mini", provider: "OpenAI", requests: 8920, cost_usd: 1640, pct: 26.3, color: "bg-sky-400/60" },
+  { model: "claude-3-sonnet", provider: "Anthropic", requests: 1240, cost_usd: 620, pct: 9.9, color: "bg-violet-500" },
+  { model: "claude-haiku", provider: "Anthropic", requests: 3120, cost_usd: 308, pct: 4.9, color: "bg-violet-400/60" },
 ];
 
 const nomosOptimizations = [
-  { intent: "limite_cartao_faq", from: "gpt-4o", to: "gpt-4o-mini", count: 2840, saved_day: 12.40 },
-  { intent: "taxa_juros_explicacao", from: "gpt-4o", to: "claude-haiku", count: 1540, saved_day: 9.20 },
-  { intent: "bloqueio_cartao", from: "gpt-4o-mini", to: "bypass", count: 1210, saved_day: 7.50 },
-  { intent: "segunda_via_fatura", from: "gpt-4o", to: "gpt-4o-mini", count: 980, saved_day: 5.80 },
+  { intent: "limite_cartao_faq", from: "gpt-4o", to: "gpt-4o-mini", count: 2840, saved_day: 2.48 },
+  { intent: "taxa_juros_explicacao", from: "gpt-4o", to: "claude-haiku", count: 1540, saved_day: 1.84 },
+  { intent: "bloqueio_cartao", from: "gpt-4o-mini", to: "bypass", count: 1210, saved_day: 1.50 },
+  { intent: "segunda_via_fatura", from: "gpt-4o", to: "gpt-4o-mini", count: 980, saved_day: 1.16 },
 ];
 
 const totalNomosRequests = nomosOptimizations.reduce((s, o) => s + o.count, 0);
@@ -31,15 +90,16 @@ export function BudgetPage() {
   const { data: budget, isDemo, refetch } = useApiData(getBudgetStatus, mockBudgetSummary, {
     intervalMs: 60_000,
   });
+  const { data: gain } = useApiData(getGainReport, mockGainReport);
 
-  const totalWithoutAion = budget.used_brl + budget.avoided_cost;
+  const totalWithoutAion = budget.used_usd + budget.avoided_cost;
   const savingsPct = totalWithoutAion > 0
     ? Math.round((budget.avoided_cost / totalWithoutAion) * 100)
     : 0;
   const usedPct = totalWithoutAion > 0
-    ? Math.round((budget.used_brl / totalWithoutAion) * 100)
+    ? Math.round((budget.used_usd / totalWithoutAion) * 100)
     : 0;
-  const projectedMonthly = Math.round((budget.used_brl / daysInPeriod) * 30);
+  const projectedMonthly = Math.round((budget.used_usd / daysInPeriod) * 30);
 
   return (
     <div className="space-y-6">
@@ -51,36 +111,22 @@ export function BudgetPage() {
           Economia
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          O que o AION economizou e onde o dinheiro está indo — últimos {daysInPeriod} dias
+          Gasto de LLM, roteamento e otimizações — últimos {daysInPeriod} dias
         </p>
       </div>
 
       {/* Hero metrics */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {/* Economia gerada — hero metric */}
-        <div className="col-span-2 rounded-xl border border-green-500/30 bg-green-950/30 p-5 lg:col-span-1">
-          <div className="flex items-center gap-2 text-xs text-green-400">
-            <TrendingDown className="h-3.5 w-3.5" />
-            Economia gerada
-          </div>
-          <p className="mt-2 font-[family-name:var(--font-heading)] text-3xl font-bold text-green-400">
-            R$ <AnimatedNumber value={budget.avoided_cost} />
-          </p>
-          <p className="mt-1 text-xs text-green-400/70">
-            {savingsPct}% do custo evitado — via bypass e compressão
-          </p>
-        </div>
-
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <DollarSign className="h-3.5 w-3.5" />
             Custo real do mês
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
-            R$ <AnimatedNumber value={budget.used_brl} />
+            <AnimatedNumber value={budget.used_usd} format={fmtCost} />
           </p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            vs R$ {totalWithoutAion.toLocaleString("pt-BR")} sem AION
+            vs {fmtCost(totalWithoutAion)} sem AION
           </p>
         </div>
 
@@ -101,12 +147,113 @@ export function BudgetPage() {
             Projeção 30 dias
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
-            R$ <AnimatedNumber value={projectedMonthly} />
+            <AnimatedNumber value={projectedMonthly} format={fmtCost} />
           </p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
             baseado nos últimos {daysInPeriod} dias
           </p>
         </div>
+      </div>
+
+      {/* Taxa de bypass */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-medium text-[var(--color-text-muted)]">Taxa de chamadas LLM evitadas</span>
+          <span className="font-[family-name:var(--font-mono)] text-sm font-bold text-[var(--color-primary)]">
+            {fmtPct(gain.summary.llm_calls_avoided_pct)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 overflow-hidden rounded-full bg-white/5 h-1.5">
+            <div
+              className="h-full rounded-full bg-[var(--color-primary)] transition-all duration-500"
+              style={{ width: `${Math.min(100, gain.summary.llm_calls_avoided_pct * 100)}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 4 tabelas de breakdown */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RankTable
+          title="Top Drivers de Economia"
+          rows={gain.breakdowns.top_saving_drivers}
+          rowKey={(d) => d.name}
+          columns={[
+            {
+              label: "Driver",
+              render: (d) => (
+                <span className="flex items-center gap-2">
+                  {d.name}
+                  {d.is_estimated && (
+                    <span className="rounded border border-amber-800/40 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-400">est.</span>
+                  )}
+                </span>
+              ),
+            },
+            { label: "Req. evitadas", render: (d) => fmtNum(d.calls_avoided), align: "right" },
+            { label: "Custo evitado", render: (d) => fmtCost(d.cost_avoided_usd), align: "right" },
+            { label: "%", render: (d) => `${d.pct_of_total_savings.toFixed(1)}%`, align: "right" },
+          ]}
+        />
+
+        <RankTable
+          title="Top Intents"
+          rows={gain.breakdowns.top_intents}
+          rowKey={(i) => i.intent}
+          columns={[
+            {
+              label: "Intent",
+              render: (i) => (
+                <span className="flex items-center gap-1.5">
+                  {i.intent}
+                  {i.source === "intent_memory_cumulative" && (
+                    <span className="text-[9px] text-[var(--color-text-muted)]">(all-time)</span>
+                  )}
+                </span>
+              ),
+            },
+            { label: "Evitadas", render: (i) => fmtNum(i.calls_avoided), align: "right" },
+            { label: "Custo evitado", render: (i) => fmtCost(i.cost_avoided_usd), align: "right" },
+            {
+              label: "Precisão",
+              render: (i) => (
+                <span className={i.bypass_accuracy >= 0.9 ? "text-emerald-400" : "text-amber-400"}>
+                  {fmtPct(i.bypass_accuracy)}
+                </span>
+              ),
+              align: "right",
+            },
+          ]}
+        />
+
+        <RankTable
+          title="Top Modelos"
+          rows={gain.breakdowns.top_models}
+          rowKey={(m) => m.model_used}
+          columns={[
+            { label: "Modelo", render: (m) => m.model_used },
+            { label: "Chamadas", render: (m) => fmtNum(m.calls_routed), align: "right" },
+            { label: "Custo evitado", render: (m) => fmtCost(m.cost_avoided_usd), align: "right" },
+          ]}
+        />
+
+        <RankTable
+          title="Top Estratégias"
+          rows={gain.breakdowns.top_strategies}
+          rowKey={(s) => s.strategy}
+          columns={[
+            { label: "Estratégia", render: (s) => s.label },
+            { label: "Ocorrências", render: (s) => fmtNum(s.count), align: "right" },
+            {
+              label: "Custo evitado",
+              render: (s) => s.cost_avoided_usd > 0 ? fmtCost(s.cost_avoided_usd) : (
+                <span className="text-[var(--color-text-muted)]">—</span>
+              ),
+              align: "right",
+            },
+          ]}
+        />
       </div>
 
       {/* Custo com AION vs. sem AION */}
@@ -122,7 +269,7 @@ export function BudgetPage() {
               <div className="h-full w-full rounded-lg bg-red-500/15" />
               <div className="absolute inset-0 flex items-center px-3">
                 <span className="text-xs font-semibold text-red-400">
-                  R$ {totalWithoutAion.toLocaleString("pt-BR")}
+                  {fmtCost(totalWithoutAion)}
                 </span>
               </div>
             </div>
@@ -141,12 +288,12 @@ export function BudgetPage() {
               <div className="absolute inset-0 flex items-center">
                 <div className="px-3" style={{ width: `${usedPct}%` }}>
                   <span className="text-xs font-semibold text-green-400">
-                    R$ {budget.used_brl.toLocaleString("pt-BR")}
+                    {fmtCost(budget.used_usd)}
                   </span>
                 </div>
                 <div className="flex-1 px-3">
                   <span className="text-xs text-green-400/50">
-                    ← R$ {budget.avoided_cost.toLocaleString("pt-BR")} economizados
+                    ← {fmtCost(budget.avoided_cost)} economizados
                   </span>
                 </div>
               </div>
@@ -183,7 +330,7 @@ export function BudgetPage() {
                       {m.requests.toLocaleString("pt-BR")} req
                     </span>
                     <span className="w-24 text-right font-mono text-sm font-semibold text-[var(--color-text)]">
-                      R$ {m.cost_brl.toLocaleString("pt-BR")}
+                      {fmtCost(m.cost_usd)}
                     </span>
                   </div>
                 </div>
@@ -210,7 +357,7 @@ export function BudgetPage() {
           <p className="mb-4 text-xs text-[var(--color-text-muted)]">
             {totalNomosRequests.toLocaleString("pt-BR")} requests direcionados para o modelo mais eficiente —{" "}
             <span className="font-semibold text-green-400">
-              R$ {Math.round(totalNomosSavedMonth).toLocaleString("pt-BR")} economizados no mês
+              {fmtCost(totalNomosSavedMonth)} economizados no mês
             </span>
           </p>
           <div className="space-y-2.5">
@@ -241,7 +388,7 @@ export function BudgetPage() {
                 </div>
                 <div className="ml-4 shrink-0 text-right">
                   <p className="font-mono text-xs font-bold text-green-400">
-                    +R$ {(o.saved_day * 30).toFixed(0)}/mês
+                    +{fmtCost(o.saved_day * 30)}/mês
                   </p>
                   <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
                     {o.count.toLocaleString("pt-BR")} req

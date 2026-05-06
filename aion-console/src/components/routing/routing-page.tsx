@@ -166,7 +166,7 @@ export function RoutingPage() {
             Custo otimizado
           </div>
           <div className="mt-2 font-[family-name:var(--font-mono)] text-2xl font-bold text-green-400">
-            R$ {nomosStats.cost_optimized.toFixed(2)}
+            US$ {nomosStats.cost_optimized.toFixed(2)}
           </div>
           <div className="mt-0.5 text-xs text-green-600">economizado pelo roteamento inteligente</div>
         </div>

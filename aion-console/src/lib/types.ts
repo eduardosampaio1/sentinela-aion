@@ -178,8 +178,8 @@ export interface Session {
 
 export interface BudgetCap {
   department: string;
-  cap_brl: number;
-  used_brl: number;
+  cap_usd: number;
+  used_usd: number;
   used_pct: number;
   mode: "downgrade" | "hard_stop" | "alert_only";
   alert_sent: boolean;
@@ -187,7 +187,7 @@ export interface BudgetCap {
 
 export interface BudgetSummary {
   monthly_budget: number;
-  used_brl: number;
+  used_usd: number;
   used_pct: number;
   avoided_cost: number;
   alerts: number;
@@ -325,4 +325,63 @@ export interface InstalledCollectivePolicy {
   status: "sandbox" | "shadow" | "production";
   installed_at: number;
   sectors: string[];
+}
+
+// ─── Gain Report ─────────────────────────────────────────────────────────────
+
+export interface GainSavingDriver {
+  name: string;
+  calls_avoided: number;
+  cost_avoided_usd: number;
+  pct_of_total_savings: number;
+  source: string;
+  is_estimated: boolean;
+}
+
+export interface GainIntentBreakdown {
+  intent: string;
+  calls_avoided: number;
+  cost_avoided_usd: number;
+  bypass_accuracy: number;
+  source: string; // "events" | "intent_memory_cumulative"
+}
+
+export interface GainModelBreakdown {
+  model_used: string;
+  calls_routed: number;
+  cost_avoided_usd: number;
+}
+
+export interface GainStrategyBreakdown {
+  strategy: string;
+  label: string;
+  count: number;
+  cost_avoided_usd: number;
+}
+
+export interface GainSummary {
+  window_start: string;
+  window_end: string;
+  total_requests: number;
+  llm_calls_avoided: number;
+  llm_calls_avoided_pct: number;
+  tokens_saved: number;
+  estimated_cost_avoided_usd: number;
+  estimated_latency_avoided_ms: number;
+}
+
+export interface GainReport {
+  schema_version: string;
+  summary: GainSummary;
+  breakdowns: {
+    top_saving_drivers: GainSavingDriver[];
+    top_intents: GainIntentBreakdown[];
+    top_models: GainModelBreakdown[];
+    top_strategies: GainStrategyBreakdown[];
+  };
+  confidence: "low" | "medium" | "high";
+  limitations: string[];
+  data_sources: string[];
+  calculation_notes: string[];
+  generated_at: string;
 }

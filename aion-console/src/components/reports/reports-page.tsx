@@ -213,10 +213,10 @@ function CostsTab({ timeRange }: { timeRange: TimeRange }) {
     live: 0.05, "1h": 0.5, "4h": 2, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
   };
   const scale = costScalers[timeRange] || 1;
-  const scaledSpent = (budget.used_brl * scale).toFixed(2);
+  const scaledSpent = (budget.used_usd * scale).toFixed(2);
   const scaledAvoided = (budget.avoided_cost * scale).toFixed(2);
-  const roi = budget.avoided_cost > 0 && budget.used_brl > 0
-    ? (budget.avoided_cost / budget.used_brl).toFixed(1)
+  const roi = budget.avoided_cost > 0 && budget.used_usd > 0
+    ? (budget.avoided_cost / budget.used_usd).toFixed(1)
     : "1.6";
 
   return (

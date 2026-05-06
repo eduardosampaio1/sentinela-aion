@@ -556,7 +556,7 @@ export function OperationsPage() {
                   <div>
                     <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Custo</label>
                     <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
-                      {selectedEvent.cost ? `$${selectedEvent.cost.toFixed(4)}` : "R$ 0,00 (desviado)"}
+                      {selectedEvent.cost ? `US$ ${selectedEvent.cost.toFixed(4)}` : "US$ 0.0000 (desviado)"}
                     </p>
                   </div>
                   {selectedEvent.tokens_used && (
