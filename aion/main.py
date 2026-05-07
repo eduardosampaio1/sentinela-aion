@@ -40,6 +40,7 @@ _pipeline: Pipeline | None = None
 _snapshot_task: asyncio.Task | None = None
 _approval_task: asyncio.Task | None = None
 _trust_guard_task: asyncio.Task | None = None
+_kairos_sweep_task: asyncio.Task | None = None
 
 
 async def _snapshot_baselines_loop():
@@ -51,6 +52,24 @@ async def _snapshot_baselines_loop():
             await get_nemos().snapshot_baselines_if_needed()
         except Exception:
             logger.debug("NEMOS snapshot failed (non-critical)", exc_info=True)
+
+
+async def _kairos_lifecycle_sweep_loop():
+    """Background task: sweep shadow_running candidates every KAIROS_SWEEP_INTERVAL_SECONDS."""
+    try:
+        from aion.kairos.settings import get_kairos_settings
+        interval = get_kairos_settings().sweep_interval_seconds
+    except Exception:
+        interval = 300
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            from aion.kairos import get_kairos
+            completed = await get_kairos().lifecycle_manager.sweep()
+            if completed:
+                logger.info("KAIROS sweep: %d candidate(s) transitioned to shadow_completed", completed)
+        except Exception:
+            logger.debug("KAIROS sweep failed (non-critical)", exc_info=True)
 
 
 async def _approval_sweep_loop():
@@ -262,7 +281,7 @@ async def lifespan(app: FastAPI):
     logger.info("AION pipeline ready")
 
     # ── Trust Guard: apply entitlement from startup state + launch loop ───────
-    global _snapshot_task, _approval_task, _trust_guard_task
+    global _snapshot_task, _approval_task, _trust_guard_task, _kairos_sweep_task
     try:
         from aion.trust_guard.entitlement_engine import EntitlementEngine, TrustViolationBehavior
         from aion.config import get_trust_guard_settings
@@ -278,6 +297,14 @@ async def lifespan(app: FastAPI):
     _snapshot_task = asyncio.create_task(_snapshot_baselines_loop())
     _approval_task = asyncio.create_task(_approval_sweep_loop())
 
+    try:
+        from aion.kairos.settings import get_kairos_settings
+        if get_kairos_settings().enabled:
+            _kairos_sweep_task = asyncio.create_task(_kairos_lifecycle_sweep_loop())
+            logger.info("KAIROS lifecycle sweep loop started")
+    except Exception as _kairos_err:
+        logger.warning("KAIROS sweep startup failed (non-fatal): %s", _kairos_err)
+
     yield
 
     if _snapshot_task:
@@ -286,6 +313,8 @@ async def lifespan(app: FastAPI):
         _approval_task.cancel()
     if _trust_guard_task:
         _trust_guard_task.cancel()
+    if _kairos_sweep_task:
+        _kairos_sweep_task.cancel()
 
     await shutdown_telemetry()
     await shutdown_client()
@@ -353,7 +382,7 @@ async def _handle_request_validation_error(request: Request, exc: RequestValidat
 
 
 # Register routers
-from aion.routers import proxy, observability, control_plane, budget, sessions, approvals, intelligence, reports, data_mgmt, global_feed, collective, gain  # noqa: E402
+from aion.routers import proxy, observability, control_plane, budget, sessions, approvals, intelligence, reports, data_mgmt, global_feed, collective, gain, kairos  # noqa: E402
 
 app.include_router(proxy.router)
 app.include_router(observability.router)
@@ -367,3 +396,4 @@ app.include_router(data_mgmt.router)
 app.include_router(global_feed.router)
 app.include_router(collective.router)
 app.include_router(gain.router)
+app.include_router(kairos.router)

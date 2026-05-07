@@ -7,6 +7,7 @@ import { getBudgetStatus } from "@/lib/api";
 import { getGainReport } from "@/lib/api/gains";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockBudgetSummary, mockIntentPerformance, mockGainReport } from "@/lib/mock-data";
+import { useT } from "@/lib/i18n";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ const bypassCount = 12840;
 const daysInPeriod = 24;
 
 export function BudgetPage() {
+  const t = useT();
   const { data: budget, isDemo, refetch } = useApiData(getBudgetStatus, mockBudgetSummary, {
     intervalMs: 60_000,
   });
@@ -108,10 +110,10 @@ export function BudgetPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Economia
+          {t("budget.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Gasto de LLM, roteamento e otimizações — últimos {daysInPeriod} dias
+          {t("budget.subtitle").replace("{n}", String(daysInPeriod))}
         </p>
       </div>
 
@@ -120,37 +122,37 @@ export function BudgetPage() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <DollarSign className="h-3.5 w-3.5" />
-            Custo real do mês
+            {t("budget.metrics.real_cost")}
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
             <AnimatedNumber value={budget.used_usd} format={fmtCost} />
           </p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            vs {fmtCost(totalWithoutAion)} sem AION
+            {t("budget.metrics.without_aion").replace("{value}", fmtCost(totalWithoutAion))}
           </p>
         </div>
 
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <Zap className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-            Respostas sem LLM
+            {t("budget.metrics.bypass_responses")}
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
             <AnimatedNumber value={bypassCount} />
           </p>
-          <p className="mt-1 text-xs text-[var(--color-text-muted)]">bypass e cache — custo zero</p>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">{t("budget.metrics.bypass_subtitle")}</p>
         </div>
 
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             <BarChart3 className="h-3.5 w-3.5" />
-            Projeção 30 dias
+            {t("budget.metrics.projection")}
           </div>
           <p className="mt-2 text-2xl font-bold text-[var(--color-text)]">
             <AnimatedNumber value={projectedMonthly} format={fmtCost} />
           </p>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            baseado nos últimos {daysInPeriod} dias
+            {t("budget.metrics.projection_subtitle").replace("{n}", String(daysInPeriod))}
           </p>
         </div>
       </div>
@@ -158,7 +160,7 @@ export function BudgetPage() {
       {/* Taxa de bypass */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-medium text-[var(--color-text-muted)]">Taxa de chamadas LLM evitadas</span>
+          <span className="text-xs font-medium text-[var(--color-text-muted)]">{t("budget.bypass_rate")}</span>
           <span className="font-[family-name:var(--font-mono)] text-sm font-bold text-[var(--color-primary)]">
             {fmtPct(gain.summary.llm_calls_avoided_pct)}
           </span>
@@ -176,12 +178,12 @@ export function BudgetPage() {
       {/* 4 tabelas de breakdown */}
       <div className="grid gap-4 lg:grid-cols-2">
         <RankTable
-          title="Top Drivers de Economia"
+          title={t("budget.tables.top_drivers")}
           rows={gain.breakdowns.top_saving_drivers}
           rowKey={(d) => d.name}
           columns={[
             {
-              label: "Driver",
+              label: t("budget.tables.driver_col"),
               render: (d) => (
                 <span className="flex items-center gap-2">
                   {d.name}
@@ -191,19 +193,19 @@ export function BudgetPage() {
                 </span>
               ),
             },
-            { label: "Req. evitadas", render: (d) => fmtNum(d.calls_avoided), align: "right" },
-            { label: "Custo evitado", render: (d) => fmtCost(d.cost_avoided_usd), align: "right" },
-            { label: "%", render: (d) => `${d.pct_of_total_savings.toFixed(1)}%`, align: "right" },
+            { label: t("budget.tables.avoided_calls"), render: (d) => fmtNum(d.calls_avoided), align: "right" },
+            { label: t("budget.tables.cost_avoided"), render: (d) => fmtCost(d.cost_avoided_usd), align: "right" },
+            { label: t("budget.tables.pct"), render: (d) => `${d.pct_of_total_savings.toFixed(1)}%`, align: "right" },
           ]}
         />
 
         <RankTable
-          title="Top Intents"
+          title={t("budget.tables.top_intents")}
           rows={gain.breakdowns.top_intents}
           rowKey={(i) => i.intent}
           columns={[
             {
-              label: "Intent",
+              label: t("budget.tables.intent_col"),
               render: (i) => (
                 <span className="flex items-center gap-1.5">
                   {i.intent}
@@ -213,10 +215,10 @@ export function BudgetPage() {
                 </span>
               ),
             },
-            { label: "Evitadas", render: (i) => fmtNum(i.calls_avoided), align: "right" },
-            { label: "Custo evitado", render: (i) => fmtCost(i.cost_avoided_usd), align: "right" },
+            { label: t("budget.tables.avoided_calls"), render: (i) => fmtNum(i.calls_avoided), align: "right" },
+            { label: t("budget.tables.cost_avoided"), render: (i) => fmtCost(i.cost_avoided_usd), align: "right" },
             {
-              label: "Precisão",
+              label: t("budget.tables.precision"),
               render: (i) => (
                 <span className={i.bypass_accuracy >= 0.9 ? "text-emerald-400" : "text-amber-400"}>
                   {fmtPct(i.bypass_accuracy)}
@@ -228,23 +230,23 @@ export function BudgetPage() {
         />
 
         <RankTable
-          title="Top Modelos"
+          title={t("budget.tables.top_models")}
           rows={gain.breakdowns.top_models}
           rowKey={(m) => m.model_used}
           columns={[
-            { label: "Modelo", render: (m) => m.model_used },
-            { label: "Chamadas", render: (m) => fmtNum(m.calls_routed), align: "right" },
-            { label: "Custo evitado", render: (m) => fmtCost(m.cost_avoided_usd), align: "right" },
+            { label: t("budget.tables.model_col"), render: (m) => m.model_used },
+            { label: t("budget.tables.calls_routed"), render: (m) => fmtNum(m.calls_routed), align: "right" },
+            { label: t("budget.tables.cost_avoided"), render: (m) => fmtCost(m.cost_avoided_usd), align: "right" },
           ]}
         />
 
         <RankTable
-          title="Top Estratégias"
+          title={t("budget.tables.top_strategies")}
           rows={gain.breakdowns.top_strategies}
           rowKey={(s) => s.strategy}
           columns={[
-            { label: "Estratégia", render: (s) => s.label },
-            { label: "Ocorrências", render: (s) => fmtNum(s.count), align: "right" },
+            { label: t("budget.tables.strategy_col"), render: (s) => s.label },
+            { label: t("budget.tables.occurrences"), render: (s) => fmtNum(s.count), align: "right" },
             {
               label: "Custo evitado",
               render: (s) => s.cost_avoided_usd > 0 ? fmtCost(s.cost_avoided_usd) : (
@@ -259,12 +261,12 @@ export function BudgetPage() {
       {/* Custo com AION vs. sem AION */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
         <h2 className="mb-5 text-sm font-semibold text-[var(--color-text)]">
-          Custo com AION vs. sem AION este mês
+          {t("budget.comparison.title")}
         </h2>
         <div className="space-y-3">
           {/* Sem AION */}
           <div className="flex items-center gap-4">
-            <span className="w-36 shrink-0 text-xs text-[var(--color-text-muted)]">Sem AION (estimado)</span>
+            <span className="w-36 shrink-0 text-xs text-[var(--color-text-muted)]">{t("budget.comparison.without_aion")}</span>
             <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-white/5">
               <div className="h-full w-full rounded-lg bg-red-500/15" />
               <div className="absolute inset-0 flex items-center px-3">
@@ -277,7 +279,7 @@ export function BudgetPage() {
 
           {/* Com AION */}
           <div className="flex items-center gap-4">
-            <span className="w-36 shrink-0 text-xs text-[var(--color-text-muted)]">Com AION (real)</span>
+            <span className="w-36 shrink-0 text-xs text-[var(--color-text-muted)]">{t("budget.comparison.with_aion")}</span>
             <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-white/5">
               {/* Used portion */}
               <div
@@ -293,7 +295,7 @@ export function BudgetPage() {
                 </div>
                 <div className="flex-1 px-3">
                   <span className="text-xs text-green-400/50">
-                    ← {fmtCost(budget.avoided_cost)} economizados
+                    ← {fmtCost(budget.avoided_cost)} {t("budget.comparison.saved")}
                   </span>
                 </div>
               </div>
@@ -314,7 +316,7 @@ export function BudgetPage() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <h2 className="mb-5 flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Cpu className="h-4 w-4 text-[var(--color-primary)]" />
-            Custo por modelo
+            {t("budget.model_cost.title")}
           </h2>
           <div className="space-y-4">
             {modelBreakdown.map((m) => (
@@ -352,13 +354,12 @@ export function BudgetPage() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Sparkles className="h-4 w-4 text-[var(--color-primary)]" />
-            Otimizações automáticas de roteamento
+            {t("budget.nomos.title")}
           </h2>
           <p className="mb-4 text-xs text-[var(--color-text-muted)]">
-            {totalNomosRequests.toLocaleString("pt-BR")} requests direcionados para o modelo mais eficiente —{" "}
-            <span className="font-semibold text-green-400">
-              {fmtCost(totalNomosSavedMonth)} economizados no mês
-            </span>
+            {t("budget.nomos.subtitle")
+              .replace("{requests}", totalNomosRequests.toLocaleString("pt-BR"))
+              .replace("{saved}", fmtCost(totalNomosSavedMonth))}
           </p>
           <div className="space-y-2.5">
             {nomosOptimizations.map((o) => (

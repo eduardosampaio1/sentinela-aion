@@ -575,6 +575,24 @@ class Pipeline:
                 elapsed_ms = (time.perf_counter() - t0) * 1000
                 context.module_latencies[key] = round(elapsed_ms, 2)
 
+        # ── KAIROS shadow evaluation (fire-and-forget, never blocks response) ──
+        # Snapshot the two mutable dicts (metadata, module_latencies) so post-pipeline
+        # writes don't race with shadow evaluation. Result objects (estixe_result,
+        # nomos_result) are treated as immutable after pipeline modules complete.
+        try:
+            from aion.kairos.shadow import KairosShadowEvaluator
+            _ctx_snap = context.model_copy(update={
+                "metadata": dict(context.metadata),
+                "module_latencies": dict(context.module_latencies),
+            })
+            _t_shadow = asyncio.create_task(
+                _guarded_bg(KairosShadowEvaluator().evaluate(_ctx_snap, response))
+            )
+            _BG_TASKS.add(_t_shadow)
+            _t_shadow.add_done_callback(_BG_TASKS.discard)
+        except Exception:
+            logger.debug("KAIROS shadow evaluator setup failed (non-critical)", exc_info=True)
+
         return response
 
     async def emit_telemetry(self, context: PipelineContext) -> None:

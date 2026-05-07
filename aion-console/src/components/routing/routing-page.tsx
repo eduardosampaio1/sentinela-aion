@@ -27,6 +27,7 @@ import { getModels, setBehavior, getIntelligenceIntents } from "@/lib/api";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockModels, mockIntentPerformance } from "@/lib/mock-data";
 import type { IntentPerformance } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const defaultRules = [
   { id: "r1", prompt_type: "Simples", model_id: "gpt-4o-mini", condition: "< 50 tokens" },
@@ -43,6 +44,7 @@ const modelDistribution = [
 ];
 
 export function RoutingPage() {
+  const t = useT();
   // M3 fix: treat empty array as demo so the <DemoBanner> surfaces when the
   // backend responded 200 but with zero usable models (e.g. registry failed
   // to load, or no model passed `isModelInfoLike`). Otherwise we'd render an
@@ -148,10 +150,10 @@ export function RoutingPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Roteamento
+          {t("routing.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Inteligência de seleção de modelos. Cada decisão otimiza custo sem perder qualidade.
+          {t("routing.subtitle")}
         </p>
       </div>
 

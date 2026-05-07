@@ -7,6 +7,7 @@ import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
 import { mockAdminRoles, mockIdentityProviders } from "@/lib/mock-data";
 import { rotateKeys, getAudit, getComplianceSummary, deleteTenantData, getActiveTenant } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 const roleColors: Record<string, string> = {
   red: "bg-red-900/30 text-red-400 border-red-800/50",
@@ -28,6 +29,7 @@ type Tab = (typeof tabs)[number];
 type AdminActionType = "create-role" | "edit-role" | "connect-idp" | "configure-idp" | "rotate-keys" | "session-timeout" | "configure-mfa" | "manage-allowlist";
 
 export function AdminPage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<Tab>("Papéis & Permissões");
   const [selectedAction, setSelectedAction] = useState<AdminActionType | null>(null);
   const [selectedRoleName, setSelectedRoleName] = useState<string | null>(null);
@@ -246,10 +248,10 @@ export function AdminPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Administração
+          {t("admin.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          RBAC, provedores de identidade e configurações de segurança de acesso
+          {t("admin.subtitle")}
         </p>
       </div>
 

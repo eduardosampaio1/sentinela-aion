@@ -30,3 +30,4 @@ export * from "./admin";
 export * from "./reports";
 export * from "./collective";
 export * from "./gains";
+export * from "./kairos";
