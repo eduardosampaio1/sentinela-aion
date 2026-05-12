@@ -515,8 +515,15 @@ async def chat_completions(request: Request):
             "budget_exceeded",
             "rate_limit_error",
         )
-    except Exception:
-        pass  # fail-open
+    except Exception as _budget_unexpected:
+        # check_budget() has its own fail-open handler — reaching here means
+        # something failed before the inner guard (e.g. import error). Log
+        # prominently so the failure is observable rather than silent.
+        import logging as _log
+        _log.getLogger("aion.budget").warning(
+            "Budget check raised unexpected exception (fail-open): %s", _budget_unexpected,
+            exc_info=True,
+        )
 
     try:
         if chat_request.stream:

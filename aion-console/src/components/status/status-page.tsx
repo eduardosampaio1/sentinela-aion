@@ -36,7 +36,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useAionData } from "@/lib/use-aion-data";
-import { mockSpendTrend, mockModelCostDistribution } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
 import { useT } from "@/lib/i18n";
 
@@ -60,6 +59,10 @@ export function StatusPage() {
   const recentEvents = liveData.events.slice(0, 5);
 
   const totalEconomy = modules.nomos.cost_optimized + modules.estixe.cost_avoided + modules.metis.cost_saved;
+
+  // Historical chart data — populated from /v1/economics/daily via useAionData.
+  const spendTrend = liveData.spendTrend;
+  const modelCostDist = liveData.modelCostDist;
 
   return (
     <div className="space-y-6">
@@ -195,50 +198,58 @@ export function StatusPage() {
           </h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">US$ por dia</p>
           <div className="mt-4 h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={mockSpendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradAvoided" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
-                  tickFormatter={(v: string) => v.slice(8)}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => `${v}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    fontSize: 12,
-                  }}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  labelFormatter={(v: any) => `Dia ${String(v).slice(8)}/04`}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={(v: any, name: any) => [
-                    `US$ ${Number(v).toFixed(2)}`,
-                    name === "spend" ? t("status.chart_ext.spend_label") : t("status.chart_ext.avoided_label"),
-                  ]}
-                />
-                <Area type="monotone" dataKey="spend" stroke="#0ea5e9" strokeWidth={2} fill="url(#gradSpend)" />
-                <Area type="monotone" dataKey="avoided" stroke="#22c55e" strokeWidth={2} fill="url(#gradAvoided)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {spendTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={spendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradAvoided" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                    tickFormatter={(v: string) => v.slice(8)}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => `${v}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    labelFormatter={(v: any) => `Dia ${String(v).slice(8)}`}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(v: any, name: any) => [
+                      `US$ ${Number(v).toFixed(2)}`,
+                      name === "spend" ? t("status.chart_ext.spend_label") : t("status.chart_ext.avoided_label"),
+                    ]}
+                  />
+                  <Area type="monotone" dataKey="spend" stroke="#0ea5e9" strokeWidth={2} fill="url(#gradSpend)" />
+                  <Area type="monotone" dataKey="avoided" stroke="#22c55e" strokeWidth={2} fill="url(#gradAvoided)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[var(--color-border)]">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Histórico disponível após agregação diária ativada
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -247,39 +258,47 @@ export function StatusPage() {
           <h2 className="text-sm font-semibold text-[var(--color-text)]">{t("status.chart_ext.cost_distribution")}</h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{t("status.chart_ext.by_model")}</p>
           <div className="mt-4 h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={mockModelCostDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={48}
-                  outerRadius={72}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {mockModelCostDistribution.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Legend
-                  iconSize={8}
-                  formatter={(value: string) => (
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
-                  )}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    fontSize: 12,
-                  }}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={(v: any) => [`${v}%`, "Custo"]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {modelCostDist.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={modelCostDist}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {modelCostDist.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Legend
+                    iconSize={8}
+                    formatter={(value: string) => (
+                      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
+                    )}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(v: any) => [`${v}%`, "Custo"]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[var(--color-border)]">
+                <p className="text-center text-xs text-[var(--color-text-muted)]">
+                  Distribuição por modelo disponível<br />após dados de custo registrados
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

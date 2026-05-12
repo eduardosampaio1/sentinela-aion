@@ -202,7 +202,12 @@ class Pipeline:
         # Persist to Redis without blocking the caller. Best-effort — failures
         # are logged at debug to avoid breaking the kill switch UX if Redis
         # is unavailable (the in-memory state still works for this process).
-        asyncio.create_task(self._persist_safe_mode_to_redis())
+        # Guard: create_task requires a running event loop; in sync contexts
+        # (e.g., test teardown) we skip the persist gracefully.
+        try:
+            asyncio.get_running_loop().create_task(self._persist_safe_mode_to_redis())
+        except RuntimeError:
+            pass  # No running event loop — Redis persist skipped (sync context)
 
     def deactivate_safe_mode(self) -> None:
         """Recover from safe mode."""
@@ -210,7 +215,10 @@ class Pipeline:
         self._safe_mode_reason = ""
         self._safe_mode_expires_at = None
         self._log_mode_transition("safe", "normal", "manual_recovery")
-        asyncio.create_task(self._clear_safe_mode_in_redis())
+        try:
+            asyncio.get_running_loop().create_task(self._clear_safe_mode_in_redis())
+        except RuntimeError:
+            pass  # No running event loop — Redis clear skipped (sync context)
 
     @property
     def safe_mode_state(self) -> dict:

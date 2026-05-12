@@ -102,26 +102,38 @@ class BudgetStore:
         return BudgetState(tenant=tenant)
 
     async def record_spend(self, tenant: str, cost: float) -> None:
-        """Adiciona custo ao estado. Chamado post-LLM (fire-and-forget)."""
+        """Adiciona custo ao estado. Chamado post-LLM (fire-and-forget).
+
+        Daily spend uses a dedicated Redis key with INCRBYFLOAT for atomic
+        increment — prevents the race condition where two concurrent requests
+        both read the same today_spend value and overwrite each other's write.
+        The daily key auto-expires after 2 days so no manual cleanup is needed.
+        """
         r = await self._get_redis()
         if r is None:
             return
         try:
-            state = await self.get_state(tenant)
-            # Reset diário
             today = _today_key()
+            daily_key = f"aion:budget:{tenant}:daily:{today}"
+            month_key = f"aion:budget:{tenant}:monthly"
+
+            pipe = r.pipeline()
+            # Atomic increment — safe under concurrent requests
+            pipe.incrbyfloat(daily_key, cost)
+            pipe.expire(daily_key, 172800)  # 2 days TTL
+            pipe.incrbyfloat(month_key, cost)
+            pipe.expire(month_key, 93 * 86400)  # ~3 months
+            await pipe.execute()
+
+            # Update metadata (non-atomic is fine — flags are advisory only)
             state_key = f"aion:budget:{tenant}:state"
             raw = await r.get(state_key)
+            state = BudgetState(tenant=tenant)
             if raw:
-                data = json.loads(raw)
-                stored_day = data.get("_day", today)
-                if stored_day != today:
-                    # Novo dia — reset spend diário
-                    state.today_spend = 0.0
-                    state.alert_sent_today = False
-                    state.cap_reached_today = False
-            state.today_spend += cost
-            state.month_spend += cost
+                try:
+                    state = BudgetState(**json.loads(raw))
+                except Exception:
+                    pass
             state.last_updated = time.time()
             data = state.model_dump()
             data["_day"] = today
@@ -130,15 +142,25 @@ class BudgetStore:
             logger.debug("BudgetStore.record_spend failed", exc_info=True)
 
     async def get_today_spend(self, tenant: str) -> float:
-        """Retorna gasto do dia atual. Usa NEMOS EconomicsBucket se Redis indisponível."""
+        """Retorna gasto do dia atual usando chave atômica INCRBYFLOAT.
+
+        Falls back to NEMOS EconomicsBucket when Redis is unavailable.
+        Falls back to JSON state blob for backward compatibility with
+        data written by the old record_spend (before the atomic refactor).
+        """
         r = await self._get_redis()
         if r is None:
             return await self._nemos_today_spend(tenant)
         try:
-            raw = await r.get(f"aion:budget:{tenant}:state")
-            if raw:
-                data = json.loads(raw)
-                today = _today_key()
+            today = _today_key()
+            daily_key = f"aion:budget:{tenant}:daily:{today}"
+            raw = await r.get(daily_key)
+            if raw is not None:
+                return float(raw)
+            # Backward compat: check old JSON state blob
+            state_raw = await r.get(f"aion:budget:{tenant}:state")
+            if state_raw:
+                data = json.loads(state_raw)
                 if data.get("_day") == today:
                     return float(data.get("today_spend", 0.0))
         except Exception:

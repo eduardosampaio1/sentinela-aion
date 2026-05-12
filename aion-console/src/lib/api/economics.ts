@@ -29,3 +29,34 @@ export async function setBudgetCap(config: {
 export async function getEconomics(): Promise<Record<string, unknown>> {
   return fetchApi("/v1/economics");
 }
+
+export interface DailyEconomicsRow {
+  id: string;
+  tenant: string;
+  date: string;
+  total_requests: number;
+  total_cost_usd: number;
+  total_savings_usd: number;
+  bypass_count: number;
+  block_count: number;
+  tokens_saved: number;
+  by_model: Record<string, { requests: number; cost_usd: number }>;
+  updated_at: string;
+}
+
+export interface DailyEconomicsResponse {
+  tenant: string;
+  days: number;
+  rows: DailyEconomicsRow[];
+}
+
+export async function getEconomicsDaily(days = 30): Promise<DailyEconomicsRow[]> {
+  try {
+    const resp = await fetchApi<DailyEconomicsResponse>(
+      `/v1/economics/daily?days=${days}`
+    );
+    return Array.isArray(resp.rows) ? resp.rows : [];
+  } catch {
+    return [];
+  }
+}

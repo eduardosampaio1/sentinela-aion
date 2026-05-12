@@ -41,6 +41,25 @@ _snapshot_task: asyncio.Task | None = None
 _approval_task: asyncio.Task | None = None
 _trust_guard_task: asyncio.Task | None = None
 _kairos_sweep_task: asyncio.Task | None = None
+_economics_daily_task: asyncio.Task | None = None
+
+
+async def _economics_daily_loop():
+    """Background task: aggregate daily economics every AION_ECONOMICS_SWEEP_INTERVAL_SECONDS (default 4 h)."""
+    interval = int(os.environ.get("AION_ECONOMICS_SWEEP_INTERVAL_SECONDS", "14400"))
+    # Run once at startup so today's partial data is available immediately.
+    try:
+        from aion.shared.economics_daily_job import run_economics_daily_sweep
+        await run_economics_daily_sweep()
+    except Exception:
+        logger.debug("Economics daily sweep failed (non-critical)", exc_info=True)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            from aion.shared.economics_daily_job import run_economics_daily_sweep
+            await run_economics_daily_sweep()
+        except Exception:
+            logger.debug("Economics daily sweep failed (non-critical)", exc_info=True)
 
 
 async def _snapshot_baselines_loop():
@@ -280,8 +299,15 @@ async def lifespan(app: FastAPI):
     _pipeline_ready.set()
     logger.info("AION pipeline ready")
 
+    # ── Supabase table probe (blocker 2 — runs once, fail-open) ──────────────
+    try:
+        from aion.shared.economics_daily_job import probe_supabase_tables
+        await probe_supabase_tables()
+    except Exception:
+        pass  # probe is purely informational; never block startup
+
     # ── Trust Guard: apply entitlement from startup state + launch loop ───────
-    global _snapshot_task, _approval_task, _trust_guard_task, _kairos_sweep_task
+    global _snapshot_task, _approval_task, _trust_guard_task, _kairos_sweep_task, _economics_daily_task
     try:
         from aion.trust_guard.entitlement_engine import EntitlementEngine, TrustViolationBehavior
         from aion.config import get_trust_guard_settings
@@ -296,6 +322,7 @@ async def lifespan(app: FastAPI):
 
     _snapshot_task = asyncio.create_task(_snapshot_baselines_loop())
     _approval_task = asyncio.create_task(_approval_sweep_loop())
+    _economics_daily_task = asyncio.create_task(_economics_daily_loop())
 
     try:
         from aion.kairos.settings import get_kairos_settings
@@ -315,6 +342,8 @@ async def lifespan(app: FastAPI):
         _trust_guard_task.cancel()
     if _kairos_sweep_task:
         _kairos_sweep_task.cancel()
+    if _economics_daily_task:
+        _economics_daily_task.cancel()
 
     await shutdown_telemetry()
     await shutdown_client()
