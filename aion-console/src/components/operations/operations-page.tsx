@@ -483,7 +483,7 @@ export function OperationsPage() {
                       {evt.response_time_ms}ms
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
-                      {evt.cost ? `$${evt.cost.toFixed(4)}` : "—"}
+                      {evt.cost ? `US$ ${evt.cost.toFixed(4)}` : "—"}
                     </td>
                   </tr>
                 );
@@ -567,7 +567,7 @@ export function OperationsPage() {
                   <div>
                     <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.cost")}</label>
                     <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
-                      {selectedEvent.cost ? `$${selectedEvent.cost.toFixed(4)}` : t("operations.detail_modal.cost_none")}
+                      {selectedEvent.cost ? `US$ ${selectedEvent.cost.toFixed(4)}` : t("operations.detail_modal.cost_none")}
                     </p>
                   </div>
                   {selectedEvent.tokens_used && (
