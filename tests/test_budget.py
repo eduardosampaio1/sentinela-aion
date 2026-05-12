@@ -136,20 +136,48 @@ async def test_check_budget_fail_open_on_store_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_record_spend_accumulates_daily():
+    """record_spend uses INCRBYFLOAT for atomic daily accumulation.
+
+    Daily spend is no longer stored in the JSON state blob — it lives in a
+    dedicated Redis key (aion:budget:{tenant}:daily:{date}) to prevent the
+    race condition where two concurrent requests both read+write the same
+    today_spend value and the second write silently overwrites the first.
+    """
+    import json as _json
+    from unittest.mock import MagicMock
+
     store = BudgetStore()
     mock_redis = AsyncMock()
 
-    # Simulate empty state initially
-    mock_redis.get.return_value = None
+    # pipeline() is synchronous (returns Pipeline object, not a coroutine).
+    # AsyncMock auto-wraps all attrs as AsyncMocks, so we must explicitly
+    # replace pipeline with a regular MagicMock to avoid it becoming async.
+    mock_pipe = MagicMock()
+    mock_pipe.incrbyfloat = MagicMock(return_value=mock_pipe)
+    mock_pipe.expire = MagicMock(return_value=mock_pipe)
+    mock_pipe.execute = AsyncMock(return_value=[0.50, True, 0.50, True])
+    mock_redis.pipeline = MagicMock(return_value=mock_pipe)  # sync, not AsyncMock!
+
+    # get() returns None (no existing state)
+    mock_redis.get = AsyncMock(return_value=None)
     mock_redis.set = AsyncMock()
     store._redis_client = mock_redis
 
     await store.record_spend("acme", 0.50)
 
+    # INCRBYFLOAT must be called with the daily key and the cost
+    from datetime import date
+    today = date.today().isoformat()
+    expected_daily_key = f"aion:budget:acme:daily:{today}"
+    mock_pipe.incrbyfloat.assert_any_call(expected_daily_key, 0.50)
+
+    # Metadata state is still written (for last_updated / flag fields)
     mock_redis.set.assert_called_once()
     call_args = mock_redis.set.call_args
-    saved_data = __import__("json").loads(call_args[0][1])
-    assert saved_data["today_spend"] == pytest.approx(0.50)
+    saved_data = _json.loads(call_args[0][1])
+    # today_spend is no longer in the metadata blob — it lives in the atomic key
+    assert "_day" in saved_data
+    assert saved_data["_day"] == today
 
 
 @pytest.mark.asyncio

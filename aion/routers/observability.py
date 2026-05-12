@@ -305,6 +305,25 @@ async def runtime_economics(request: Request):
     }
 
 
+@router.get("/v1/economics/daily", tags=["Observability"])
+async def economics_daily(request: Request, days: int = 30):
+    """Historical daily aggregated economics — last N days from aion_economics_daily.
+
+    Returns an empty list when Supabase is not configured (fail-open).
+    """
+    settings = get_settings()
+    tenant = request.headers.get(settings.tenant_header, settings.default_tenant)
+    days = max(1, min(days, 365))  # clamp to [1, 365]
+
+    from aion.shared.economics_daily_job import fetch_daily_economics
+    rows = await fetch_daily_economics(tenant, days=days)
+    return {
+        "tenant": tenant,
+        "days": days,
+        "rows": rows,
+    }
+
+
 @router.get("/v1/cache/stats", tags=["Observability"])
 async def cache_stats(request: Request):
     """Semantic cache performance metrics."""

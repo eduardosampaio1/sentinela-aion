@@ -31,6 +31,7 @@ import { getSessions, getSessionAudit, getApprovals, resolveApproval } from "@/l
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockSessions, mockAnnotations } from "@/lib/mock-data";
 import type { Session, SessionTurn, AnnotationItem } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 type PendingApproval = {
   id: string;
@@ -530,6 +531,7 @@ function AnnotationCard({
 }
 
 export function SessionsPage() {
+  const t = useT();
   const [selected, setSelected] = useState<Session | null>(null);
   const [filter, setFilter] = useState<"all" | "high" | "critical" | "blocked">("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("24h");
@@ -621,10 +623,10 @@ export function SessionsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            Sessões
+            {t("sessions.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Histórico de conversas com auditoria turn-by-turn
+            {t("sessions.subtitle")}
           </p>
         </div>
         {activeTab === "sessions" && (

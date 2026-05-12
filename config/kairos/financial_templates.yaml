@@ -1,0 +1,158 @@
+# KAIROS Financial Policy Templates — V0
+#
+# LLM-AGNOSTIC INVARIANT: nenhum template pode conter ID físico de provider ou modelo.
+# Referências a modelo usam model_tier | model_alias | capability.
+# O NOMOS local resolve o alias para o provider físico do cliente.
+
+- id: greeting_bypass
+  vertical: financeiro
+  type: bypass
+  title: "Bypass de saudações genéricas"
+  description: >
+    Detecta saudações simples e responde com template estático, evitando
+    chamadas ao LLM para interações sem valor informacional.
+  risk_level: low
+  trigger:
+    conditions:
+      - field: content_pattern
+        operator: matches_pattern
+        value: "^(oi|olá|ola|bom dia|boa tarde|boa noite|tudo bem|hey|hello|hi)[\\.!\\?]?$"
+        description: "Mensagem é uma saudação genérica"
+      - field: confidence
+        operator: gte
+        value: 0.92
+        description: "Confiança mínima na classificação de saudação"
+  action:
+    type: bypass_llm
+    response_template: greeting_standard
+  fallback:
+    type: model_tier
+    value: customer_default_model
+    conditions:
+      - "confidence < 0.92"
+      - "mensagem contém pergunta adicional"
+  exclusions: []
+  default_thresholds:
+    - name: intent_confidence
+      value: 0.92
+      description: "Confiança mínima para aplicar bypass"
+  default_success_criteria:
+    - metric: llm_calls_reduction_pct
+      operator: gte
+      target_value: 80.0
+      window: 7d
+      description: "Reduzir chamadas LLM em pelo menos 80% para saudações"
+    - metric: critical_incidents
+      operator: equals
+      target_value: 0
+      window: 7d
+      description: "Zero incidentes críticos"
+
+- id: boleto_second_copy_route_to_api
+  vertical: financeiro
+  type: route_to_api
+  title: "Segunda via de boleto → API interna"
+  description: >
+    Direciona solicitações de segunda via de boleto para API interna do cliente,
+    evitando chamadas ao LLM para fluxo totalmente parametrizável.
+  risk_level: low
+  trigger:
+    conditions:
+      - field: intent
+        operator: equals
+        value: segunda_via_boleto
+        description: "Intenção classificada como segunda via de boleto"
+      - field: confidence
+        operator: gte
+        value: 0.82
+        description: "Confiança mínima para roteamento automático"
+      - field: user_authenticated
+        operator: equals
+        value: true
+        description: "Usuário precisa estar autenticado"
+  action:
+    type: route_to_api
+    target: billing_api.second_copy
+  fallback:
+    type: model_tier
+    value: low_cost_fast
+    conditions:
+      - "confidence < 0.82"
+      - "user_authenticated = false"
+      - "billing_api unavailable"
+      - "mensagem menciona contestação ou cobrança indevida"
+  exclusions:
+    - "cobrança indevida"
+    - "contestação"
+    - "Procon"
+    - "juizado"
+    - "estorno"
+  default_thresholds:
+    - name: intent_confidence
+      value: 0.82
+      description: "Confiança mínima para roteamento para API"
+  default_success_criteria:
+    - metric: llm_calls_reduction_pct
+      operator: gte
+      target_value: 20.0
+      window: 7d
+      description: "Reduzir chamadas LLM em pelo menos 20% no cluster"
+    - metric: handoff_rate
+      operator: lte
+      target_value: 4.0
+      window: 7d
+      description: "Manter handoff abaixo de 4%"
+    - metric: fallback_rate
+      operator: lte
+      target_value: 15.0
+      window: 7d
+      description: "Manter fallback abaixo de 15%"
+    - metric: critical_incidents
+      operator: equals
+      target_value: 0
+      window: 7d
+      description: "Zero incidentes críticos"
+
+- id: pix_sensitive_data_guard
+  vertical: financeiro
+  type: guardrail
+  title: "Guardrail: dados sensíveis em transações PIX"
+  description: >
+    Bloqueia processamento quando a mensagem contém dados sensíveis em contexto
+    de transação PIX (chave PIX, CPF, CNPJ), prevenindo exposição indevida.
+  risk_level: high
+  trigger:
+    conditions:
+      - field: pii_type
+        operator: in
+        value: ["pix_key", "cpf", "cnpj"]
+        description: "Mensagem contém dados sensíveis de PII financeira"
+      - field: context_topic
+        operator: equals
+        value: pix_transaction
+        description: "Contexto é transação PIX"
+  action:
+    type: block
+    reason: pii_in_pix_context
+  fallback:
+    type: capability
+    value: safe_response
+    conditions:
+      - "contexto não é transação PIX"
+      - "dado é apenas mencionado, sem intenção de transação"
+  exclusions: []
+  default_thresholds:
+    - name: pii_detection_confidence
+      value: 0.85
+      description: "Confiança mínima na detecção de PII para aplicar bloqueio"
+  default_success_criteria:
+    - metric: pii_exposure_incidents
+      operator: equals
+      target_value: 0
+      window: 30d
+      description: "Zero exposições de dados sensíveis"
+    - metric: false_positive_rate
+      operator: lte
+      target_value: 5.0
+      window: 7d
+      description: "Taxa de falso positivo abaixo de 5%"

@@ -24,16 +24,9 @@ import { DemoBanner } from "@/components/ui/demo-banner";
 import { mockEvents, mockMonitors } from "@/lib/mock-data";
 import type { AionEvent, Monitor } from "@/lib/types";
 import { toggleModule } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 type FilterType = "all" | "bypass" | "route" | "block" | "error";
-
-const filterConfig: { id: FilterType; label: string }[] = [
-  { id: "all", label: "Todas" },
-  { id: "bypass", label: "Desviadas" },
-  { id: "route", label: "Roteadas" },
-  { id: "block", label: "Bloqueadas" },
-  { id: "error", label: "Com erro" },
-];
 
 const moduleIcon = (module: string | null) => {
   switch (module) {
@@ -53,12 +46,12 @@ const moduleColor = (module: string | null) => {
   }
 };
 
-const decisionConfig: Record<string, { bg: string; text: string; label: string }> = {
-  bypass: { bg: "bg-teal-900/30", text: "text-teal-400", label: "Desviado" },
-  route: { bg: "bg-blue-900/30", text: "text-blue-400", label: "Roteado" },
-  block: { bg: "bg-red-900/30", text: "text-red-400", label: "Bloqueado" },
-  fallback: { bg: "bg-amber-900/30", text: "text-amber-400", label: "Fallback" },
-  error: { bg: "bg-red-500", text: "text-white", label: "Erro" },
+const decisionStyles: Record<string, { bg: string; text: string }> = {
+  bypass: { bg: "bg-teal-900/30", text: "text-teal-400" },
+  route: { bg: "bg-blue-900/30", text: "text-blue-400" },
+  block: { bg: "bg-red-900/30", text: "text-red-400" },
+  fallback: { bg: "bg-amber-900/30", text: "text-amber-400" },
+  error: { bg: "bg-red-500", text: "text-white" },
 };
 
 const latencyColor = (ms: number) => {
@@ -67,31 +60,49 @@ const latencyColor = (ms: number) => {
   return "text-red-600";
 };
 
-const MODULE_CONFIG = [
-  {
-    name: "estixe" as const,
-    label: "Proteção",
-    desc: "Classificação, desvio e bloqueio semântico",
-    Icon: Shield,
-    color: { ring: "border-teal-800/40", bg: "bg-teal-900/20", icon: "text-teal-400", badge: "text-teal-300" },
-  },
-  {
-    name: "nomos" as const,
-    label: "Roteamento",
-    desc: "Inteligência adaptativa de roteamento",
-    Icon: GitBranch,
-    color: { ring: "border-sky-800/40", bg: "bg-sky-900/20", icon: "text-sky-400", badge: "text-sky-300" },
-  },
-  {
-    name: "metis" as const,
-    label: "Otimização",
-    desc: "Compressão e otimização de contexto",
-    Icon: Gauge,
-    color: { ring: "border-violet-800/40", bg: "bg-violet-900/20", icon: "text-violet-400", badge: "text-violet-300" },
-  },
-] as const;
-
 export function OperationsPage() {
+  const t = useT();
+
+  const filterConfig: { id: FilterType; label: string }[] = [
+    { id: "all", label: t("operations.filter.all") },
+    { id: "bypass", label: t("operations.filter.bypassed") },
+    { id: "route", label: t("operations.filter.routed") },
+    { id: "block", label: t("operations.filter.blocked") },
+    { id: "error", label: t("operations.filter.error") },
+  ];
+
+  const decisionConfig: Record<string, { bg: string; text: string; label: string }> = {
+    bypass: { ...decisionStyles.bypass, label: t("operations.decision_labels.bypass") },
+    route: { ...decisionStyles.route, label: t("operations.decision_labels.route") },
+    block: { ...decisionStyles.block, label: t("operations.decision_labels.block") },
+    fallback: { ...decisionStyles.fallback, label: t("operations.decision_labels.fallback") },
+    error: { ...decisionStyles.error, label: t("operations.decision_labels.error") },
+  };
+
+  const MODULE_CONFIG = [
+    {
+      name: "estixe" as const,
+      label: t("operations.module_labels.protection"),
+      desc: "Classificação, desvio e bloqueio semântico",
+      Icon: Shield,
+      color: { ring: "border-teal-800/40", bg: "bg-teal-900/20", icon: "text-teal-400", badge: "text-teal-300" },
+    },
+    {
+      name: "nomos" as const,
+      label: t("operations.module_labels.routing"),
+      desc: "Inteligência adaptativa de roteamento",
+      Icon: GitBranch,
+      color: { ring: "border-sky-800/40", bg: "bg-sky-900/20", icon: "text-sky-400", badge: "text-sky-300" },
+    },
+    {
+      name: "metis" as const,
+      label: t("operations.module_labels.optimization"),
+      desc: "Compressão e otimização de contexto",
+      Icon: Gauge,
+      color: { ring: "border-violet-800/40", bg: "bg-violet-900/20", icon: "text-violet-400", badge: "text-violet-300" },
+    },
+  ] as const;
+
   const [filter, setFilter] = useState<FilterType>("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("1h");
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -165,10 +176,10 @@ export function OperationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            Operação
+            {t("operations.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Cada decisão mostra qual módulo agiu e por quê.
+            {t("operations.subtitle").replace("{n}", String(filtered.length))}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -181,7 +192,7 @@ export function OperationsPage() {
             }`}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${autoRefresh ? "animate-spin" : ""}`} style={autoRefresh ? { animationDuration: "3s" } : undefined} />
-            {autoRefresh ? "Ao vivo" : "Manual"}
+            {autoRefresh ? t("operations.live") : t("operations.paused")}
           </button>
           <TimeRangeSelect value={timeRange} onChange={setTimeRange} />
           <button
@@ -201,7 +212,7 @@ export function OperationsPage() {
             className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
           >
             <Download className="h-3.5 w-3.5" />
-            Exportar CSV
+            {t("operations.export_csv")}
           </button>
         </div>
       </div>
@@ -226,7 +237,7 @@ export function OperationsPage() {
       {/* ═══ Módulos ═══ */}
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-          Módulos ativos
+          {t("operations.section_modules.title")}
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {MODULE_CONFIG.map((mod) => {
@@ -252,7 +263,7 @@ export function OperationsPage() {
                         {mod.label}
                       </span>
                       {!enabled && (
-                        <Badge variant="muted">Desligado</Badge>
+                        <Badge variant="muted">{t("operations.section_modules.disabled")}</Badge>
                       )}
                     </div>
                     <p className="text-[11px] text-[var(--color-text-muted)]">{mod.desc}</p>
@@ -275,10 +286,10 @@ export function OperationsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold text-[var(--color-text)]">
-              Monitores
+              {t("operations.monitors.title")}
             </h2>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Alertas contínuos sobre métricas críticas do pipeline — últimas 24 horas.
+              {t("operations.monitors.subtitle")}
             </p>
           </div>
           <div className="relative group">
@@ -287,10 +298,10 @@ export function OperationsPage() {
               className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-muted)] opacity-50"
             >
               <Bell className="h-3.5 w-3.5" />
-              + Novo monitor
+              {t("operations.monitors.new_monitor")}
             </button>
             <span className="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 opacity-0 transition-opacity group-hover:opacity-100">
-              Em breve
+              {t("operations.monitors.coming_soon")}
             </span>
           </div>
         </div>
@@ -393,7 +404,7 @@ export function OperationsPage() {
                   <div className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1">
                     <AlertTriangle className="h-3 w-3 flex-shrink-0 text-amber-400" />
                     <span className="text-[10px] font-medium text-amber-400">
-                      Disparado em {formatLastTriggered(monitor.last_triggered)}
+                      {t("operations.detail_modal.triggered_at")} {formatLastTriggered(monitor.last_triggered)}
                     </span>
                   </div>
                 )}
@@ -416,23 +427,23 @@ export function OperationsPage() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Activity className="mb-3 h-10 w-10 text-[var(--color-text-muted)]" />
-            <h3 className="text-sm font-semibold text-[var(--color-text)]">Nenhuma operação registrada</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">{t("operations.empty_state.title")}</h3>
             <p className="mt-1 max-w-sm text-xs text-[var(--color-text-muted)]">
-              Quando o AION processar requisições, as decisões aparecerão aqui em tempo real.
+              {t("operations.empty_state.subtitle")}
             </p>
           </div>
         ) : (
           <table className="w-full min-w-[900px]">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-white/5 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                <th className="px-4 py-3">Sessão</th>
-                <th className="px-4 py-3">Quando</th>
-                <th className="px-4 py-3">Módulo</th>
-                <th className="px-4 py-3">Entrada</th>
-                <th className="px-4 py-3">Decisão</th>
-                <th className="px-4 py-3">Modelo</th>
-                <th className="px-4 py-3 text-right">Tempo</th>
-                <th className="px-4 py-3 text-right">Custo</th>
+                <th className="px-4 py-3">{t("operations.table_columns.session")}</th>
+                <th className="px-4 py-3">{t("operations.table_columns.when")}</th>
+                <th className="px-4 py-3">{t("operations.table_columns.module")}</th>
+                <th className="px-4 py-3">{t("operations.table_columns.input")}</th>
+                <th className="px-4 py-3">{t("operations.table_columns.decision")}</th>
+                <th className="px-4 py-3">{t("operations.table_columns.model")}</th>
+                <th className="px-4 py-3 text-right">{t("operations.table_columns.time")}</th>
+                <th className="px-4 py-3 text-right">{t("operations.table_columns.cost")}</th>
               </tr>
             </thead>
             <tbody>
@@ -472,7 +483,7 @@ export function OperationsPage() {
                       {evt.response_time_ms}ms
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
-                      {evt.cost ? `$${evt.cost.toFixed(4)}` : "—"}
+                      {evt.cost ? `US$ ${evt.cost.toFixed(4)}` : "—"}
                     </td>
                   </tr>
                 );
@@ -488,13 +499,13 @@ export function OperationsPage() {
           <div className="w-full max-w-2xl rounded-2xl bg-[var(--color-surface)] shadow-xl">
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
               <div className="flex items-center gap-3">
-                <h3 className="text-lg font-semibold text-[var(--color-text)]">Detalhes da decisão</h3>
+                <h3 className="text-lg font-semibold text-[var(--color-text)]">{t("operations.detail_modal.title")}</h3>
                 <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-xs font-bold ${moduleColor(selectedEvent.module)}`}>
                   {moduleIcon(selectedEvent.module)}
                   {selectedEvent.module}
                 </span>
               </div>
-              <button onClick={() => setSelectedEvent(null)} className="cursor-pointer text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Fechar">
+              <button onClick={() => setSelectedEvent(null)} className="cursor-pointer text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label={t("operations.detail_modal.close")}>
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -502,22 +513,22 @@ export function OperationsPage() {
               <div className="space-y-5">
                 {/* Decision Path */}
                 <div>
-                  <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Caminho da decisão</label>
+                  <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.decision_path")}</label>
                   <div className="mt-2 flex items-center gap-2">
                     <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-[var(--color-text)]">Input</span>
                     <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                     <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("ESTIXE")}`}>
-                      Proteção
+                      {t("operations.module_labels.protection")}
                     </span>
                     <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                     {selectedEvent.decision !== "bypass" && selectedEvent.decision !== "block" ? (
                       <>
                         <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("NOMOS")}`}>
-                          Roteamento
+                          {t("operations.module_labels.routing")}
                         </span>
                         <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                         <span className={`rounded border px-2 py-1 text-xs font-bold ${moduleColor("METIS")}`}>
-                          Otimização
+                          {t("operations.module_labels.optimization")}
                         </span>
                         <ArrowRight className="h-3 w-3 text-[var(--color-text-muted)]" />
                       </>
@@ -529,47 +540,47 @@ export function OperationsPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Entrada do usuário</label>
+                  <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.user_input")}</label>
                   <p className="mt-1 rounded-lg bg-white/5 p-3 text-sm text-[var(--color-text)]">{selectedEvent.input}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Módulo responsável</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.module_responsible")}</label>
                     <div className="mt-1 flex items-center gap-1.5">
                       {moduleIcon(selectedEvent.module)}
                       <span className="font-[family-name:var(--font-mono)] text-sm font-bold text-[var(--color-text)]">{selectedEvent.module}</span>
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Modelo</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.model")}</label>
                     <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
-                      {selectedEvent.model_used || "Nenhum (desviado)"}
+                      {selectedEvent.model_used || t("operations.detail_modal.model_none")}
                     </p>
                   </div>
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Tempo de resposta</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.response_time")}</label>
                     <p className={`mt-1 font-[family-name:var(--font-mono)] text-sm font-medium ${latencyColor(selectedEvent.response_time_ms)}`}>
                       {selectedEvent.response_time_ms}ms
                     </p>
                   </div>
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Custo</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.cost")}</label>
                     <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
-                      {selectedEvent.cost ? `US$ ${selectedEvent.cost.toFixed(4)}` : "US$ 0.0000 (desviado)"}
+                      {selectedEvent.cost ? `US$ ${selectedEvent.cost.toFixed(4)}` : t("operations.detail_modal.cost_none")}
                     </p>
                   </div>
                   {selectedEvent.tokens_used && (
                     <div>
-                      <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Tokens</label>
+                      <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.tokens")}</label>
                       <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
-                        {selectedEvent.tokens_used.toLocaleString("pt-BR")}
+                        {selectedEvent.tokens_used.toLocaleString()}
                       </p>
                     </div>
                   )}
                   {selectedEvent.policy_applied && (
                     <div>
-                      <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Política aplicada</label>
+                      <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.policy_applied")}</label>
                       <p className="mt-1 font-[family-name:var(--font-mono)] text-sm text-[var(--color-text)]">
                         {selectedEvent.policy_applied}
                       </p>
@@ -579,14 +590,14 @@ export function OperationsPage() {
 
                 {selectedEvent.output && (
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">Resposta gerada</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t("operations.detail_modal.output")}</label>
                     <p className="mt-1 rounded-lg bg-white/5 p-3 text-sm text-[var(--color-text)]">{selectedEvent.output}</p>
                   </div>
                 )}
 
                 {selectedEvent.error && (
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-red-500">Erro</label>
+                    <label className="text-xs font-medium uppercase tracking-wider text-red-500">{t("operations.detail_modal.error_label")}</label>
                     <p className="mt-1 rounded-lg bg-red-950/50 p-3 text-sm text-red-400">{selectedEvent.error}</p>
                   </div>
                 )}
@@ -601,25 +612,21 @@ export function OperationsPage() {
         <ConfirmActionModal
           open
           severity="warning"
-          title={`${pendingToggle.enabled ? "Ativar" : "Desativar"} módulo ${pendingToggle.name.toUpperCase()}?`}
-          description={
-            pendingToggle.enabled
-              ? `O módulo ${pendingToggle.name.toUpperCase()} será reativado e voltará a processar requisições em produção.`
-              : `O módulo ${pendingToggle.name.toUpperCase()} será desativado. Requisições continuarão fluindo sem este módulo até que seja reativado.`
-          }
+          title={t(pendingToggle.enabled ? "operations.confirm_toggle.title_enable" : "operations.confirm_toggle.title_disable").replace("{name}", pendingToggle.name.toUpperCase())}
+          description={t(pendingToggle.enabled ? "operations.confirm_toggle.desc_enable" : "operations.confirm_toggle.desc_disable").replace("{name}", pendingToggle.name.toUpperCase())}
           impact={
             pendingToggle.enabled
               ? [
-                  `• ${pendingToggle.name.toUpperCase()} voltará a processar todo o tráfego imediatamente`,
-                  "• Nenhuma interrupção de tráfego — mudança gradual",
+                  `• ${t("operations.confirm_toggle.impact_enable_0").replace("{name}", pendingToggle.name.toUpperCase())}`,
+                  `• ${t("operations.confirm_toggle.impact_enable_1")}`,
                 ]
               : [
-                  `• ${pendingToggle.name.toUpperCase()} não processará mais requisições`,
-                  "• Tráfego continuará fluindo, mas sem as proteções/otimizações deste módulo",
-                  "• A mudança tem efeito imediato em produção",
+                  `• ${t("operations.confirm_toggle.impact_disable_0").replace("{name}", pendingToggle.name.toUpperCase())}`,
+                  `• ${t("operations.confirm_toggle.impact_disable_1")}`,
+                  `• ${t("operations.confirm_toggle.impact_disable_2")}`,
                 ]
           }
-          actionLabel={pendingToggle.enabled ? "Ativar módulo" : "Desativar módulo"}
+          actionLabel={t(pendingToggle.enabled ? "operations.confirm_toggle.confirm_enable" : "operations.confirm_toggle.confirm_disable")}
           loading={toggleConfirmLoading}
           error={toggleConfirmError}
           onConfirm={handleToggleConfirm}

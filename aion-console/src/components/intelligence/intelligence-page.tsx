@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
 import { getIntelligenceOverview, getThreats, getIntelligenceIntents, getGlobalThreatFeed } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // ─── Mock fallbacks ────────────────────────────────────────────────────────────
 
@@ -214,6 +215,7 @@ function ThreatCard({ threat }: { threat: Record<string, unknown> }) {
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function IntelligencePage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<"overview" | "threats" | "intents" | "global">("overview");
 
   const {
@@ -265,10 +267,10 @@ export function IntelligencePage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            Inteligência
+            {t("intelligence.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            O que o AION aprendeu sobre o seu ambiente — dados reais da memória operacional
+            {t("intelligence.subtitle")}
           </p>
         </div>
         <button

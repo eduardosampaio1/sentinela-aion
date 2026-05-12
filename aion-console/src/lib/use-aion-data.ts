@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getHealth, getStats, getEvents, getEconomics, getCacheStats } from "./api";
-import type { Stats, AionEvent, CacheStats } from "./types";
+import { getHealth, getStats, getEvents, getEconomics, getCacheStats, getEconomicsDaily } from "./api";
+import type { Stats, AionEvent, CacheStats, SpendTrendPoint } from "./types";
 import type { ModuleStats, DecisionDistribution, OperationalState } from "./mock-data";
 import {
   mockStats,
@@ -11,16 +11,29 @@ import {
   mockOperationalState,
 } from "./mock-data";
 
+export interface ModelCostPoint {
+  name: string;
+  value: number;
+  fill: string;
+}
+
 export interface AionLiveData {
   stats: Stats;
   modules: ModuleStats;
   distribution: DecisionDistribution;
   operational: OperationalState;
   events: AionEvent[];
+  spendTrend: SpendTrendPoint[];
+  modelCostDist: ModelCostPoint[];
   lastUpdate: number;
   connected: boolean;
   error: string | null;
 }
+
+const MODEL_COLORS = [
+  "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#14b8a6", "#f97316",
+];
 
 const INITIAL: AionLiveData = {
   stats: mockStats,
@@ -28,6 +41,8 @@ const INITIAL: AionLiveData = {
   distribution: mockDistribution,
   operational: mockOperationalState,
   events: [],
+  spendTrend: [],
+  modelCostDist: [],
   lastUpdate: Date.now(),
   connected: false,
   error: null,
@@ -46,12 +61,13 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [health, stats, events, economics, cacheData] = await Promise.all([
+      const [health, stats, events, economics, cacheData, dailyRows] = await Promise.all([
         getHealth().catch(() => null),
         getStats().catch(() => null),
         getEvents(20).catch((): AionEvent[] => []),
         getEconomics().catch(() => null),
         getCacheStats().catch(() => null),
+        getEconomicsDaily(30).catch(() => []),
       ]);
 
       if (!mountedRef.current) return;
@@ -115,12 +131,39 @@ export function useAionData(intervalMs = 3000, enabled = true): AionLiveData {
         };
       }
 
+      // Build spendTrend from daily economics rows (sorted ascending by date)
+      const spendTrend: SpendTrendPoint[] = dailyRows.map((r) => ({
+        date: r.date,
+        spend: r.total_cost_usd,
+        avoided: r.total_savings_usd,
+      }));
+
+      // Build modelCostDist by aggregating by_model across all days
+      const modelTotals: Record<string, number> = {};
+      for (const row of dailyRows) {
+        if (row.by_model && typeof row.by_model === "object") {
+          for (const [model, data] of Object.entries(row.by_model)) {
+            modelTotals[model] = (modelTotals[model] ?? 0) + (data.cost_usd ?? 0);
+          }
+        }
+      }
+      const modelCostDist: ModelCostPoint[] = Object.entries(modelTotals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MODEL_COLORS.length)
+        .map(([name, value], i) => ({
+          name,
+          value: Math.round(value * 10000) / 10000,
+          fill: MODEL_COLORS[i % MODEL_COLORS.length],
+        }));
+
       setData({
         stats: mappedStats,
         modules,
         distribution,
         operational,
         events,
+        spendTrend,
+        modelCostDist,
         lastUpdate: Date.now(),
         connected: true,
         error: null,

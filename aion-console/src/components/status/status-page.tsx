@@ -36,14 +36,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { useAionData } from "@/lib/use-aion-data";
-import { mockSpendTrend, mockModelCostDistribution } from "@/lib/mock-data";
 import type { ServiceStatus } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const fmtUSD = (n: number) => `US$ ${n.toFixed(2)}`;
 const fmtPct = (n: number) => `${Math.round(n)}%`;
 const fmtInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
 export function StatusPage() {
+  const t = useT();
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   // Single data source: fetches real API, falls back to mocks when offline.
@@ -58,6 +59,10 @@ export function StatusPage() {
   const recentEvents = liveData.events.slice(0, 5);
 
   const totalEconomy = modules.nomos.cost_optimized + modules.estixe.cost_avoided + modules.metis.cost_saved;
+
+  // Historical chart data — populated from /v1/economics/daily via useAionData.
+  const spendTrend = liveData.spendTrend;
+  const modelCostDist = liveData.modelCostDist;
 
   return (
     <div className="space-y-6">
@@ -97,7 +102,7 @@ export function StatusPage() {
             }`}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${autoRefresh ? "animate-spin" : ""}`} style={autoRefresh ? { animationDuration: "3s" } : undefined} />
-            {autoRefresh ? "Ao vivo" : "Pausado"}
+            {autoRefresh ? t("status.live") : t("status.paused")}
           </button>
         </div>
 
@@ -106,7 +111,7 @@ export function StatusPage() {
           <div className="rounded-xl bg-[var(--color-surface)] p-4 shadow-sm">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-muted)]">
               <Zap className="h-3.5 w-3.5 text-[var(--color-secondary)]" />
-              Chamadas evitadas
+              {t("status.hero.avoided_calls")}
             </div>
             <AnimatedNumber
               value={stats.bypasses}
@@ -114,14 +119,14 @@ export function StatusPage() {
             />
             <div className="mt-0.5 text-xs text-[var(--color-success)]">
               <AnimatedNumber value={(stats.bypasses / stats.total_requests) * 100} format={fmtPct} />
-              {" "}do total
+              {" "}{t("status.hero.of_total")}
             </div>
           </div>
 
           <div className="rounded-xl bg-[var(--color-surface)] p-4 shadow-sm">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-muted)]">
               <DollarSign className="h-3.5 w-3.5 text-green-600" />
-              Economizado hoje
+              {t("status.hero.saved_today")}
             </div>
             <AnimatedNumber
               value={stats.cost_saved}
@@ -129,34 +134,34 @@ export function StatusPage() {
               className="mt-2 block font-[family-name:var(--font-mono)] text-2xl font-bold text-green-400"
             />
             <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              <AnimatedNumber value={stats.tokens_saved} /> tokens poupados
+              <AnimatedNumber value={stats.tokens_saved} /> {t("status.hero.tokens_saved")}
             </div>
           </div>
 
           <div className="rounded-xl bg-[var(--color-surface)] p-4 shadow-sm">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-muted)]">
               <Shield className="h-3.5 w-3.5 text-red-500" />
-              Ameaças bloqueadas
+              {t("status.hero.threats_blocked")}
             </div>
             <AnimatedNumber
               value={modules.estixe.threats_detected}
               className="mt-2 block font-[family-name:var(--font-mono)] text-2xl font-bold text-[var(--color-text)]"
             />
             <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              <AnimatedNumber value={stats.blocks} /> bloqueios totais
+              <AnimatedNumber value={stats.blocks} /> {t("status.hero.total_blocks")}
             </div>
           </div>
 
           <div className="rounded-xl bg-[var(--color-surface)] p-4 shadow-sm">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-muted)]">
               <Gauge className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-              Latência média
+              {t("status.hero.avg_latency")}
             </div>
             <div className="mt-2 font-[family-name:var(--font-mono)] text-2xl font-bold text-[var(--color-text)]">
               <AnimatedNumber value={stats.avg_latency_ms} /><span className="text-sm font-medium text-[var(--color-text-muted)]">ms</span>
             </div>
             <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              <AnimatedNumber value={(1 - stats.errors / stats.total_requests) * 100} format={(n) => `${n.toFixed(1)}%`} /> sem fallback
+              <AnimatedNumber value={(1 - stats.errors / stats.total_requests) * 100} format={(n) => `${n.toFixed(1)}%`} /> {t("status.hero.no_fallback")}
             </div>
           </div>
         </div>
@@ -165,15 +170,15 @@ export function StatusPage() {
         <div className="mt-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
           <ShieldCheck className="h-3.5 w-3.5 text-[var(--color-primary)]" />
           <span>
-            <strong className="text-[var(--color-text)]">{opState.active_guardrails}/{opState.total_guardrails}</strong> guardrails ativos
+            <strong className="text-[var(--color-text)]">{opState.active_guardrails}/{opState.total_guardrails}</strong> {t("status.hero.guardrails_active")}
           </span>
           <span className="mx-1">·</span>
           <span>
-            Modelo principal: <strong className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">{stats.top_model}</strong>
+            {t("status.hero.primary_model")} <strong className="font-[family-name:var(--font-mono)] text-[var(--color-text)]">{stats.top_model}</strong>
           </span>
           <span className="mx-1">·</span>
           <span>
-            Uptime: <strong className="text-[var(--color-text)] font-[family-name:var(--font-mono)]">
+            {t("status.hero.uptime")} <strong className="text-[var(--color-text)] font-[family-name:var(--font-mono)]">
               <AnimatedNumber value={opState.uptime_hours} format={(n) => `${n.toFixed(1)}h`} />
             </strong>
           </span>
@@ -189,95 +194,111 @@ export function StatusPage() {
         <div className="lg:col-span-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <TrendingDown className="h-4 w-4 text-green-400" />
-            Gasto vs. Custo evitado (abril)
+            {t("status.chart_ext.title")}
           </h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">US$ por dia</p>
           <div className="mt-4 h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={mockSpendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradAvoided" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
-                  tickFormatter={(v: string) => v.slice(8)}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => `${v}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    fontSize: 12,
-                  }}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  labelFormatter={(v: any) => `Dia ${String(v).slice(8)}/04`}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={(v: any, name: any) => [
-                    `US$ ${Number(v).toFixed(2)}`,
-                    name === "spend" ? "Gasto" : "Evitado",
-                  ]}
-                />
-                <Area type="monotone" dataKey="spend" stroke="#0ea5e9" strokeWidth={2} fill="url(#gradSpend)" />
-                <Area type="monotone" dataKey="avoided" stroke="#22c55e" strokeWidth={2} fill="url(#gradAvoided)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {spendTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={spendTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gradAvoided" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                    tickFormatter={(v: string) => v.slice(8)}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: "var(--color-text-muted)", fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => `${v}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    labelFormatter={(v: any) => `Dia ${String(v).slice(8)}`}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(v: any, name: any) => [
+                      `US$ ${Number(v).toFixed(2)}`,
+                      name === "spend" ? t("status.chart_ext.spend_label") : t("status.chart_ext.avoided_label"),
+                    ]}
+                  />
+                  <Area type="monotone" dataKey="spend" stroke="#0ea5e9" strokeWidth={2} fill="url(#gradSpend)" />
+                  <Area type="monotone" dataKey="avoided" stroke="#22c55e" strokeWidth={2} fill="url(#gradAvoided)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[var(--color-border)]">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Histórico disponível após agregação diária ativada
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Model cost distribution — 1/3 width */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">Distribuição de custo</h2>
-          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Por modelo (% do total)</p>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">{t("status.chart_ext.cost_distribution")}</h2>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{t("status.chart_ext.by_model")}</p>
           <div className="mt-4 h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={mockModelCostDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={48}
-                  outerRadius={72}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {mockModelCostDistribution.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Legend
-                  iconSize={8}
-                  formatter={(value: string) => (
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
-                  )}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    fontSize: 12,
-                  }}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={(v: any) => [`${v}%`, "Custo"]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {modelCostDist.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={modelCostDist}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={48}
+                    outerRadius={72}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {modelCostDist.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Legend
+                    iconSize={8}
+                    formatter={(value: string) => (
+                      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{value}</span>
+                    )}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                    }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(v: any) => [`${v}%`, "Custo"]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-[var(--color-border)]">
+                <p className="text-center text-xs text-[var(--color-text-muted)]">
+                  Distribuição por modelo disponível<br />após dados de custo registrados
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -288,7 +309,7 @@ export function StatusPage() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Brain className="h-4 w-4 text-[var(--color-primary)]" />
-            Inteligência em ação
+            {t("status.decisions_section.title")}
           </h2>
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Como o AION está decidindo agora</p>
 
@@ -312,9 +333,9 @@ export function StatusPage() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text)]">
             <Activity className="h-4 w-4 text-[var(--color-primary)]" />
-            Últimas decisões
+            {t("status.live_feed.title")}
           </h2>
-          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">Fluxo em tempo real</p>
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{t("status.live_feed.subtitle")}</p>
 
           <div className="mt-4 space-y-2">
             {recentEvents.map((evt) => (
@@ -462,11 +483,11 @@ export function StatusPage() {
             </div>
             <div>
               <h3 className="font-[family-name:var(--font-heading)] text-sm font-bold text-amber-200">CACHE</h3>
-              <span className="text-xs text-amber-600">Cache semântico</span>
+              <span className="text-xs text-amber-600">{t("status.cache_card.title")}</span>
             </div>
             <span className="ml-auto">
               <Badge variant={modules.cache.enabled ? "success" : "warning"}>
-                {modules.cache.enabled ? "Ativo" : "Desligado"}
+                {modules.cache.enabled ? t("status.cache_card.active") : t("status.cache_card.disabled")}
               </Badge>
             </span>
           </div>
@@ -479,7 +500,7 @@ export function StatusPage() {
               </div>
             </div>
             <div>
-              <div className="text-xs text-amber-600">Entradas</div>
+              <div className="text-xs text-amber-600">{t("status.cache_card.entries")}</div>
               <AnimatedNumber value={modules.cache.total_entries} className="font-[family-name:var(--font-mono)] text-lg font-bold text-amber-200" />
             </div>
             <div>
@@ -512,11 +533,11 @@ export function StatusPage() {
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <div>
-              <div className="text-xs text-rose-600">Rewrites hoje</div>
+              <div className="text-xs text-rose-600">{t("status.rewriter_card.rewrites_today")}</div>
               <AnimatedNumber value={modules.metis.rewrites_applied} className="font-[family-name:var(--font-mono)] text-lg font-bold text-rose-200" />
             </div>
             <div>
-              <div className="text-xs text-rose-600">Taxa de rewrite</div>
+              <div className="text-xs text-rose-600">{t("status.rewriter_card.rewrite_rate")}</div>
               <div className="font-[family-name:var(--font-mono)] text-lg font-bold text-rose-200">
                 <AnimatedNumber value={modules.metis.optimizations_today > 0 ? (modules.metis.rewrites_applied / modules.metis.optimizations_today) * 100 : 0} format={fmtPct} />
               </div>
@@ -542,20 +563,20 @@ export function StatusPage() {
 
           <div className="mt-4 grid grid-cols-2 gap-3">
             <div>
-              <div className="text-xs text-cyan-600">Falsos positivos evitados</div>
+              <div className="text-xs text-cyan-600">{t("status.ner_card.fp_avoided")}</div>
               <AnimatedNumber value={modules.estixe.false_positives_avoided} className="font-[family-name:var(--font-mono)] text-lg font-bold text-cyan-200" />
             </div>
             <div>
               <div className="text-xs text-cyan-600">Classificador</div>
               <div className="font-[family-name:var(--font-mono)] text-lg font-bold text-cyan-200">
-                {modules.nomos.classifier_method === "hybrid" ? "Híbrido" : "Heurístico"}
+                {modules.nomos.classifier_method === "hybrid" ? t("status.ner_card.hybrid") : t("status.ner_card.heuristic")}
               </div>
             </div>
           </div>
 
           <div className="mt-3 text-xs text-cyan-400">
             {modules.nomos.classifier_method === "hybrid"
-              ? "70% semântico + 30% heurístico"
+              ? t("status.ner_card.mode_desc")
               : "Fallback: apenas heurístico"}
           </div>
         </div>
@@ -565,15 +586,15 @@ export function StatusPage() {
       <div className="flex items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
         <div className="flex items-center gap-6 text-sm">
           <div>
-            <span className="text-[var(--color-text-muted)]">Total processado: </span>
+            <span className="text-[var(--color-text-muted)]">{t("status.footer.total_processed")} </span>
             <AnimatedNumber value={stats.total_requests} className="font-[family-name:var(--font-mono)] font-bold text-[var(--color-text)]" />
           </div>
           <div>
-            <span className="text-[var(--color-text-muted)]">Economia total: </span>
+            <span className="text-[var(--color-text-muted)]">{t("status.footer.total_savings")} </span>
             <AnimatedNumber value={stats.cost_saved} format={fmtUSD} className="font-[family-name:var(--font-mono)] font-bold text-green-400" />
           </div>
           <div>
-            <span className="text-[var(--color-text-muted)]">Erros: </span>
+            <span className="text-[var(--color-text-muted)]">{t("status.footer.errors")} </span>
             <AnimatedNumber value={stats.errors} className="font-[family-name:var(--font-mono)] font-bold text-[var(--color-text)]" />
             <span className="text-xs text-[var(--color-text-muted)]"> (</span>
             <AnimatedNumber value={(stats.errors / stats.total_requests) * 100} format={(n) => `${n.toFixed(1)}%`} className="text-xs text-[var(--color-text-muted)]" />
@@ -584,12 +605,12 @@ export function StatusPage() {
           {liveData.connected ? (
             <div className="flex items-center gap-1.5 text-xs text-[var(--color-success)]">
               <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              API conectada
+              {t("status.footer.api_connected")}
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-xs text-amber-500">
               <AlertTriangle className="h-3.5 w-3.5" />
-              Dados simulados
+              {t("status.footer.simulated_data")}
             </div>
           )}
         </div>
@@ -634,17 +655,18 @@ function ModuleBadge({ module }: { module: string | null }) {
 }
 
 function DecisionBadge({ decision }: { decision: string }) {
-  const config: Record<string, { bg: string; text: string; label: string }> = {
-    bypass: { bg: "bg-teal-900/30", text: "text-teal-400", label: "Desviado" },
-    route: { bg: "bg-blue-900/30", text: "text-blue-400", label: "Roteado" },
-    block: { bg: "bg-red-900/30", text: "text-red-400", label: "Bloqueado" },
-    fallback: { bg: "bg-amber-900/30", text: "text-amber-400", label: "Fallback" },
-    error: { bg: "bg-red-500", text: "text-white", label: "Erro" },
+  const t = useT();
+  const config: Record<string, { bg: string; text: string; labelKey: string }> = {
+    bypass: { bg: "bg-teal-900/30", text: "text-teal-400", labelKey: "status.events.bypassed" },
+    route: { bg: "bg-blue-900/30", text: "text-blue-400", labelKey: "operations.decision_labels.route" },
+    block: { bg: "bg-red-900/30", text: "text-red-400", labelKey: "operations.decision_labels.block" },
+    fallback: { bg: "bg-amber-900/30", text: "text-amber-400", labelKey: "operations.decision_labels.fallback" },
+    error: { bg: "bg-red-500", text: "text-white", labelKey: "operations.decision_labels.error" },
   };
   const c = config[decision] || config.error;
   return (
     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${c.bg} ${c.text}`}>
-      {c.label}
+      {t(c.labelKey)}
     </span>
   );
 }

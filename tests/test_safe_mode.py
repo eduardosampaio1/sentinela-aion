@@ -373,7 +373,7 @@ class TestKillswitchAPI:
             headers={**admin_headers, "X-Aion-Actor-Reason": "llm_instability"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "safe_mode_active"
+        assert resp.json()["killswitch_active"] is True
 
         # Health reflects safe mode
         health = await client.get("/health")
@@ -407,7 +407,7 @@ class TestKillswitchAPI:
             headers={**admin_headers, "X-Aion-Actor-Reason": "test cleanup"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "normal_mode_restored"
+        assert resp.json()["killswitch_active"] is False
 
         # Health back to normal
         health = await client.get("/health")

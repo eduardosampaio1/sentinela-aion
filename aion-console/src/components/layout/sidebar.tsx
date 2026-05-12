@@ -25,10 +25,14 @@ import {
   Brain,
   Network,
   Cpu,
+  Globe,
+  Sparkles,
+  Scale,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { mockAdminRoles } from "@/lib/mock-data";
 import { getHealth, type HealthInfo } from "@/lib/api/observability";
+import { useI18n } from "@/lib/i18n";
 
 // ── Mode label helpers ────────────────────────────────────────────────────────
 
@@ -60,37 +64,39 @@ function ModeLabel({ mode }: { mode: string }) {
 
 const navGroups = [
   {
-    label: "Core",
+    key: "core",
     items: [
-      { href: "/", label: "Visão Geral", icon: Activity },
-      { href: "/operations", label: "Operação", icon: Radio },
+      { href: "/", key: "overview", icon: Activity },
+      { href: "/operations", key: "operations", icon: Radio },
     ],
   },
   {
-    label: "Inteligência",
+    key: "intelligence",
     items: [
-      { href: "/intelligence", label: "Inteligência", icon: Brain },
-      { href: "/policies", label: "Comportamento", icon: SlidersHorizontal },
-      { href: "/routing", label: "Roteamento", icon: GitBranch },
-      { href: "/estixe", label: "Proteção", icon: Shield },
-      { href: "/shadow", label: "Shadow Mode", icon: FlaskConical },
+      { href: "/intelligence", key: "intelligence", icon: Brain },
+      { href: "/policies", key: "policies", icon: SlidersHorizontal },
+      { href: "/routing", key: "routing", icon: GitBranch },
+      { href: "/estixe", key: "estixe", icon: Shield },
+      { href: "/shadow", key: "shadow", icon: FlaskConical },
+      { href: "/governance", key: "governance", icon: Scale },
     ],
   },
   {
-    label: "Plataforma",
+    key: "platform",
     items: [
-      { href: "/sessions", label: "Sessões", icon: MessagesSquare },
-      { href: "/budget", label: "Economia", icon: TrendingDown },
-      { href: "/collective", label: "AION Collective", icon: Network },
-      { href: "/reports", label: "Relatórios", icon: FileBarChart },
+      { href: "/sessions", key: "sessions", icon: MessagesSquare },
+      { href: "/budget", key: "budget", icon: TrendingDown },
+      { href: "/collective", key: "collective", icon: Network },
+      { href: "/reports", key: "reports", icon: FileBarChart },
+      { href: "/gain", key: "gain_report", icon: Sparkles },
     ],
   },
 ];
 
 const bottomItems = [
-  { href: "/admin", label: "Admin", icon: Users },
-  { href: "/settings", label: "Configurações", icon: Settings },
-  { href: "/help", label: "Ajuda", icon: HelpCircle },
+  { href: "/admin", key: "admin", icon: Users },
+  { href: "/settings", key: "settings", icon: Settings },
+  { href: "/help", key: "help", icon: HelpCircle },
 ];
 
 type InviteStatus = "idle" | "sending" | "sent";
@@ -103,6 +109,7 @@ export function Sidebar({
   onToggle: () => void;
 }) {
   const pathname = usePathname();
+  const { locale, setLocale, t } = useI18n();
   const [showInvite, setShowInvite] = useState(false);
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -147,10 +154,10 @@ export function Sidebar({
   const selectedRole = mockAdminRoles.find((r) => r.name === inviteRole);
   const rolePreview = selectedRole
     ? selectedRole.permissions[0] === "*"
-      ? "Acesso total ao sistema"
+      ? t("nav.invite_modal.full_access")
       : selectedRole.permissions.slice(0, 2).join(", ") +
         (selectedRole.permissions.length > 2
-          ? ` +${selectedRole.permissions.length - 2} mais`
+          ? ` +${selectedRole.permissions.length - 2} ${locale === "pt" ? "mais" : "more"}`
           : "")
     : "";
 
@@ -174,10 +181,10 @@ export function Sidebar({
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-2 py-3">
           {navGroups.map((group, gi) => (
-            <div key={group.label} className={gi > 0 ? "mt-4" : ""}>
+            <div key={group.key} className={gi > 0 ? "mt-4" : ""}>
               {!collapsed && (
                 <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]/50">
-                  {group.label}
+                  {t(`nav.groups.${group.key}`)}
                 </p>
               )}
               {collapsed && gi > 0 && (
@@ -187,6 +194,7 @@ export function Sidebar({
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.href);
+                  const label = t(`nav.items.${item.key}`);
                   return (
                     <Link
                       key={item.href}
@@ -196,10 +204,10 @@ export function Sidebar({
                           ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
                           : "text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)]"
                       } ${collapsed ? "justify-center" : ""}`}
-                      title={collapsed ? item.label : undefined}
+                      title={collapsed ? label : undefined}
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      {!collapsed && <span>{item.label}</span>}
+                      {!collapsed && <span>{label}</span>}
                     </Link>
                   );
                 })}
@@ -254,22 +262,23 @@ export function Sidebar({
               className="flex w-full items-center gap-3 rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-muted)] transition-all duration-150 hover:border-[var(--color-primary)]/40 hover:bg-[var(--color-primary)]/5 hover:text-[var(--color-primary)] cursor-pointer mb-1.5"
             >
               <UserPlus className="h-4 w-4 shrink-0" />
-              <span>Convidar colega</span>
+              <span>{t("nav.invite")}</span>
             </button>
           ) : (
             <button
               onClick={() => setShowInvite(true)}
-              title="Convidar colega"
+              title={t("nav.invite")}
               className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-sm text-[var(--color-text-muted)] transition-colors duration-150 hover:bg-white/5 hover:text-[var(--color-text)] cursor-pointer mb-1.5"
             >
               <UserPlus className="h-4 w-4" />
             </button>
           )}
 
-          {/* Admin + Settings + Ajuda */}
+          {/* Admin + Settings + Help */}
           {bottomItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
+            const label = t(`nav.items.${item.key}`);
             return (
               <Link
                 key={item.href}
@@ -279,13 +288,31 @@ export function Sidebar({
                     ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium"
                     : "text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)]"
                 } ${collapsed ? "justify-center" : ""}`}
-                title={collapsed ? item.label : undefined}
+                title={collapsed ? label : undefined}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
+                {!collapsed && <span>{label}</span>}
               </Link>
             );
           })}
+
+          {/* Language toggle */}
+          <button
+            onClick={() => setLocale(locale === "pt" ? "en" : "pt")}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-text-muted)] transition-colors duration-150 hover:bg-white/5 hover:text-[var(--color-text)] cursor-pointer ${
+              collapsed ? "justify-center" : ""
+            }`}
+            title={locale === "pt" ? "Switch to English" : "Mudar para Português"}
+          >
+            <Globe className="h-4 w-4 shrink-0" />
+            {!collapsed && (
+              <span className="flex items-center gap-1.5">
+                <span className={locale === "pt" ? "font-semibold text-[var(--color-primary)]" : ""}>PT</span>
+                <span className="opacity-30">/</span>
+                <span className={locale === "en" ? "font-semibold text-[var(--color-primary)]" : ""}>EN</span>
+              </span>
+            )}
+          </button>
 
           {/* Collapse toggle */}
           <button
@@ -293,14 +320,14 @@ export function Sidebar({
             className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-text-muted)] transition-colors duration-150 hover:bg-white/5 hover:text-[var(--color-text)] cursor-pointer ${
               collapsed ? "justify-center" : ""
             }`}
-            aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
           >
             {collapsed ? (
               <PanelLeftOpen className="h-4 w-4" />
             ) : (
               <>
                 <PanelLeftClose className="h-4 w-4" />
-                <span>Recolher</span>
+                <span>{t("nav.collapse")}</span>
               </>
             )}
           </button>
@@ -323,11 +350,11 @@ export function Sidebar({
                   <CheckCircle2 className="h-7 w-7 text-green-400" />
                 </div>
                 <p className="text-base font-semibold text-[var(--color-text)]">
-                  Convite enviado!
+                  {t("nav.invite_modal.sent")}
                 </p>
                 <p className="text-sm text-[var(--color-text-muted)]">
                   <span className="font-medium text-[var(--color-text)]">{inviteEmail}</span>{" "}
-                  receberá o link de acesso em breve.
+                  {locale === "pt" ? "receberá o link de acesso em breve." : "will receive the access link shortly."}
                 </p>
               </div>
             ) : (
@@ -336,10 +363,10 @@ export function Sidebar({
                 <div className="flex items-start justify-between mb-5">
                   <div>
                     <h3 className="text-base font-semibold text-[var(--color-text)]">
-                      Convidar colega
+                      {t("nav.invite_modal.title")}
                     </h3>
                     <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                      O convite será enviado por e-mail
+                      {locale === "pt" ? "O convite será enviado por e-mail" : "The invite will be sent by email"}
                     </p>
                   </div>
                   <button
@@ -355,13 +382,13 @@ export function Sidebar({
                   {/* Name */}
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">
-                      Nome completo
+                      {t("nav.invite_modal.name_placeholder") === "Nome" ? "Nome completo" : "Full name"}
                     </label>
                     <input
                       type="text"
                       value={inviteName}
                       onChange={(e) => setInviteName(e.target.value)}
-                      placeholder="João Silva"
+                      placeholder={locale === "pt" ? "João Silva" : "John Smith"}
                       className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)]/40 outline-none focus:border-[var(--color-primary)]/60 transition-colors"
                     />
                   </div>
@@ -369,13 +396,13 @@ export function Sidebar({
                   {/* Email */}
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">
-                      E-mail corporativo
+                      {t("nav.invite_modal.email_placeholder")}
                     </label>
                     <input
                       type="email"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="joao@empresa.com"
+                      placeholder={locale === "pt" ? "joao@empresa.com" : "john@company.com"}
                       className="w-full rounded-lg border border-[var(--color-border)] bg-white/5 px-3 py-2 text-sm text-[var(--color-text)] placeholder-[var(--color-text-muted)]/40 outline-none focus:border-[var(--color-primary)]/60 transition-colors"
                     />
                   </div>
@@ -383,7 +410,7 @@ export function Sidebar({
                   {/* Role */}
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-[var(--color-text-muted)]">
-                      Papel no sistema
+                      {t("nav.invite_modal.role_label")}
                     </label>
                     <div className="relative">
                       <select
@@ -413,7 +440,7 @@ export function Sidebar({
                     onClick={handleCloseInvite}
                     className="flex-1 rounded-lg border border-[var(--color-border)] py-2 text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors cursor-pointer"
                   >
-                    Cancelar
+                    {locale === "pt" ? "Cancelar" : "Cancel"}
                   </button>
                   <button
                     onClick={handleSendInvite}
@@ -424,7 +451,7 @@ export function Sidebar({
                     }
                     className="flex-1 rounded-lg bg-[var(--color-cta)] py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    {inviteStatus === "sending" ? "Enviando..." : "Enviar convite"}
+                    {inviteStatus === "sending" ? t("nav.invite_modal.sending") : t("nav.invite_modal.send")}
                   </button>
                 </div>
               </>
