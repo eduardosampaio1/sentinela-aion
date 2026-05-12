@@ -9,7 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from aion.shared.economics_daily_job import (
+    _PAGE_SIZE,
     _aggregate,
+    _discover_tenants,
     fetch_daily_economics,
     run_economics_daily_sweep,
 )
@@ -206,6 +208,111 @@ async def test_run_sweep_returns_partial_summary_on_http_error(monkeypatch):
     assert isinstance(result, dict)
     # Either completed partially or failed — but never raised
     assert "rows_written" in result or "skipped" in result
+
+
+# ── _discover_tenants pagination ─────────────────────────────────────────────
+
+
+def _make_tenant_page(tenants: list[str], pad_to: int = 0) -> list[dict]:
+    """Build a page of aion_decisions rows with only the tenant field."""
+    rows = [{"tenant": t} for t in tenants]
+    # Pad with repeated first tenant to hit _PAGE_SIZE without adding new tenants
+    if pad_to > len(rows):
+        rows += [{"tenant": tenants[0]}] * (pad_to - len(rows))
+    return rows
+
+
+@pytest.mark.asyncio
+async def test_discover_tenants_paginates_beyond_first_page(monkeypatch):
+    """Tenants that appear only after the first page are discovered correctly."""
+    monkeypatch.setenv("AION_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("AION_SUPABASE_SERVICE_ROLE_KEY", "test-key")
+
+    # Page 1 — full page, contains only tenant-A
+    page1 = _make_tenant_page(["tenant-A"], pad_to=_PAGE_SIZE)
+    # Page 2 — partial page, contains tenant-B (new) + tenant-A (known)
+    page2 = [{"tenant": "tenant-B"}, {"tenant": "tenant-A"}]
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=[
+        MagicMock(status_code=200, json=MagicMock(return_value=page1)),
+        MagicMock(status_code=200, json=MagicMock(return_value=page2)),
+    ])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        tenants = await _discover_tenants(mock_client, date.today())
+
+    assert "tenant-A" in tenants
+    assert "tenant-B" in tenants
+    assert mock_client.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_tenants_early_exit_when_no_new_tenants(monkeypatch):
+    """Stops after a full page that adds zero new tenants (early-exit optimisation)."""
+    monkeypatch.setenv("AION_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("AION_SUPABASE_SERVICE_ROLE_KEY", "test-key")
+
+    # Page 1 — full page, tenant-A only
+    page1 = _make_tenant_page(["tenant-A"], pad_to=_PAGE_SIZE)
+    # Page 2 — would also be a full page with only known tenant-A
+    page2 = _make_tenant_page(["tenant-A"], pad_to=_PAGE_SIZE)
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=[
+        MagicMock(status_code=200, json=MagicMock(return_value=page1)),
+        MagicMock(status_code=200, json=MagicMock(return_value=page2)),
+    ])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        tenants = await _discover_tenants(mock_client, date.today())
+
+    assert tenants == ["tenant-A"]
+    # Must stop after page 2 (early exit) — must NOT fetch a third page
+    assert mock_client.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_discover_tenants_stops_on_partial_page(monkeypatch):
+    """Returns tenants from a partial (last) page without fetching another."""
+    monkeypatch.setenv("AION_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("AION_SUPABASE_SERVICE_ROLE_KEY", "test-key")
+
+    partial_page = [{"tenant": "tenant-X"}, {"tenant": "tenant-Y"}]
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=
+        MagicMock(status_code=200, json=MagicMock(return_value=partial_page))
+    )
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        tenants = await _discover_tenants(mock_client, date.today())
+
+    assert set(tenants) == {"tenant-X", "tenant-Y"}
+    assert mock_client.get.call_count == 1  # partial page → no second fetch
+
+
+@pytest.mark.asyncio
+async def test_discover_tenants_returns_empty_on_error(monkeypatch):
+    """Returns empty list when Supabase returns non-200."""
+    monkeypatch.setenv("AION_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("AION_SUPABASE_SERVICE_ROLE_KEY", "test-key")
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=MagicMock(status_code=500))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        tenants = await _discover_tenants(mock_client, date.today())
+
+    assert tenants == []
 
 
 # ── fetch_daily_economics ─────────────────────────────────────────────────────

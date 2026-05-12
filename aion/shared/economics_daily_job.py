@@ -213,25 +213,61 @@ async def _upsert_daily_row(
 # ── Tenant discovery ──────────────────────────────────────────────────────────
 
 async def _discover_tenants(client: Any, since_date: date) -> list[str]:
-    """Get all distinct tenants that had decisions in the last LOOKBACK_DAYS days."""
-    from datetime import timedelta
+    """Get all distinct tenants that had decisions since `since_date`.
+
+    Paginated so that lookback windows with more than _PAGE_SIZE rows never
+    silently truncate the tenant list.  Each page fetches only the `tenant`
+    column, so pages are cheap even on large tables.
+
+    Early-exit optimisation: if a full page adds zero new tenants to the
+    accumulated set, further pages are guaranteed to contain only already-known
+    tenants (tenants are sparse relative to rows), so we stop early.
+    """
     cutoff = datetime.combine(since_date, datetime.min.time()).replace(
         tzinfo=timezone.utc
     ).isoformat()
 
-    url = (
-        f"{_base_url()}/aion_decisions"
-        f"?select=tenant"
-        f"&created_at=gte.{cutoff}"
-        f"&limit={_PAGE_SIZE}"
-    )
-    resp = await client.get(url, headers=_supabase_headers())
-    if resp.status_code != 200:
-        return []
-    rows = resp.json()
-    if not isinstance(rows, list):
-        return []
-    return list({r["tenant"] for r in rows if r.get("tenant")})
+    tenants: set[str] = set()
+    offset = 0
+
+    while True:
+        url = (
+            f"{_base_url()}/aion_decisions"
+            f"?select=tenant"
+            f"&created_at=gte.{cutoff}"
+            f"&order=created_at.asc"
+            f"&limit={_PAGE_SIZE}"
+            f"&offset={offset}"
+        )
+        resp = await client.get(url, headers=_supabase_headers())
+        if resp.status_code != 200:
+            logger.debug(
+                "economics_daily_job: _discover_tenants page failed %s",
+                resp.status_code,
+            )
+            break
+
+        page = resp.json()
+        if not isinstance(page, list):
+            break
+
+        before = len(tenants)
+        for r in page:
+            t = r.get("tenant")
+            if t:
+                tenants.add(t)
+
+        if len(page) < _PAGE_SIZE:
+            break  # last page — no more rows
+
+        if len(tenants) == before:
+            # Full page, but zero new tenants found: all remaining rows belong
+            # to tenants already in the set.  Stop early.
+            break
+
+        offset += _PAGE_SIZE
+
+    return list(tenants)
 
 
 # ── Startup table probe ───────────────────────────────────────────────────────
