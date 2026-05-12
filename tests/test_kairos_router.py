@@ -165,7 +165,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "boleto_route"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 201
@@ -188,7 +188,7 @@ class TestCreateFromTemplate:
         resp = client.post(
             "/v1/kairos/candidates/from-template",
             json={},
-            headers={"X-Aion-Tenant-Id": "tenant-1"},
+            headers={"X-Aion-Tenant": "tenant-1"},
         )
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "missing_template_id"
@@ -198,7 +198,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "nonexistent"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "template_not_found"
@@ -212,7 +212,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "tmpl_x", "title": "My Custom Title"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 201
@@ -225,7 +225,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "tmpl_y"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 503
@@ -241,7 +241,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "tmpl_z"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 500
@@ -257,7 +257,7 @@ class TestCreateFromTemplate:
             resp = client.post(
                 "/v1/kairos/candidates/from-template",
                 json={"template_id": "tmpl_ok"},
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 201
@@ -276,7 +276,7 @@ class TestListCandidates:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.get(
                 "/v1/kairos/candidates",
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         assert resp.status_code == 200
@@ -294,7 +294,7 @@ class TestListCandidates:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             client.get(
                 "/v1/kairos/candidates?status=shadow_running",
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         call_kwargs = kairos.store.list_candidates.call_args
@@ -306,7 +306,7 @@ class TestListCandidates:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             client.get(
                 "/v1/kairos/candidates?type=guardrail",
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
 
         call_kwargs = kairos.store.list_candidates.call_args
@@ -316,7 +316,7 @@ class TestListCandidates:
         with patch("aion.routers.kairos.get_kairos", side_effect=RuntimeError("disabled")):
             resp = client.get(
                 "/v1/kairos/candidates",
-                headers={"X-Aion-Tenant-Id": "tenant-1"},
+                headers={"X-Aion-Tenant": "tenant-1"},
             )
         assert resp.status_code == 503
 
@@ -333,7 +333,7 @@ class TestGetCandidate:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.get(
                 f"/v1/kairos/candidates/{c.id}",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
             )
 
         assert resp.status_code == 200
@@ -351,7 +351,7 @@ class TestGetCandidate:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.get(
                 f"/v1/kairos/candidates/{c.id}",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
             )
 
         assert resp.status_code == 200
@@ -364,7 +364,7 @@ class TestGetCandidate:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.get(
                 "/v1/kairos/candidates/nonexistent",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
             )
 
         assert resp.status_code == 404
@@ -378,7 +378,7 @@ class TestGetCandidate:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.get(
                 f"/v1/kairos/candidates/{c.id}",
-                headers={"X-Aion-Tenant-Id": "requesting-tenant"},
+                headers={"X-Aion-Tenant": "requesting-tenant"},
             )
 
         assert resp.status_code == 404
@@ -405,7 +405,7 @@ class TestStartShadow:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/shadow",
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "op-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "op-1"},
             )
 
         assert resp.status_code == 200
@@ -424,7 +424,7 @@ class TestStartShadow:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/shadow",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
                 # No X-Aion-Actor-Id
             )
 
@@ -438,7 +438,7 @@ class TestStartShadow:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/shadow",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
             )
 
         assert resp.status_code == 409
@@ -450,7 +450,7 @@ class TestStartShadow:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 "/v1/kairos/candidates/missing/shadow",
-                headers={"X-Aion-Tenant-Id": "tenant-test"},
+                headers={"X-Aion-Tenant": "tenant-test"},
             )
 
         assert resp.status_code == 404
@@ -462,7 +462,7 @@ class TestStartShadow:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/shadow",
-                headers={"X-Aion-Tenant-Id": "requesting-tenant"},
+                headers={"X-Aion-Tenant": "requesting-tenant"},
             )
 
         assert resp.status_code == 404
@@ -489,7 +489,7 @@ class TestApprove:
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/approve",
                 json={"reason": "meets all criteria"},
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 200
@@ -506,7 +506,7 @@ class TestApprove:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/approve",
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
                 # No body at all
             )
 
@@ -516,7 +516,7 @@ class TestApprove:
         resp = client.post(
             "/v1/kairos/candidates/some-id/approve",
             json={"reason": "ok"},
-            headers={"X-Aion-Tenant-Id": "tenant-test"},
+            headers={"X-Aion-Tenant": "tenant-test"},
         )
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "missing_actor"
@@ -536,7 +536,7 @@ class TestApprove:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/approve",
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 409
@@ -547,7 +547,7 @@ class TestApprove:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 "/v1/kairos/candidates/missing/approve",
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 404
@@ -559,7 +559,7 @@ class TestApprove:
         with patch("aion.routers.kairos.get_kairos", return_value=kairos):
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/approve",
-                headers={"X-Aion-Tenant-Id": "requesting-tenant", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "requesting-tenant", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 404
@@ -568,7 +568,7 @@ class TestApprove:
         with patch("aion.routers.kairos.get_kairos", side_effect=RuntimeError("disabled")):
             resp = client.post(
                 "/v1/kairos/candidates/some-id/approve",
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
         assert resp.status_code == 503
 
@@ -590,7 +590,7 @@ class TestReject:
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/reject",
                 json={"reason": "too many false positives"},
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 200
@@ -601,7 +601,7 @@ class TestReject:
         resp = client.post(
             "/v1/kairos/candidates/some-id/reject",
             json={},
-            headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+            headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
         )
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "missing_reason"
@@ -610,7 +610,7 @@ class TestReject:
         resp = client.post(
             "/v1/kairos/candidates/some-id/reject",
             json={"reason": "bad policy"},
-            headers={"X-Aion-Tenant-Id": "tenant-test"},
+            headers={"X-Aion-Tenant": "tenant-test"},
         )
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "missing_actor"
@@ -632,7 +632,7 @@ class TestReject:
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/reject",
                 json={"reason": "test"},
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 409
@@ -644,7 +644,7 @@ class TestReject:
             resp = client.post(
                 "/v1/kairos/candidates/missing/reject",
                 json={"reason": "test"},
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 404
@@ -657,7 +657,7 @@ class TestReject:
             resp = client.post(
                 f"/v1/kairos/candidates/{c.id}/reject",
                 json={"reason": "test"},
-                headers={"X-Aion-Tenant-Id": "requesting-tenant", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "requesting-tenant", "X-Aion-Actor-Id": "admin-1"},
             )
 
         assert resp.status_code == 404
@@ -667,6 +667,6 @@ class TestReject:
             resp = client.post(
                 "/v1/kairos/candidates/some-id/reject",
                 json={"reason": "test"},
-                headers={"X-Aion-Tenant-Id": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
+                headers={"X-Aion-Tenant": "tenant-test", "X-Aion-Actor-Id": "admin-1"},
             )
         assert resp.status_code == 503

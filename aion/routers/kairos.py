@@ -10,8 +10,8 @@ Endpoints:
     POST /v1/kairos/candidates/{id}/reject       → reject candidate
 
 Headers:
-    X-Aion-Tenant-Id  — required on all endpoints
-    X-Aion-Actor-Id   — required on approve / reject; optional on shadow (audit trail)
+    X-Aion-Tenant  — required on all endpoints (or AION_TENANT_HEADER override)
+    X-Aion-Actor-Id  — required on approve / reject; optional on shadow (audit trail)
 
 Error semantics:
     503 — KAIROS module is disabled (KAIROS_ENABLED=false)
@@ -35,6 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from aion.config import get_settings
 from aion.kairos import get_kairos
 from aion.kairos.models import (
     LifecycleActorType,
@@ -62,7 +63,13 @@ def _err(status: int, message: str, code: str) -> JSONResponse:
 
 
 def _tenant(request: Request) -> Optional[str]:
-    return request.headers.get("X-Aion-Tenant-Id")
+    """Read tenant from the configured tenant header (settings.tenant_header).
+
+    Returns None when absent so callers can return 400.  KAIROS requires an
+    explicit tenant — no fallback to settings.default_tenant — because all
+    governance operations must be unambiguously scoped.
+    """
+    return request.headers.get(get_settings().tenant_header) or None
 
 
 def _actor(request: Request) -> Optional[str]:
@@ -114,7 +121,7 @@ async def create_candidate_from_template(request: Request):
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     try:
         body = await request.json()
@@ -196,7 +203,7 @@ async def list_candidates(
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     try:
         kairos = get_kairos()
@@ -224,7 +231,7 @@ async def get_candidate(candidate_id: str, request: Request):
     """Get a PolicyCandidate with its lifecycle events and active shadow run."""
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     try:
         kairos = get_kairos()
@@ -273,7 +280,7 @@ async def mark_ready_for_shadow(candidate_id: str, request: Request):
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     actor_id = _actor(request)
 
@@ -324,7 +331,7 @@ async def start_shadow(candidate_id: str, request: Request):
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     actor_id = _actor(request)
 
@@ -375,7 +382,7 @@ async def approve_candidate(candidate_id: str, request: Request):
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     actor_id = _actor(request)
     if not actor_id:
@@ -428,7 +435,7 @@ async def reject_candidate(candidate_id: str, request: Request):
     """
     tenant_id = _tenant(request)
     if not tenant_id:
-        return _err(400, "X-Aion-Tenant-Id header is required", "missing_tenant")
+        return _err(400, "tenant header is required", "missing_tenant")
 
     actor_id = _actor(request)
     if not actor_id:
