@@ -15,6 +15,9 @@ os.environ.setdefault("AION_METIS_ENABLED", "false")
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-key")
 os.environ.setdefault("AION_TRUST_GUARD_ENABLED", "false")
 os.environ.setdefault("AION_REQUIRE_CHAT_AUTH", "false")
+# Tests must not require a real license JWT. Without this, FastAPI's lifespan
+# calls validate_license_or_abort() → sys.exit(1) → CancelledError on TestClient setup.
+os.environ.setdefault("AION_LICENSE_SKIP_VALIDATION", "true")
 
 
 @pytest.fixture(autouse=True)

@@ -9,7 +9,7 @@ Verifies that:
 """
 
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -84,7 +84,8 @@ class TestEstixeDegradation:
         with patch("aion.estixe.classifier.get_embedding_model") as mock_model:
             mock_instance = MagicMock()
             mock_instance.loaded = False
-            mock_instance.load = asyncio.coroutine(lambda: None)
+            # Python 3.11 removed asyncio.coroutine — use AsyncMock instead.
+            mock_instance.load = AsyncMock(return_value=None)
             mock_model.return_value = mock_instance
 
             with patch("aion.config.get_estixe_settings") as mock_settings:
