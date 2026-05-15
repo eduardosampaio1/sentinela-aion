@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 import logging
 from collections import OrderedDict
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from aion.config import get_metis_settings
 from aion.shared.schemas import ChatCompletionRequest, ChatMessage
@@ -50,7 +50,8 @@ class BehaviorConfig(StrictModel):
     objectivity: int = Field(default=50, ge=0, le=100)
     density: int = Field(default=50, ge=0, le=100)
     explanation: int = Field(default=50, ge=0, le=100)
-    cost_target: str = Field(default="medium")  # free | low | medium | high
+    # F-21: allowlist validation — only accepted values, no freeform strings.
+    cost_target: Literal["free", "low", "medium", "high", "fast"] = Field(default="medium")
     formality: int = Field(default=50, ge=0, le=100)
 
     # ── Console UI dials (sent by routing-page slider, behavior-estimate) ──

@@ -813,6 +813,16 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                 else:
                     # Traditional service key: use key's own role for RBAC
                     effective_role = service_role
+                    # F-13: X-Aion-Actor-Role is informational only — never used for authz.
+                    # Log a warning if the header diverges from the resolved key role, as this
+                    # may indicate a misconfigured client or an attempted role escalation.
+                    actor_role_hdr = request.headers.get("X-Aion-Actor-Role", "").strip()
+                    if actor_role_hdr and actor_role_hdr != getattr(service_role, "value", str(service_role)):
+                        logger.warning(
+                            "X-Aion-Actor-Role header '%s' diverges from resolved key role '%s' "
+                            "(header is informational only — authz uses key role). ip=%s tenant=%s",
+                            actor_role_hdr, service_role, request.client.host if request.client else "?", tenant,
+                        )
 
                 # ── Gap 3: RBAC enforcement via effective (actor) role ──
                 if required_perm and not check_permission(effective_role, required_perm):
