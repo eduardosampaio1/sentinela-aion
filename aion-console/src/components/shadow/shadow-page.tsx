@@ -14,6 +14,7 @@ import { DemoBanner } from "@/components/ui/demo-banner";
 import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
 import { useApiData } from "@/lib/use-api-data";
 import { getCalibration, promoteCalibration, rollbackCalibration } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -811,6 +812,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function ShadowPage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<TabId>("shadow");
 
   return (
@@ -818,10 +820,10 @@ export function ShadowPage() {
       {/* Page header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Laboratório
+          {t("shadow.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Teste, compare e evolua políticas AION com dados reais
+          {t("shadow.subtitle")}
         </p>
       </div>
 

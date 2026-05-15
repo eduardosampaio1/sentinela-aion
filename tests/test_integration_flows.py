@@ -146,7 +146,7 @@ class TestRBAC:
                 },
             )
             assert resp.status_code == 200
-            assert resp.json()["status"] == "safe_mode_active"
+            assert resp.json()["killswitch_active"] is True
             # Cleanup: deactivate so other tests aren't affected
             await client.delete(
                 "/v1/killswitch",

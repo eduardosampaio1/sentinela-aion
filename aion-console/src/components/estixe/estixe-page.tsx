@@ -42,8 +42,10 @@ import {
 } from "@/lib/api";
 import { useApiData } from "@/lib/use-api-data";
 import type { IntentSuggestion, SuggestionApprovalResponse } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 export function EstixePage() {
+  const t = useT();
   const [intents, setIntents] = useState(mockIntents);
   const [securityRules, setSecurityRules] = useState(mockSecurityRules);
   const [bypassConfidence, setBypassConfidence] = useState(85);
@@ -349,10 +351,10 @@ export function EstixePage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Proteção
+          {t("estixe.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Controle e proteção em tempo real. Cada bloqueio e desvio economiza custo e reduz risco.
+          {t("estixe.subtitle")}
         </p>
       </div>
 
@@ -648,7 +650,7 @@ export function EstixePage() {
                       </code>
                       <Badge variant="muted">{s.cluster_size} requests</Badge>
                       <Badge variant="success">
-                        ~R$ {s.estimated_daily_savings.toFixed(2)}/dia
+                        ~US$ {s.estimated_daily_savings.toFixed(2)}/dia
                       </Badge>
                       <span className="text-[10px] text-[var(--color-text-muted)]">
                         confiança: {(s.confidence * 100).toFixed(0)}%

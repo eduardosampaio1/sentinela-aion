@@ -3,9 +3,11 @@
 import { useState, type ReactNode } from "react";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+import { useKeyboardShortcuts } from "@/lib/hooks/use-keyboard-shortcuts";
 
 export function Shell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  useKeyboardShortcuts({ onToggleSidebar: () => setCollapsed((v) => !v) });
 
   return (
     <div className="h-full">

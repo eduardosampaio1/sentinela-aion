@@ -309,12 +309,15 @@ def _mark_redis_failure():
     _redis_available = False
     _redis_last_failure = time.time()
     if _redis_client is not None:
+        _client_to_close = _redis_client
+        _redis_client = None
         try:
             import asyncio
-            asyncio.ensure_future(_redis_client.aclose())
+            asyncio.get_running_loop().create_task(_client_to_close.aclose())
+        except RuntimeError:
+            pass  # No running event loop — connection will be GC'd
         except Exception:
             pass
-        _redis_client = None
 
 
 # ════════════════════════════════════════════
@@ -353,7 +356,8 @@ async def _check_rate_limit(key: str, limit: int) -> bool:
 
     redis_key = f"aion:ratelimit:{key}"
     now = time.time()
-    window_start = now - 60
+    s = get_settings()
+    window_start = now - s.rate_limit_window_seconds
 
     try:
         pipe = r.pipeline()

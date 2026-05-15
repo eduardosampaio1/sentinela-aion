@@ -25,6 +25,7 @@ import {
   promoteCollectivePolicy,
 } from "@/lib/api";
 import { getHealth, type HealthInfo } from "@/lib/api/observability";
+import { useT } from "@/lib/i18n";
 import {
   mockCollectivePolicies,
   mockInstalledPolicies,
@@ -353,6 +354,7 @@ function InstalledTable({
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function CollectivePage() {
+  const t = useT();
   const [activeSector, setActiveSector] = useState<SectorTab>("all");
   const [installTarget, setInstallTarget] = useState<CollectivePolicy | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<InstalledCollectivePolicy | null>(null);
@@ -447,10 +449,10 @@ export function CollectivePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            AION Collective
+            {t("collective.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Políticas testadas em produção pelo time AION. Instale em 1 clique, sem código.
+            {t("collective.subtitle")}
           </p>
         </div>
         <button

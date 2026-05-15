@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import React from "react";
 import {
   FileBarChart,
   Download,
@@ -21,18 +22,11 @@ import type { TimeRange } from "@/components/ui/time-range-select";
 import { mockBudgetSummary, mockThreatCategories, mockIntentPerformance, mockSessions, mockStats } from "@/lib/mock-data";
 import { useApiData } from "@/lib/use-api-data";
 import { getStats, getBudgetStatus, getSessions, getExecutiveReport, API_BASE, getActiveTenant, getThreats, getReportSchedule, scheduleReport, deleteReportSchedule } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
-const tabs = ["Execução", "Segurança", "Custos", "Shadow", "Auditoria", "Agendamento"] as const;
-type Tab = (typeof tabs)[number];
+type Tab = "exec" | "security" | "costs" | "shadow" | "audit" | "schedule";
 
-const tabIcons: Record<Tab, React.ReactNode> = {
-  "Execução": <Zap className="h-3.5 w-3.5" />,
-  "Segurança": <Shield className="h-3.5 w-3.5" />,
-  "Custos": <Wallet className="h-3.5 w-3.5" />,
-  "Shadow": <FlaskConical className="h-3.5 w-3.5" />,
-  "Auditoria": <ScrollText className="h-3.5 w-3.5" />,
-  "Agendamento": <Clock className="h-3.5 w-3.5" />,
-};
+const TAB_IDS: Tab[] = ["exec", "security", "costs", "shadow", "audit", "schedule"];
 
 const exportFormats = ["PDF", "PPTX", "CSV", "XLSX"] as const;
 
@@ -75,6 +69,7 @@ function getRequestsForRange(range: TimeRange): string {
 }
 
 function ExecTab({ timeRange }: { timeRange: TimeRange }) {
+  const t = useT();
   const { data: stats, isDemo, refetch } = useApiData(getStats, mockStats, { intervalMs: 30_000 });
   const bypassPct = stats.total_requests > 0
     ? ((stats.bypasses / stats.total_requests) * 100).toFixed(1)
@@ -92,7 +87,7 @@ function ExecTab({ timeRange }: { timeRange: TimeRange }) {
       </div>
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">Performance por módulo</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-text)]">{t("reports.tabs.performance_header")}</h3>
         <div className="space-y-3">
           {[
             { name: "Proteção", requests: 847240, bypassed: 579710, pct: 68.4, color: "bg-teal-500" },
@@ -123,6 +118,7 @@ const PATTERN_REPORT_LABELS: Record<string, string> = {
 };
 
 function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
+  const t = useT();
   const { data: threats, isDemo: threatsIsDemo, refetch: refetchThreats } = useApiData(
     getThreats,
     [] as Record<string, unknown>[],
@@ -158,7 +154,7 @@ function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
       {totalRealThreats > 0 && (
         <div className="rounded-xl border border-red-800/40 bg-[var(--color-surface)]">
           <div className="border-b border-[var(--color-border)] px-5 py-4">
-            <h3 className="text-sm font-semibold text-red-400">Ameaças ativas — detectadas em tempo real</h3>
+            <h3 className="text-sm font-semibold text-red-400">{t("reports.tabs.active_threats")}</h3>
           </div>
           <div className="divide-y divide-[var(--color-border)]/50">
             {Object.entries(patternCounts).map(([pattern, count]) => (
@@ -184,7 +180,7 @@ function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
       {/* Mock historical categories */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="border-b border-[var(--color-border)] px-5 py-4">
-          <h3 className="text-sm font-semibold text-[var(--color-text)]">Categorias históricas de ameaça</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">{t("reports.tabs.historical_threats")}</h3>
         </div>
         <div className="divide-y divide-[var(--color-border)]/50">
           {mockThreatCategories.map((t) => (
@@ -208,15 +204,16 @@ function SecurityTab({ timeRange }: { timeRange: TimeRange }) {
 }
 
 function CostsTab({ timeRange }: { timeRange: TimeRange }) {
+  const t = useT();
   const { data: budget, isDemo, refetch } = useApiData(getBudgetStatus, mockBudgetSummary, { intervalMs: 60_000 });
   const costScalers: Record<TimeRange, number> = {
     live: 0.05, "1h": 0.5, "4h": 2, "24h": 1, "2d": 2, "7d": 7, "14d": 14, "30d": 30,
   };
   const scale = costScalers[timeRange] || 1;
-  const scaledSpent = (budget.used_brl * scale).toFixed(2);
+  const scaledSpent = (budget.used_usd * scale).toFixed(2);
   const scaledAvoided = (budget.avoided_cost * scale).toFixed(2);
-  const roi = budget.avoided_cost > 0 && budget.used_brl > 0
-    ? (budget.avoided_cost / budget.used_brl).toFixed(1)
+  const roi = budget.avoided_cost > 0 && budget.used_usd > 0
+    ? (budget.avoided_cost / budget.used_usd).toFixed(1)
     : "1.6";
 
   return (
@@ -231,7 +228,7 @@ function CostsTab({ timeRange }: { timeRange: TimeRange }) {
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="border-b border-[var(--color-border)] px-5 py-4">
-          <h3 className="text-sm font-semibold text-[var(--color-text)]">Intents com maior oportunidade de economia</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">{t("reports.tabs.opportunity_title")}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -264,6 +261,7 @@ function CostsTab({ timeRange }: { timeRange: TimeRange }) {
 }
 
 function ShadowTab({ timeRange }: { timeRange: TimeRange }) {
+  const t = useT();
   const shadowScalers: Record<TimeRange, number> = {
     live: 0.05,
     "1h": 0.5,
@@ -295,7 +293,7 @@ function ShadowTab({ timeRange }: { timeRange: TimeRange }) {
           </p>
         </div>
         <button className="ml-auto rounded-lg bg-green-800/40 px-3 py-1.5 text-xs font-medium text-green-300 hover:bg-green-800/60 transition-colors">
-          Promover para live
+          {t("reports.tabs.promote_live")}
         </button>
       </div>
     </div>
@@ -361,6 +359,7 @@ function AuditTab({ timeRange }: { timeRange: TimeRange }) {
 }
 
 function ScheduleTab() {
+  const t = useT();
   const mockScheduleFallback: Record<string, unknown> = { schedule: null };
   const { data: scheduleData, isDemo: schedIsDemo, refetch: refetchSched } = useApiData(
     getReportSchedule,
@@ -394,7 +393,7 @@ function ScheduleTab() {
       setSaved(true);
       refetchSched();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+      setSaveError(err instanceof Error ? err.message : t("reports.tabs.saving"));
     } finally {
       setSaving(false);
     }
@@ -421,15 +420,15 @@ function ScheduleTab() {
       {saved && (
         <div className="flex items-center gap-2 rounded-xl border border-green-800/50 bg-green-900/20 px-4 py-3 text-sm text-green-400">
           <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-          Agendamento salvo com sucesso.
+          {t("reports.tabs.schedule_saved")}
         </div>
       )}
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 space-y-5">
         <div>
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">Agendamento de relatório executivo</h2>
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">{t("reports.tabs.schedule_title")}</h2>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            Configure quando e para quem o relatório é enviado automaticamente
+            {t("reports.tabs.schedule_subtitle")}
           </p>
         </div>
 
@@ -437,7 +436,7 @@ function ScheduleTab() {
         {existing && (
           <div className="flex items-start justify-between rounded-lg bg-teal-900/20 border border-teal-800/40 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-teal-400">Agendamento ativo</p>
+              <p className="text-sm font-medium text-teal-400">{t("reports.tabs.active_schedule")}</p>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                 Frequência: <strong className="text-teal-300">{existing.frequency as string}</strong>
                 {Array.isArray(existing.recipients) && (existing.recipients as string[]).length > 0 && (
@@ -450,7 +449,7 @@ function ScheduleTab() {
               disabled={deleting}
               className="ml-3 flex-shrink-0 rounded-lg border border-red-800/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-900/20 transition-colors disabled:opacity-50"
             >
-              {deleting ? "Removendo..." : "Remover"}
+              {deleting ? t("reports.tabs.removing") : t("reports.tabs.remove")}
             </button>
           </div>
         )}
@@ -535,9 +534,28 @@ const TIME_RANGE_DAYS: Record<TimeRange, number> = {
 };
 
 export function ReportsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("Execução");
+  const t = useT();
+  const [activeTab, setActiveTab] = useState<Tab>("exec");
   const [exportOpen, setExportOpen] = useState(false);
   const [timeRange, setTimeRange] = useState<TimeRange>("30d");
+
+  const tabs = TAB_IDS;
+  const tabLabels: Record<Tab, string> = {
+    exec: t("reports.tabs.exec"),
+    security: t("reports.tabs.security"),
+    costs: t("reports.tabs.costs"),
+    shadow: t("reports.tabs.shadow"),
+    audit: t("reports.tabs.audit"),
+    schedule: t("reports.tabs.schedule"),
+  };
+  const tabIcons: Record<Tab, React.ReactNode> = {
+    exec: <FileBarChart className="h-4 w-4" />,
+    security: <Shield className="h-4 w-4" />,
+    costs: <Wallet className="h-4 w-4" />,
+    shadow: <FlaskConical className="h-4 w-4" />,
+    audit: <ScrollText className="h-4 w-4" />,
+    schedule: <Clock className="h-4 w-4" />,
+  };
 
   const handleExport = (fmt: string) => {
     setExportOpen(false);
@@ -573,7 +591,7 @@ export function ReportsPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            Relatórios
+            {t("reports.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
             Relatório executivo mensal — Abril 2025
@@ -591,7 +609,7 @@ export function ReportsPage() {
               className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm font-medium text-[var(--color-text)] hover:bg-white/5 transition-colors"
             >
               <Download className="h-4 w-4" />
-              Exportar
+              {t("reports.export")}
             </button>
             {exportOpen && (
               <div className="absolute right-0 top-full mt-1 z-10 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg overflow-hidden">
@@ -627,18 +645,18 @@ export function ReportsPage() {
             }`}
           >
             {tabIcons[tab]}
-            {tab}
+            {tabLabels[tab]}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
-      {activeTab === "Execução" && <ExecTab timeRange={timeRange} />}
-      {activeTab === "Segurança" && <SecurityTab timeRange={timeRange} />}
-      {activeTab === "Custos" && <CostsTab timeRange={timeRange} />}
-      {activeTab === "Shadow" && <ShadowTab timeRange={timeRange} />}
-      {activeTab === "Auditoria" && <AuditTab timeRange={timeRange} />}
-      {activeTab === "Agendamento" && <ScheduleTab />}
+      {activeTab === "exec" && <ExecTab timeRange={timeRange} />}
+      {activeTab === "security" && <SecurityTab timeRange={timeRange} />}
+      {activeTab === "costs" && <CostsTab timeRange={timeRange} />}
+      {activeTab === "shadow" && <ShadowTab timeRange={timeRange} />}
+      {activeTab === "audit" && <AuditTab timeRange={timeRange} />}
+      {activeTab === "schedule" && <ScheduleTab />}
     </div>
   );
 }

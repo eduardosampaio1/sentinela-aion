@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { mockStats } from "@/lib/mock-data";
 import { ConfirmActionModal } from "@/components/ui/confirm-action-modal";
+import { useT } from "@/lib/i18n";
 import {
   Copy,
   Check,
@@ -90,6 +91,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export function SettingsPage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<Tab>("geral");
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [rotating, setRotating] = useState(false);
@@ -190,10 +192,10 @@ export function SettingsPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Configurações
+          {t("settings.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Preferências do tenant, notificações e credenciais de API
+          {t("settings.subtitle")}
         </p>
       </div>
 

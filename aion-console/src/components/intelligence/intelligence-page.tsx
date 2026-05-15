@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   Brain,
   Shield,
-  TrendingDown,
   Zap,
   AlertTriangle,
   Activity,
@@ -19,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { DemoBanner } from "@/components/ui/demo-banner";
 import { useApiData } from "@/lib/use-api-data";
 import { getIntelligenceOverview, getThreats, getIntelligenceIntents, getGlobalThreatFeed } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // ─── Mock fallbacks ────────────────────────────────────────────────────────────
 
@@ -215,6 +215,7 @@ function ThreatCard({ threat }: { threat: Record<string, unknown> }) {
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function IntelligencePage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<"overview" | "threats" | "intents" | "global">("overview");
 
   const {
@@ -266,10 +267,10 @@ export function IntelligencePage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-            Inteligência
+            {t("intelligence.title")}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            O que o AION aprendeu sobre o seu ambiente — dados reais da memória operacional
+            {t("intelligence.subtitle")}
           </p>
         </div>
         <button
@@ -284,14 +285,7 @@ export function IntelligencePage() {
       {isDemo && <DemoBanner onRetry={refetch} />}
 
       {/* Hero metrics */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard
-          label="Economia gerada"
-          value={`$${fmt(((econ.savings_usd as number) ?? 0), 0)}`}
-          sub={`${((econ.savings_pct as number) ?? 0).toFixed(1)}% de redução vs. sem AION`}
-          icon={<TrendingDown className="h-4 w-4" />}
-          accent="text-teal-400"
-        />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <MetricCard
           label="Tokens poupados"
           value={fmt((econ.tokens_saved as number) ?? 0)}
@@ -435,9 +429,9 @@ export function IntelligencePage() {
               </p>
               <div className="space-y-2">
                 {[
-                  { label: "Gasto total", value: `$${((econ.total_spend_usd as number) ?? 0).toFixed(2)}`, color: "text-[var(--color-text)]" },
-                  { label: "Sem AION (estimado)", value: `$${((econ.estimated_without_aion_usd as number) ?? 0).toFixed(2)}`, color: "text-[var(--color-text-muted)]" },
-                  { label: "Economia", value: `$${((econ.savings_usd as number) ?? 0).toFixed(2)} (${((econ.savings_pct as number) ?? 0).toFixed(1)}%)`, color: "text-teal-400" },
+                  { label: "Gasto total", value: `US$ ${((econ.total_spend_usd as number) ?? 0).toFixed(2)}`, color: "text-[var(--color-text)]" },
+                  { label: "Sem AION (estimado)", value: `US$ ${((econ.estimated_without_aion_usd as number) ?? 0).toFixed(2)}`, color: "text-[var(--color-text-muted)]" },
+                  { label: "Economia", value: `US$ ${((econ.savings_usd as number) ?? 0).toFixed(2)} (${((econ.savings_pct as number) ?? 0).toFixed(1)}%)`, color: "text-teal-400" },
                 ].map((row) => (
                   <div key={row.label} className="flex items-center justify-between">
                     <span className="text-sm text-[var(--color-text-muted)]">{row.label}</span>

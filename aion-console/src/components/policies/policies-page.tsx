@@ -16,6 +16,7 @@ import { mockBehavior } from "@/lib/mock-data";
 import { estimateDialImpact } from "@/lib/utils/behavior-estimate";
 import { setBehavior, resetBehavior, getBehavior } from "@/lib/api";
 import type { BehaviorDial } from "@/lib/types";
+import { useT } from "@/lib/i18n";
 
 const presets = [
   {
@@ -70,6 +71,7 @@ function riskLabel(risk: string) {
 }
 
 export function PoliciesPage() {
+  const t = useT();
   const [dial, setDial] = useState<BehaviorDial>({ ...mockBehavior });
   const [activePreset, setActivePreset] = useState<string | null>(null);
 
@@ -152,10 +154,10 @@ export function PoliciesPage() {
       {/* Header */}
       <div>
         <h1 className="font-[family-name:var(--font-heading)] text-2xl font-bold text-[var(--color-text)]">
-          Comportamento da IA
+          {t("policies.title")}
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-          Cada ajuste mostra o impacto estimado em custo, tokens e risco.
+          {t("policies.subtitle")}
         </p>
       </div>
 
