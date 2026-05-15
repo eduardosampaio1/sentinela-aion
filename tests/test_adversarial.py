@@ -87,7 +87,11 @@ class TestRBACBoundaryViolations:
     @pytest.fixture
     def client(self):
         from aion.main import app
-        return TestClient(app)
+        # Use the context-manager form so the lifespan startup/shutdown runs
+        # cleanly. Otherwise background tasks outlive the test loop and raise
+        # "Event loop is closed" later in the suite.
+        with TestClient(app) as c:
+            yield c
 
     def test_viewer_cannot_write_killswitch(self, client):
         """Viewer role must be denied killswitch write."""
@@ -196,21 +200,21 @@ class TestEncodingTricks:
     def test_html_in_actor_reason_sanitized(self):
         """HTML tags in X-Aion-Actor-Reason must be escaped (F-31)."""
         from aion.main import app
-        client = TestClient(app)
 
         with patch.dict(os.environ, {"AION_ADMIN_KEY": "adminkey:admin"}):
             import aion.config
             aion.config._settings = None
 
-            resp = client.put(
-                "/v1/killswitch",
-                json={"enabled": False},
-                headers={
-                    "Authorization": "Bearer adminkey",
-                    "X-Aion-Tenant": "test",
-                    "X-Aion-Actor-Reason": '<script>alert("xss")</script>',
-                },
-            )
+            with TestClient(app) as client:
+                resp = client.put(
+                    "/v1/killswitch",
+                    json={"enabled": False},
+                    headers={
+                        "Authorization": "Bearer adminkey",
+                        "X-Aion-Tenant": "test",
+                        "X-Aion-Actor-Reason": '<script>alert("xss")</script>',
+                    },
+                )
             # Request passes middleware (reason is sanitized, not rejected).
             # Backend may return 503 if pipeline not initialized — that's fine,
             # the point is it wasn't rejected as 400/reason_required.
@@ -219,22 +223,22 @@ class TestEncodingTricks:
     def test_overlong_reason_truncated(self):
         """Reason header over 256 chars must be truncated (F-31)."""
         from aion.main import app
-        client = TestClient(app)
 
         with patch.dict(os.environ, {"AION_ADMIN_KEY": "adminkey:admin"}):
             import aion.config
             aion.config._settings = None
 
-            long_reason = "A" * 500
-            resp = client.put(
-                "/v1/killswitch",
-                json={"enabled": False},
-                headers={
-                    "Authorization": "Bearer adminkey",
-                    "X-Aion-Tenant": "test",
-                    "X-Aion-Actor-Reason": long_reason,
-                },
-            )
+            with TestClient(app) as client:
+                long_reason = "A" * 500
+                resp = client.put(
+                    "/v1/killswitch",
+                    json={"enabled": False},
+                    headers={
+                        "Authorization": "Bearer adminkey",
+                        "X-Aion-Tenant": "test",
+                        "X-Aion-Actor-Reason": long_reason,
+                    },
+                )
             # Should not fail due to long reason — it gets truncated
             assert resp.status_code != 400 or "reason_required" not in resp.text
 
@@ -249,36 +253,36 @@ class TestPolicyEdgeCases:
     def test_empty_message_list_handled(self):
         """Empty messages list should not crash the pipeline."""
         from aion.main import app
-        client = TestClient(app)
 
-        resp = client.post(
-            "/v1/chat/completions",
-            json={"model": "gpt-4o-mini", "messages": []},
-            headers={"X-Aion-Tenant": "test"},
-        )
+        with TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-4o-mini", "messages": []},
+                headers={"X-Aion-Tenant": "test"},
+            )
         # Should get a validation error or graceful handling, not 500
         assert resp.status_code != 500
 
     def test_extremely_long_message_bounded(self):
         """Very long messages should be handled within payload limits."""
         from aion.main import app
-        client = TestClient(app)
 
         # 2MB payload should be rejected by middleware (max 1MB)
         huge_content = "x" * (2 * 1024 * 1024)
-        resp = client.post(
-            "/v1/chat/completions",
-            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": huge_content}]},
-            headers={"X-Aion-Tenant": "test", "Content-Length": str(len(huge_content) + 200)},
-        )
+        with TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": huge_content}]},
+                headers={"X-Aion-Tenant": "test", "Content-Length": str(len(huge_content) + 200)},
+            )
         assert resp.status_code in (413, 422)
 
     def test_path_traversal_in_url_rejected(self):
         """Path traversal attempts in URL must not reach handlers."""
         from aion.main import app
-        client = TestClient(app)
 
-        resp = client.get("/v1/data/../../../etc/passwd")
+        with TestClient(app) as client:
+            resp = client.get("/v1/data/../../../etc/passwd")
         assert resp.status_code in (400, 403, 404, 422)
 
     def test_null_bytes_in_tenant_rejected(self):

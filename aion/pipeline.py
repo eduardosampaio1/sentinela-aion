@@ -216,9 +216,11 @@ class Pipeline:
         self._safe_mode_expires_at = None
         self._log_mode_transition("safe", "normal", "manual_recovery")
         try:
-            asyncio.get_running_loop().create_task(self._clear_safe_mode_in_redis())
+            loop = asyncio.get_running_loop()
+            if not loop.is_closed():
+                loop.create_task(self._clear_safe_mode_in_redis())
         except RuntimeError:
-            pass  # No running event loop — Redis clear skipped (sync context)
+            pass  # No running event loop or loop closed — Redis clear skipped
 
     @property
     def safe_mode_state(self) -> dict:

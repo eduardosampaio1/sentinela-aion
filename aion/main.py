@@ -334,16 +334,17 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    if _snapshot_task:
-        _snapshot_task.cancel()
-    if _approval_task:
-        _approval_task.cancel()
-    if _trust_guard_task:
-        _trust_guard_task.cancel()
-    if _kairos_sweep_task:
-        _kairos_sweep_task.cancel()
-    if _economics_daily_task:
-        _economics_daily_task.cancel()
+    # Cancel and AWAIT all background tasks. Without awaiting, sockets/Redis
+    # connections opened by the tasks may outlive the loop and raise
+    # "Event loop is closed" during GC after pytest tears down the loop.
+    _bg_tasks = [
+        t for t in (_snapshot_task, _approval_task, _trust_guard_task,
+                    _kairos_sweep_task, _economics_daily_task) if t
+    ]
+    for t in _bg_tasks:
+        t.cancel()
+    if _bg_tasks:
+        await asyncio.gather(*_bg_tasks, return_exceptions=True)
 
     await shutdown_telemetry()
     await shutdown_client()
