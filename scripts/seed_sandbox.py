@@ -6,6 +6,8 @@ security, routing, and economics features for live demos.
 Usage:
     python scripts/seed_sandbox.py --tenant demo-sandbox --base-url http://localhost:8000
     python scripts/seed_sandbox.py --tenant demo-sandbox --dry-run
+
+F-28: This script is BLOCKED in production unless AION_ALLOW_SEED=true is set.
 """
 
 from __future__ import annotations
@@ -13,11 +15,28 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import time
 import urllib.request
 from dataclasses import dataclass
 from typing import Optional
+
+
+def _check_production_gate() -> None:
+    """F-28: refuse to seed in production unless explicitly allowed."""
+    profile = os.environ.get("AION_PROFILE", "development").lower()
+    allow = os.environ.get("AION_ALLOW_SEED", "").lower() in ("true", "1")
+    if profile == "production" and not allow:
+        print(
+            "ERROR: seed_sandbox.py is blocked in AION_PROFILE=production.\n"
+            "Set AION_ALLOW_SEED=true if you really want to seed production data.\n"
+            "This is a safety gate to prevent accidental demo data in production."
+        )
+        raise SystemExit(1)
+
+
+_check_production_gate()
 
 
 # ── Synthetic request templates ───────────────────────────────────────────

@@ -420,15 +420,64 @@ def test_trust_guard_manifest_excludes_pycache_and_tests():
 
 
 def test_trust_guard_manifest_size_grew_from_baseline():
-    """Sanity check: P1.A expansion brought coverage from 7 → 90+ files."""
+    """Sanity check: P1.A expansion brought coverage from 7 → 90+ files,
+    and Codex post-PR-10 fix bumped that to ~101 with `**/*.py`.
+    """
     from pathlib import Path
     from aion.trust_guard.critical_files import resolve_files
 
     files = resolve_files(Path("."))
-    # Pre-P1.A baseline was 7 files. Post-expansion must be at least 50.
+    # Pre-P1.A baseline was 7 files. Post-expansion + recursive globs must
+    # be at least 50 (margin for legitimate file removals).
     assert len(files) >= 50, (
         f"Manifest expansion regression: only {len(files)} files registered."
     )
+
+
+def test_trust_guard_manifest_covers_nested_python_modules():
+    """Codex post-PR-10: glob `aion/<mod>/*.py` missed nested files like
+    `aion/estixe/tools/seed_quality.py`. Patterns are now `**/*.py` so the
+    resolver walks sub-packages too. Regression guard against the gap.
+    """
+    from pathlib import Path
+    from aion.trust_guard.critical_files import resolve_files
+
+    files = set(resolve_files(Path(".")))
+    nested_must_cover = {
+        # estixe/tools/ exists today and was the file flagged by Codex.
+        "aion/estixe/tools/__init__.py",
+        "aion/estixe/tools/seed_quality.py",
+    }
+    missing = nested_must_cover - files
+    assert not missing, (
+        "Trust Guard manifest still misses nested modules: "
+        f"{sorted(missing)}. Glob patterns must use `**/*.py`, not `*.py`."
+    )
+
+
+def test_trust_guard_resolver_supports_recursive_pattern():
+    """resolve_files() handles `**/*.py` semantics (Codex review fix)."""
+    import tempfile
+    from pathlib import Path
+    from aion.trust_guard.critical_files import resolve_files, CORE_FILE_PATTERNS
+
+    # At least one production pattern must use the recursive form.
+    assert any("**/" in p for p in CORE_FILE_PATTERNS), (
+        "Patterns regressed to single-level globs; sub-packages will be missed."
+    )
+
+    # End-to-end: build a temp tree with a nested file and verify it appears
+    # when resolved through a `**/*.py` pattern.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "aion" / "estixe" / "tools").mkdir(parents=True)
+        (root / "aion" / "estixe" / "__init__.py").write_text("")
+        (root / "aion" / "estixe" / "tools" / "__init__.py").write_text("")
+        (root / "aion" / "estixe" / "tools" / "seed_quality.py").write_text("x=1")
+        out = resolve_files(root)
+        assert "aion/estixe/tools/seed_quality.py" in out
+        assert "aion/estixe/tools/__init__.py" in out
+        assert "aion/estixe/__init__.py" in out
 
 
 def test_trust_guard_get_critical_files_resolves_absolute_paths():

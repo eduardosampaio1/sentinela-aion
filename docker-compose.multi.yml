@@ -12,13 +12,23 @@ services:
   redis:
     image: redis:7-alpine
     container_name: aion-redis
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save "60 1000"
+      --appendonly yes
+      --appendfsync everysec
     ports:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
+      timeout: 3s
       retries: 5
+      start_period: 5s
+    volumes:
+      - redis_data:/data
     deploy:
       resources: { limits: { memory: 256M } }
 
@@ -101,3 +111,4 @@ services:
 volumes:
   aion-runtime-1:
   aion-runtime-2:
+  redis_data:

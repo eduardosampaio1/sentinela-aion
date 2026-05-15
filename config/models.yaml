@@ -1,6 +1,10 @@
 # NOMOS — Model registry
-version: "1.0"
+version: "1.1"  # F-09: added pricing_source / pricing_observed_at
 # Used by NOMOS to route requests to the best model based on complexity and cost.
+#
+# F-09: Every model MUST declare pricing_source and pricing_observed_at so cost
+# calculations are traceable and auditable. CI should flag models where
+# pricing_observed_at is older than 30 days.
 
 models:
   - name: gpt-4o-mini
@@ -8,21 +12,27 @@ models:
     api_key_env: OPENAI_API_KEY
     cost_per_1k_input: 0.00015
     cost_per_1k_output: 0.0006
+    pricing_source: "https://openai.com/api/pricing"
+    pricing_observed_at: "2026-05-01"
+    pricing_currency: USD
     max_tokens: 16384
     latency_p50_ms: 300
     capabilities: [fast, cheap, general]
-    complexity_range: [0, 40]  # handles simple prompts
-    risk_tier: low  # not ideal for sensitive data
+    complexity_range: [0, 40]
+    risk_tier: low
 
   - name: gpt-4o
     provider: openai
     api_key_env: OPENAI_API_KEY
     cost_per_1k_input: 0.0025
     cost_per_1k_output: 0.01
+    pricing_source: "https://openai.com/api/pricing"
+    pricing_observed_at: "2026-05-01"
+    pricing_currency: USD
     max_tokens: 128000
     latency_p50_ms: 800
     capabilities: [balanced, reasoning, code]
-    complexity_range: [30, 70]  # handles medium prompts
+    complexity_range: [30, 70]
     risk_tier: medium
 
   - name: claude-sonnet-4-6
@@ -30,17 +40,23 @@ models:
     api_key_env: ANTHROPIC_API_KEY
     cost_per_1k_input: 0.003
     cost_per_1k_output: 0.015
+    pricing_source: "https://docs.anthropic.com/en/docs/about-claude/models"
+    pricing_observed_at: "2026-05-01"
+    pricing_currency: USD
     max_tokens: 200000
     latency_p50_ms: 1000
     capabilities: [premium, reasoning, code, analysis]
-    complexity_range: [50, 100]  # handles complex prompts
-    risk_tier: high  # safe for sensitive data
+    complexity_range: [50, 100]
+    risk_tier: high
 
   - name: gemini-2.0-flash
     provider: google
     api_key_env: GEMINI_API_KEY
     cost_per_1k_input: 0.0001
     cost_per_1k_output: 0.0004
+    pricing_source: "https://ai.google.dev/pricing"
+    pricing_observed_at: "2026-05-01"
+    pricing_currency: USD
     max_tokens: 1000000
     latency_p50_ms: 250
     capabilities: [fast, cheap, long_context]
