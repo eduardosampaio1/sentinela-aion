@@ -106,7 +106,11 @@ services:
     restart: unless-stopped
     deploy:
       resources:
+        requests:
+          cpus: '0.5'
+          memory: 768M
         limits:
+          cpus: '1'
           memory: 1G
 
   aion-console:
@@ -141,14 +145,26 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save "60 1000"
+      --appendonly yes
+      --appendfsync everysec
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 5s
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 192M
+
+volumes:
+  redis_data:

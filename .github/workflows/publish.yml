@@ -11,7 +11,59 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  quality-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          pip install bandit pip-audit
+
+      - name: Run unit tests
+        run: |
+          if [ -f Makefile ] && grep -q "test-fast" Makefile; then
+            make test-fast
+          else
+            python -m pytest tests/ -x -q --timeout=120
+          fi
+        timeout-minutes: 10
+
+      - name: SAST scanning with Bandit
+        run: |
+          bandit -r aion/ -ll -f json -o bandit-results.json || true
+          bandit -r aion/ -ll || true
+
+      - name: Dependency audit
+        run: pip-audit --strict || true
+        continue-on-error: true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports
+          path: bandit-results.json
+          retention-days: 30
+
   build-and-push:
+    needs: quality-checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -120,3 +172,12 @@ jobs:
             --predicate aion/trust_guard/integrity_manifest.json \
             --type https://sentinela.io/trust-guard/integrity/v1 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
+
+      # ── Container vulnerability scan ─────────────────────────────────────────
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'

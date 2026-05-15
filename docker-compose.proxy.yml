@@ -67,6 +67,9 @@ services:
     restart: unless-stopped
     deploy:
       resources:
+        requests:
+          cpus: '1'
+          memory: 1.5G
         limits:
           memory: 2G
 
@@ -74,9 +77,21 @@ services:
   # Remova este servico se preferir Redis externo (ElastiCache, Upstash, Redis Cloud)
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save "60 1000"
+      --appendonly yes
+      --appendfsync everysec
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     volumes:
       - redis_data:/data

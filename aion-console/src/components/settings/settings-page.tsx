@@ -163,8 +163,8 @@ export function SettingsPage() {
   const [notifSlack, setNotifSlack] = useState(false);
   const [notifPagerDuty, setNotifPagerDuty] = useState(false);
 
-  const apiKeyMasked = "sk-aion-••••••••••••••••••••••••k9Qp";
-  const apiKeyFull = "sk-aion-l7X3mN8vKj2pQrT5wYzA4bCdE6fGhIJk9Qp";
+  const apiKeyMasked = "sk-aion-••••••••••••••••••••••••••••";
+  const apiKeyFull = apiKeyMasked; // API key is managed server-side — never expose in client
   const endpoint = process.env.NEXT_PUBLIC_AION_API_URL ?? "http://localhost:8080";
 
   // Live stats for the API tab usage grid

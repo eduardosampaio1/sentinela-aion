@@ -25,3 +25,8 @@ tools/
 # License files — tenant-specific, never committed
 *.lic
 aion.lic
+
+# Backup files — local snapshots, never committed
+.backups/
+*.rdb
+*.rdb.gz
