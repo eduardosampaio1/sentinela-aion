@@ -166,8 +166,13 @@ class TelemetryEvent:
         input_text: str = "",
         metadata: Optional[dict[str, Any]] = None,
     ):
+        # F-33: environment and policy_version for traceability across deployments.
+        import os as _os
+        _environment = _os.environ.get("AION_PROFILE", "development")
+        _aion_version = _os.environ.get("AION_VERSION", "unknown")
+
         self.data = {
-            "schema_version": "1.1",  # bumped for F-06 sanitized-input shape
+            "schema_version": "1.2",  # F-33: added environment, aion_version
             "event_type": event_type,
             "module": module,
             "request_id": request_id,
@@ -177,6 +182,8 @@ class TelemetryEvent:
             "cost_saved": cost_saved,
             "latency_ms": latency_ms,
             "response_time_ms": round(latency_ms),   # alias para o console
+            "environment": _environment,
+            "aion_version": _aion_version,
             "tenant": tenant,
             # F-06: never store raw user text. `input` is a small dict with
             # length/hash/preview only — the original text is unrecoverable

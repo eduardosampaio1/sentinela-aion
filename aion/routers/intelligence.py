@@ -105,7 +105,9 @@ async def intelligence_overview(tenant_id: str, days: int = 30):
             "top_block_reason": top_block_reason,
         },
         "economics": {
-            "total_spend_usd": round(total_spend, 4) if total_spend else round(cost_saved, 4),
+            # F-08: never substitute cost_saved when total_spend is zero — they are
+            # different metrics. Return 0.0 so dashboards show "no data" honestly.
+            "total_spend_usd": round(total_spend, 4) if total_spend else 0.0,
             "estimated_without_aion_usd": round(estimated_without_aion, 4),
             "savings_usd": round(savings, 4),
             "savings_pct": savings_pct,

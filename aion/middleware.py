@@ -121,39 +121,66 @@ _VALID_ROLES: frozenset[str] = frozenset(r.value for r in Role)
 
 # ── API key → role mapping (loaded from config) ──
 # Format in env: AION_ADMIN_KEY=key1:admin,key2:operator,key3:viewer
+# F-01/F-02 extended format: key:role:tenant1;tenant2 (tenant binding)
+#   key:admin         → admin on ALL tenants (backward compat)
+#   key:operator:acme;globex → operator on acme and globex only
+#   key:viewer:*      → viewer on all tenants (explicit wildcard)
+
+# Stores (role, allowed_tenants) per key. allowed_tenants={"*"} means all.
+_KeyAuth = tuple  # (Role, frozenset[str])
+
 @functools.lru_cache(maxsize=64)
 def _parse_key_roles(admin_key_str: str) -> types.MappingProxyType:
-    """Parse 'key1:admin,key2:operator' into {key1: admin, key2: operator}.
-    Returns an immutable MappingProxyType so callers cannot mutate the cached value.
-    Keys without explicit role default to admin for backward compat (deprecated — use key:role form)."""
-    result = {}
+    """Parse 'key1:admin,key2:operator:acme;globex' into {key1: (admin, {"*"}), key2: (operator, {"acme","globex"})}.
+    Returns an immutable MappingProxyType so callers cannot mutate the cached value."""
+    result: dict[str, _KeyAuth] = {}
     for part in admin_key_str.split(","):
         part = part.strip()
         if not part:
             continue
-        if ":" in part:
-            key_raw, role = part.rsplit(":", 1)
-            key_str = key_raw.strip()
+        segments = part.split(":")
+        if len(segments) >= 2:
+            key_str = segments[0].strip()
             if not key_str:
                 logger.warning("AION_ADMIN_KEY: skipping entry with empty key (e.g. ':role') — check your key configuration")
                 continue
-            role_str = role.strip()
+            role_str = segments[1].strip()
+            # F-01/F-02: parse optional tenant binding (3rd segment)
+            if len(segments) >= 3:
+                tenant_str = segments[2].strip()
+                allowed_tenants = frozenset(t.strip() for t in tenant_str.split(";") if t.strip())
+            else:
+                allowed_tenants = frozenset({"*"})  # backward compat: all tenants
             if role_str in _VALID_ROLES:
-                result[key_str] = Role(role_str)
+                result[key_str] = (Role(role_str), allowed_tenants)
             else:
                 logger.warning(
                     "AION_ADMIN_KEY: key '%.8s...' has unknown role %r — defaulting to viewer (least privilege). "
                     "Valid roles: %s",
                     key_str, role_str, ", ".join(sorted(_VALID_ROLES)),
                 )
-                result[key_str] = Role.VIEWER  # fail-secure: unknown role → least privilege
+                result[key_str] = (Role.VIEWER, allowed_tenants)
         else:
+            # F-20: legacy keys without :role are a security risk (silent admin escalation).
+            # In production profile, reject them entirely. In dev, warn + default to viewer.
+            try:
+                from aion.config import Profile, get_settings as _gs
+                _prof = _gs().profile
+            except Exception:
+                _prof = None
+            if _prof == Profile.PRODUCTION:
+                logger.error(
+                    "AION_ADMIN_KEY: key '%.8s...' has no role suffix — REJECTED in production. "
+                    "Use 'key:role' format, e.g. '%s:admin'.",
+                    part, part,
+                )
+                continue  # skip this key entirely in production
             logger.warning(
-                "AION_ADMIN_KEY: key '%.8s...' has no role suffix — defaulting to admin (deprecated). "
-                "Use 'key:role' format, e.g. '%s:admin'.",
+                "AION_ADMIN_KEY: key '%.8s...' has no role suffix — defaulting to viewer (least privilege). "
+                "Use 'key:role' format, e.g. '%s:admin'. Legacy admin default is removed.",
                 part, part,
             )
-            result[part] = Role.ADMIN  # backward compat: key without role = legacy admin key
+            result[part] = Role.VIEWER  # F-20: fail-secure — viewer, not admin
     return types.MappingProxyType(result)
 
 # ── In-flight counter ──
@@ -367,6 +394,34 @@ def _hash_entry(entry: dict) -> str:
     if secret:
         return _hmac.new(secret.encode(), serialized.encode(), hashlib.sha256).hexdigest()
     return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _verify_hash_entry(entry: dict) -> bool:
+    """F-23: verify an audit entry hash, trying both current and previous secret.
+
+    During key rotation, entries signed with the previous secret must still validate.
+    """
+    import hashlib
+    import hmac as _hmac
+    stored_hash = entry.get("entry_hash", "")
+    if not stored_hash:
+        return False
+    serialized = json.dumps({k: v for k, v in entry.items() if k != "entry_hash"}, sort_keys=True, default=str)
+    # Try current secret
+    secret = os.environ.get("AION_SESSION_AUDIT_SECRET", "")
+    if secret:
+        current = _hmac.new(secret.encode(), serialized.encode(), hashlib.sha256).hexdigest()
+        if _hmac.compare_digest(current, stored_hash):
+            return True
+    # Try previous secret (F-23 dual-secret window)
+    prev_secret = os.environ.get("AION_SESSION_AUDIT_SECRET_PREVIOUS", "")
+    if prev_secret:
+        previous = _hmac.new(prev_secret.encode(), serialized.encode(), hashlib.sha256).hexdigest()
+        if _hmac.compare_digest(previous, stored_hash):
+            return True
+    # Fallback: plain SHA-256 (no secret)
+    plain = hashlib.sha256(serialized.encode()).hexdigest()
+    return _hmac.compare_digest(plain, stored_hash)
 
 
 async def _get_chain_tip_redis(tenant: str) -> Optional[str]:
@@ -721,8 +776,28 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                         content={"error": {"message": "Unauthorized", "type": "auth_error", "code": "unauthorized"}},
                     )
 
-                service_role = key_roles[provided_key]
+                service_role, allowed_tenants = key_roles[provided_key]
                 required_perm = _resolve_permission(request.method, path)
+
+                # F-01/F-02: tenant ownership check — reject if key is bound to
+                # specific tenants and the request targets a different one.
+                if "*" not in allowed_tenants and tenant not in allowed_tenants:
+                    await audit(
+                        f"tenant_ownership_violation {request.method} {path}",
+                        request, tenant,
+                        details=f"key_tenants={','.join(sorted(allowed_tenants))} requested_tenant={tenant}",
+                    )
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": {
+                            "message": (
+                                f"Forbidden: this API key is not authorized for tenant '{tenant}'. "
+                                f"Contact your AION administrator."
+                            ),
+                            "type": "auth_error",
+                            "code": "tenant_ownership_violation",
+                        }},
+                    )
 
                 # ── Trusted proxy (Gap 1+2): console_proxy keys defer RBAC to actor role ──
                 # Only requests from console_proxy can provide trusted X-Aion-Actor-* headers.
@@ -756,6 +831,11 @@ class AionSecurityMiddleware(BaseHTTPMiddleware):
                 # ── Gap 4: Reason required for dangerous mutations ──
                 if _requires_reason(request.method, path):
                     reason = request.headers.get("X-Aion-Actor-Reason", "").strip()
+                    # F-31: sanitize reason — limit length, strip control chars, no HTML.
+                    if reason:
+                        reason = reason[:256]  # hard cap
+                        reason = "".join(ch for ch in reason if ch.isprintable() and ord(ch) < 128)
+                        reason = reason.replace("<", "&lt;").replace(">", "&gt;")
                     if not reason:
                         return JSONResponse(
                             status_code=400,

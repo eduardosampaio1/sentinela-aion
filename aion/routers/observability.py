@@ -145,11 +145,16 @@ async def health():
     health_data["collective_enabled"] = settings.collective_enabled
     # ─────────────────────────────────────────────────────────────────────────
 
-    # ── Trust Guard status ────────────────────────────────────────────────────
+    # ── Trust Guard status (F-14: minimal — no license_id, expiry, features) ──
+    # Full trust data (license_id, entitlement_valid_until, restricted_features)
+    # is available at /version (requires operator auth). /health only exposes
+    # trust_state and degradation status for orchestrators and load balancers.
     trust_guard_data = _get_trust_guard_health()
     if trust_guard_data:
-        health_data["trust_guard"] = trust_guard_data
-        # Reflect TAMPERED/INVALID in degraded_components (admin visibility)
+        health_data["trust_guard"] = {
+            "trust_state": trust_guard_data.get("trust_state", "UNKNOWN"),
+            "integrity_status": trust_guard_data.get("integrity_status", "UNVERIFIED"),
+        }
         tg_state = trust_guard_data.get("trust_state", "ACTIVE")
         if tg_state in ("TAMPERED", "INVALID") and "trust_guard" not in degraded_components:
             degraded_components.append("trust_guard")
@@ -181,6 +186,8 @@ async def metrics():
     lines.append(f'# TYPE aion_requests_total counter')
     lines.append(f'aion_requests_total {counters["requests_total"]}')
 
+    # F-26: per-tenant counters when available (bounded cardinality via tenant allowlist).
+    # Fleet-wide counters always present; per-tenant available via /v1/intelligence.
     for decision in ("bypass", "block", "passthrough", "fallback"):
         key = f"{decision}_total"
         lines.append(f'aion_decisions_total{{decision="{decision}"}} {counters.get(key, 0)}')
