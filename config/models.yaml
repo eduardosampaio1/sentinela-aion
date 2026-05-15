@@ -1,5 +1,6 @@
 # NOMOS — Model registry
-version: "1.1"  # F-09: added pricing_source / pricing_observed_at
+# F-09: bumped from 1.0 → 1.1 (added pricing_source / pricing_observed_at fields).
+version: "1.1"
 # Used by NOMOS to route requests to the best model based on complexity and cost.
 #
 # F-09: Every model MUST declare pricing_source and pricing_observed_at so cost

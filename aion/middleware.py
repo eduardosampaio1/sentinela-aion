@@ -180,7 +180,9 @@ def _parse_key_roles(admin_key_str: str) -> types.MappingProxyType:
                 "Use 'key:role' format, e.g. '%s:admin'. Legacy admin default is removed.",
                 part, part,
             )
-            result[part] = Role.VIEWER  # F-20: fail-secure — viewer, not admin
+            # F-20: fail-secure — viewer, not admin. F-01/02: legacy keys get all-tenants
+            # (matching pre-existing semantics) since they predate tenant binding.
+            result[part] = (Role.VIEWER, frozenset({"*"}))
     return types.MappingProxyType(result)
 
 # ── In-flight counter ──

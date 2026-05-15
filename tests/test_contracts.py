@@ -98,20 +98,33 @@ class TestRBAC:
         assert not check_permission("hacker", "killswitch:write")
 
     def test_parse_key_roles(self):
+        # F-01/F-02: result is now (Role, frozenset[tenants]); "*" = all tenants
+        _parse_key_roles.cache_clear()
         result = _parse_key_roles("key1:admin,key2:operator,key3:viewer")
-        assert result["key1"] == "admin"
-        assert result["key2"] == "operator"
-        assert result["key3"] == "viewer"
+        assert result["key1"] == (Role.ADMIN, frozenset({"*"}))
+        assert result["key2"] == (Role.OPERATOR, frozenset({"*"}))
+        assert result["key3"] == (Role.VIEWER, frozenset({"*"}))
 
     def test_parse_key_roles_backward_compat(self):
-        """Keys without role default to admin."""
+        """F-20: legacy keys without :role suffix default to viewer (least privilege),
+        not admin. Production profile rejects them entirely."""
+        _parse_key_roles.cache_clear()
         result = _parse_key_roles("old-key-123")
-        assert result["old-key-123"] == Role.ADMIN
+        assert result["old-key-123"] == (Role.VIEWER, frozenset({"*"}))
 
     def test_parse_key_roles_mixed(self):
+        _parse_key_roles.cache_clear()
         result = _parse_key_roles("admin-key:admin,simple-key")
-        assert result["admin-key"] == "admin"
-        assert result["simple-key"] == Role.ADMIN
+        assert result["admin-key"] == (Role.ADMIN, frozenset({"*"}))
+        # F-20: legacy bare key → viewer, not admin
+        assert result["simple-key"] == (Role.VIEWER, frozenset({"*"}))
+
+    def test_parse_key_roles_tenant_binding(self):
+        """F-01/F-02: third segment binds key to specific tenants."""
+        _parse_key_roles.cache_clear()
+        result = _parse_key_roles("opkey:operator:acme;globex,vkey:viewer:*")
+        assert result["opkey"] == (Role.OPERATOR, frozenset({"acme", "globex"}))
+        assert result["vkey"] == (Role.VIEWER, frozenset({"*"}))
 
     def test_resolve_permission_killswitch(self):
         assert _resolve_permission("PUT", "/v1/killswitch") == "killswitch:write"

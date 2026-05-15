@@ -64,7 +64,7 @@ def test_f06_telemetry_event_uses_sanitized_input():
         input_text=secret,
         tenant="acme",
     )
-    assert ev.data["schema_version"] == "1.1"
+    assert ev.data["schema_version"] == "1.2"  # F-33: bumped to 1.2 (+ environment, aion_version)
     assert isinstance(ev.data["input"], dict)
     assert ev.data["input"]["length"] == len(secret)
     # The secret text must not appear anywhere in the event payload.
@@ -227,8 +227,8 @@ def test_f22_yaml_version_reader():
     from pathlib import Path
     from aion.contract.builder import _read_yaml_version
 
-    # Files in this repo declare `version: "1.0"` at the top.
-    assert _read_yaml_version(Path("config/models.yaml")) == "1.0"
+    # F-09: models.yaml bumped to "1.1" (added pricing_source, pricing_observed_at).
+    assert _read_yaml_version(Path("config/models.yaml")) == "1.1"
     assert _read_yaml_version(Path("config/policies.yaml")) == "1.0"
     # Missing file → None (no exception)
     assert _read_yaml_version(Path("config/__nonexistent__.yaml")) is None
@@ -264,7 +264,7 @@ def test_f22_contract_includes_provenance():
     assert c.provenance.compression_ratio == 0.8
     # YAML versions surfaced.
     assert c.provenance.policy_version == "1.0"
-    assert c.provenance.models_version == "1.0"
+    assert c.provenance.models_version == "1.1"  # F-09: bumped
     # System prompt hash present (we have a system message above).
     assert c.provenance.prompt_template_hash is not None
 
