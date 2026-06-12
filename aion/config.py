@@ -177,7 +177,7 @@ class EstixeSettings(BaseSettings):
         extra="ignore",
     )
 
-    bypass_threshold: float = 0.85
+    bypass_threshold: float = 0.74    # recalibrado p/ embedding multilíngue (era 0.85; saudações caíam p/ passthrough). saudação min~0.77 vs pergunta max~0.70
     block_min_threshold: float = 0.82    # min confidence for action=block intents (prevents relaxation)
     risk_check_enabled: bool = True       # enable RiskClassifier (S3 structural risk layer)
     risk_check_threshold: float = 0.78   # default threshold for risk categories (overridden per-category in YAML)
