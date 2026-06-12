@@ -177,7 +177,7 @@ class EstixeSettings(BaseSettings):
         extra="ignore",
     )
 
-    bypass_threshold: float = 0.85
+    bypass_threshold: float = 0.74    # recalibrado p/ embedding multilíngue (era 0.85; saudações caíam p/ passthrough). saudação min~0.77 vs pergunta max~0.70
     block_min_threshold: float = 0.82    # min confidence for action=block intents (prevents relaxation)
     risk_check_enabled: bool = True       # enable RiskClassifier (S3 structural risk layer)
     risk_check_threshold: float = 0.78   # default threshold for risk categories (overridden per-category in YAML)
@@ -186,7 +186,7 @@ class EstixeSettings(BaseSettings):
     # benigno (ex: "fraude" em resposta sobre como reportar uma fraude). Input permanece
     # no threshold original (rigoroso) — output eh mais tolerante por design.
     output_threshold_boost: float = 0.06
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"  # multilíngue (384d, drop-in). Antes: all-MiniLM-L6-v2 (inglês-cêntrico, fraco em PT-BR)
     embedding_lru_cache_size: int = 5000    # max entries in the per-process embedding LRU cache
     max_tokens_per_request: int = 4096
     intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
