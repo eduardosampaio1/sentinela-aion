@@ -186,7 +186,7 @@ class EstixeSettings(BaseSettings):
     # benigno (ex: "fraude" em resposta sobre como reportar uma fraude). Input permanece
     # no threshold original (rigoroso) — output eh mais tolerante por design.
     output_threshold_boost: float = 0.06
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"  # multilíngue (384d, drop-in). Antes: all-MiniLM-L6-v2 (inglês-cêntrico, fraco em PT-BR)
     embedding_lru_cache_size: int = 5000    # max entries in the per-process embedding LRU cache
     max_tokens_per_request: int = 4096
     intents_path: Path = _PACKAGE_DIR / "estixe" / "data" / "intents.yaml"
