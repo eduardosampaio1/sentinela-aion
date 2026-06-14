@@ -25,8 +25,8 @@ def test_fail_mode_closed():
 
 def test_estixe_settings():
     s = EstixeSettings()
-    assert s.bypass_threshold == 0.85
-    assert s.embedding_model == "all-MiniLM-L6-v2"
+    assert s.bypass_threshold == 0.74  # recalibrado p/ embedding multilíngue
+    assert s.embedding_model == "paraphrase-multilingual-MiniLM-L12-v2"
     assert s.max_tokens_per_request == 4096
 
 
