@@ -23,6 +23,9 @@ _TTL_SECONDS = 86400  # 24h
 
 
 class ThreatPattern(str, Enum):
+    ACCUMULATED_PRESSURE = "accumulated_pressure"
+    # suspicion scalar (surprise+momentum) crossed threshold — slow-burn probing
+    # whose per-turn risk is NOT strictly increasing (see aion.estixe.suspicion)
     PROGRESSIVE_BYPASS = "progressive_bypass"
     # risk_score climbing across turns toward threshold
     INTENT_MUTATION = "intent_mutation"
@@ -43,13 +46,37 @@ class ThreatSignal(BaseModel):
     recommended_action: str  # "monitor" | "escalate_threshold" | "block_session"
 
 
-def _analyze(turns: list) -> Optional[ThreatSignal]:
+def _analyze(
+    turns: list,
+    suspicion: float = 0.0,
+    suspicion_detect_threshold: float = 0.6,
+) -> Optional[ThreatSignal]:
     """Analyze a list of TurnSummary objects for threat patterns.
+
+    ``suspicion`` is the persisted surprise+momentum accumulator (see
+    aion.estixe.suspicion). When it crosses ``suspicion_detect_threshold`` the
+    ACCUMULATED_PRESSURE pattern fires — independent of per-turn monotonicity.
+    Default ``suspicion=0.0`` keeps the legacy four-pattern behaviour intact.
 
     Returns a ThreatSignal if a pattern is detected, else None.
     """
     if len(turns) < 2:
         return None
+
+    # ACCUMULATED_PRESSURE — checked first: the suspicion scalar already encodes
+    # the full session history, so it catches slow-burn probing that the
+    # strictly-increasing PROGRESSIVE_BYPASS check below would miss.
+    if suspicion >= suspicion_detect_threshold:
+        high = suspicion >= suspicion_detect_threshold * 2
+        return ThreatSignal(
+            session_id="",
+            tenant="",
+            pattern=ThreatPattern.ACCUMULATED_PRESSURE,
+            confidence=round(min(0.95, 0.5 + min(suspicion, 3.0) * 0.15), 3),
+            detected_at=time.time(),
+            turns_analyzed=len(turns),
+            recommended_action="block_session" if high else "escalate_threshold",
+        )
 
     risk_scores = [t.risk_score for t in turns]
     intents = [t.intent or "" for t in turns]
@@ -204,14 +231,19 @@ class ThreatDetector:
         self._store = ThreatStore()
 
     async def analyze(
-        self, tenant: str, session_id: str, turns: list
+        self, tenant: str, session_id: str, turns: list, suspicion: float = 0.0
     ) -> Optional[ThreatSignal]:
         """Analyze turns and persist signal if detected. Returns signal or None.
+
+        ``suspicion`` is the accumulator carried on TurnContext; the detection
+        threshold comes from EstixeSettings so it can be tuned per deployment.
 
         Fail-open: a Redis failure in store.save() is logged but never propagated —
         the calling pipeline must not be interrupted by observability writes.
         """
-        signal = _analyze(turns)
+        from aion.config import get_estixe_settings
+        threshold = get_estixe_settings().threat_suspicion_detect_threshold
+        signal = _analyze(turns, suspicion=suspicion, suspicion_detect_threshold=threshold)
         if signal is None:
             return None
         signal.session_id = session_id

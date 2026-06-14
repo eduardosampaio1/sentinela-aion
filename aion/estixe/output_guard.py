@@ -34,7 +34,8 @@ import re
 
 from aion.config import EstixeSettings
 from aion.estixe.guardrails import Guardrails
-from aion.estixe.risk_classifier import RiskClassifier, RiskMatch
+from aion.estixe.risk_classifier import RiskClassifier, RiskMatch, get_role_authorizations
+from aion.estixe.suspicion import role_authorized_for_block
 from aion.shared.contracts import EstixeAction, EstixeResult, PiiPolicyConfig
 from aion.shared.schemas import PipelineContext
 
@@ -120,6 +121,23 @@ class OutputGuard:
                 threshold_overrides[r.name] = min(0.99, base + boost)
             risk = self._classify_by_chunks(response_text, threshold_overrides)
             if risk is not None and not risk.shadow and risk.risk_level in ("critical", "high"):
+                # Role-aware bypass (same gate as the input block): a response whose
+                # structural risk is a category the end-user's role legitimately accesses
+                # (e.g. admin asking how to add a user) is not blocked — recorded + delivered.
+                if role_authorized_for_block(
+                    risk.category, context.metadata.get("user_roles"),
+                    get_role_authorizations(), self._settings.role_aware_block,
+                ):
+                    context.metadata["output_role_authorized_bypass"] = {
+                        "category": risk.category,
+                        "roles": context.metadata.get("user_roles"),
+                        "confidence": round(risk.confidence, 3),
+                    }
+                    logger.info(
+                        "Role-authorized OUTPUT risk bypass: category=%s roles=%s conf=%.3f",
+                        risk.category, context.metadata.get("user_roles"), risk.confidence,
+                    )
+                    return result
                 result.action = EstixeAction.BLOCK
                 result.block_reason = (
                     f"Output bloqueado: resposta classifica como risco estrutural "

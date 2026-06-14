@@ -430,6 +430,13 @@ async def chat_completions(request: Request):
         _explicit_sid = request.headers.get("X-Aion-Session-Id") or None
         context.session_id = derive_session_id(tenant, chat_request.messages, explicit_id=_explicit_sid)
 
+    # P1.3: end-user role(s) for role-aware suspicion. MUST be set server-side by the
+    # integrator (which authenticated the user) — never a value the end-user controls,
+    # else "X-Aion-User-Role: admin" is a trivial bypass.
+    _role_hdr = request.headers.get(settings.user_role_header)
+    if _role_hdr:
+        context.metadata["user_roles"] = [r.strip() for r in _role_hdr.split(",") if r.strip()]
+
     _tenant_ov = await get_overrides(tenant)
     if "pii_policy" in _tenant_ov:
         context.metadata["pii_policy"] = _tenant_ov["pii_policy"]

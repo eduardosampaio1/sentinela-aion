@@ -29,6 +29,50 @@ from aion.shared.embeddings import get_embedding_model
 logger = logging.getLogger("aion.estixe.risk_classifier")
 
 
+_category_baselines_cache: Optional[dict] = None
+_role_authorizations_cache: Optional[dict] = None
+
+
+def get_role_authorizations() -> dict:
+    """Per-role authorized risk categories from risk_taxonomy.yaml (cached, no embeddings).
+
+    {role: [categories]} — an authorized role makes those categories non-surprising
+    in the suspicion accumulator (P1.3). Default {} → no role exemptions.
+    """
+    global _role_authorizations_cache
+    if _role_authorizations_cache is None:
+        import yaml
+        path = Path(__file__).resolve().parent / "data" / "risk_taxonomy.yaml"
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            _role_authorizations_cache = {
+                str(k): list(v) for k, v in (data.get("role_authorizations") or {}).items()
+            }
+        except Exception:
+            _role_authorizations_cache = {}
+    return _role_authorizations_cache
+
+
+def get_category_baselines() -> dict:
+    """Per-category suspicion baselines from risk_taxonomy.yaml (cached, no embeddings).
+
+    Reads only the `suspicion_baselines` block — cheap YAML parse. Used by the
+    pipeline to build SuspicionParams without needing a loaded classifier.
+    """
+    global _category_baselines_cache
+    if _category_baselines_cache is None:
+        import yaml
+        path = Path(__file__).resolve().parent / "data" / "risk_taxonomy.yaml"
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            _category_baselines_cache = {
+                k: float(v) for k, v in (data.get("suspicion_baselines") or {}).items()
+            }
+        except Exception:
+            _category_baselines_cache = {}
+    return _category_baselines_cache
+
+
 @dataclass
 class RiskMatch:
     """Result of risk classification."""
@@ -50,6 +94,7 @@ class RiskDefinition:
     description: str
     seeds: list[str]
     shadow: bool = False                                        # shadow mode flag
+    benign_ceiling: float = 0.0   # observed max benign score (P1.2 per-category suspicion baseline)
     embeddings: Optional[np.ndarray] = field(default=None, repr=False)
 
 
@@ -115,6 +160,7 @@ class RiskClassifier:
             data = yaml.safe_load(f)
 
         self._risks = []
+        ceilings = data.get("suspicion_baselines", {})
         for name, cfg in data.get("risks", {}).items():
             seeds = cfg.get("seeds", [])
             shadow = bool(cfg.get("shadow", False))
@@ -125,6 +171,7 @@ class RiskClassifier:
                 description=cfg.get("description", ""),
                 seeds=seeds,
                 shadow=shadow,
+                benign_ceiling=float(ceilings.get(name, cfg.get("benign_ceiling", 0.0))),
             )
             if seeds and model.loaded:
                 # Normalize seeds before encoding — same normalization applied to inputs
@@ -230,6 +277,30 @@ class RiskClassifier:
                 self._classify_cache.popitem(last=False)
 
         return best
+
+    def raw_best(self, text: str) -> tuple[str, float]:
+        """Best-match (category, confidence) over ALL categories, IGNORING thresholds.
+
+        Unlike classify() (which returns None below threshold), raw_best always
+        returns the top category and its raw cosine confidence — so the suspicion
+        accumulator sees real scores on sub-threshold (slow-burn) turns too.
+        Reuses the embedding LRU cache, so cost is ~one argmax beyond classify().
+        """
+        model = get_embedding_model()
+        if not model.loaded or not self._risks:
+            return ("", 0.0)
+        normalized = normalize_input(text)
+        input_emb = model.encode_single(
+            normalized, normalize=True, use_cache=self._settings.cache_embeddings,
+        )
+        best_cat, best_conf = "", 0.0
+        for risk in self._risks:
+            if risk.embeddings is None:
+                continue
+            conf = float(np.max(risk.embeddings @ input_emb))
+            if conf > best_conf:
+                best_conf, best_cat = conf, risk.name
+        return (best_cat, best_conf)
 
     async def reload(self) -> None:
         """Reload risk taxonomy from disk (hot-reload).

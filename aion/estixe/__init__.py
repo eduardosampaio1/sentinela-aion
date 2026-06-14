@@ -234,6 +234,27 @@ class EstixeModule:
                 logger.debug(
                     "Multi-turn risk escalation: prior_risk=%.3f delta=%.3f", prior_risk, delta
                 )
+            # Suspicion enforcement (Titans P0, Fase 2) — gated, OFF by default.
+            # Bounded transient tightening that relaxes automatically as suspicion
+            # decays (eta). Gates calibrated FP-zero — see
+            # qa-evidence/aion-suspicion-calibration/. No ActuationGuard: nothing
+            # persistent to roll back.
+            if self._settings.threat_enforce_enabled:
+                from aion.estixe.suspicion import enforce_tightening
+                tightened = enforce_tightening(
+                    threshold_overrides,
+                    turn_ctx.suspicion,
+                    self._settings.threat_suspicion_enforce_threshold,
+                    self._risk_classifier._risks,
+                )
+                if tightened is not threshold_overrides:
+                    threshold_overrides = tightened
+                    context.metadata["suspicion_enforced"] = round(turn_ctx.suspicion, 3)
+                    logger.warning(
+                        "Suspicion enforcement: tenant=%s suspicion=%.3f -> thresholds tightened",
+                        context.tenant, turn_ctx.suspicion,
+                    )
+
             # Intent continuity: carry forward the last detected intent as a hint
             prior_intent = turn_ctx.last_intent
             if prior_intent:
@@ -247,7 +268,8 @@ class EstixeModule:
                     from aion.estixe.threat_detector import get_threat_detector
                     _td = _asyncio.create_task(
                         get_threat_detector().analyze(
-                            context.tenant, context.session_id, turn_ctx.turns
+                            context.tenant, context.session_id, turn_ctx.turns,
+                            suspicion=turn_ctx.suspicion,
                         )
                     )
                     from aion.pipeline import _BG_TASKS
@@ -327,6 +349,11 @@ class EstixeModule:
         tenant_shadow_mode: bool = bool(context.metadata.get("shadow_mode"))
         if self._settings.risk_check_enabled:
             risk = self._risk_classifier.classify(user_message, threshold_overrides=threshold_overrides)
+            # Raw best-match (category, confidence) for the suspicion accumulator —
+            # recorded for EVERY turn incl. sub-threshold, so slow-burn is visible (P1.2).
+            _raw_cat, _raw_conf = self._risk_classifier.raw_best(user_message)
+            context.metadata["risk_raw_category"] = _raw_cat
+            context.metadata["risk_raw_confidence"] = _raw_conf
             if risk is not None:
                 if risk.shadow or tenant_shadow_mode:
                     # Shadow mode: log observation, do NOT block — category is being evaluated
@@ -347,6 +374,18 @@ class EstixeModule:
                         ))
                     except Exception:
                         pass
+                elif risk.risk_level in ("critical", "high") and self._role_bypasses_block(risk, context):
+                    # Role-aware bypass: end-user role legitimately accesses this category
+                    # (e.g. admin asking for access). Record + continue (NOT block). Audited.
+                    context.metadata["role_authorized_bypass"] = {
+                        "category": risk.category,
+                        "roles": context.metadata.get("user_roles"),
+                        "confidence": round(risk.confidence, 3),
+                    }
+                    logger.info(
+                        "Role-authorized risk bypass: category=%s roles=%s conf=%.3f",
+                        risk.category, context.metadata.get("user_roles"), risk.confidence,
+                    )
                 elif risk.risk_level in ("critical", "high"):
                     block_reason = (
                         f"Solicitação bloqueada: risco estrutural "
@@ -430,6 +469,18 @@ class EstixeModule:
         # Cache decisão CONTINUE para próxima request idêntica
         await self._cache_decision_if_safe(context, normalized, result)
         return context
+
+    def _role_bypasses_block(self, risk, context) -> bool:
+        """True if the end-user's role legitimately accesses this risk category and
+        role-aware block is enabled (default OFF). Gated + audited — see suspicion.py."""
+        from aion.estixe.suspicion import role_authorized_for_block
+        from aion.estixe.risk_classifier import get_role_authorizations
+        return role_authorized_for_block(
+            risk.category,
+            context.metadata.get("user_roles"),
+            get_role_authorizations(),
+            self._settings.role_aware_block,
+        )
 
     # ──────────────────────────────────────────────
     # DecisionCache helpers

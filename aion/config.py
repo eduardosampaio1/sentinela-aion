@@ -101,6 +101,10 @@ class AionSettings(BaseSettings):
     # --- Multi-tenancy ---
     tenant_header: str = "X-Aion-Tenant"
     default_tenant: str = "default"
+    # P1.3 role-aware suspicion: header com role(s) do end-user (separados por vírgula),
+    # SET SERVER-SIDE pelo app integrador — NUNCA valor controlado pelo end-user
+    # (senão "X-Aion-User-Role: admin" vira bypass trivial). Vazio/ausente = sem role.
+    user_role_header: str = "X-Aion-User-Role"
 
     # --- Paths (resolved relative to project root) ---
     config_dir: Path = _PROJECT_DIR / "config"
@@ -200,6 +204,33 @@ class EstixeSettings(BaseSettings):
     velocity_block_threshold: int = 5      # blocks in window to trigger tightening
     velocity_window_seconds: int = 60      # rolling window size in seconds
     velocity_tighten_delta: float = 0.05   # how much to lower thresholds when triggered
+
+    # ── Suspicion accumulator (Titans P0: surprise + momentum, cross-turn) ──
+    # A decaying scalar persisted on TurnContext, surviving the 3-turn window:
+    #   S_t = eta*S_{t-1} + theta*max(0, risk_t - baseline)
+    # Catches slow-burn probing whose per-turn risk is not strictly increasing.
+    # Gates calibrados (FP-zero-first) contra risk_scores REAIS, com baseline
+    # POR-CATEGORIA (P1.2) — pisos em risk_taxonomy.yaml `suspicion_baselines`.
+    # Ver qa-evidence/aion-suspicion-calibration/RESULTS-real.md (recall 0.80,
+    # fpr 0.00). NOTA: sobre scores reais a separação vem do piso por-categoria;
+    # o momentum ficou pouco relevante (detecção ~turno 2). `threat_suspicion_baseline`
+    # abaixo é só o FALLBACK global (turno sem categoria); os pisos reais por
+    # categoria vivem na taxonomia.
+    threat_suspicion_enabled: bool = True            # Fase 1: compute S_t + emit ACCUMULATED_PRESSURE
+    threat_suspicion_eta: float = 0.70               # momentum / forgetting carry (0<eta<1)
+    threat_suspicion_theta: float = 4.0              # learning rate on per-turn surprise
+    threat_suspicion_baseline: float = 0.50          # GLOBAL FALLBACK only (per-category in taxonomy)
+    threat_suspicion_detect_threshold: float = 0.1   # emit ACCUMULATED_PRESSURE at/above this
+    # Fase 2 (enforcement) — OFF by default; flip on (per-instance) only after a
+    # shadow/observe period. enforce_threshold recalibrado pra escala per-categoria
+    # (pisos altos → surpresas pequenas): ~0.5 = um turno de jailbreak claro
+    # (instruction_override bem acima do piso). detect dispara em 0.1; enforce exige sinal forte.
+    threat_enforce_enabled: bool = False             # gate: suspicion tightens next-turn thresholds
+    threat_suspicion_enforce_threshold: float = 0.5  # tighten thresholds when suspicion ≥ this
+    # Role-aware single-turn block (default OFF — relaxar um block DURO é opt-in deliberado).
+    # Quando ON, um risco crit/high em categoria autorizada pro role do end-user
+    # (role_authorizations na taxonomia) NÃO bloqueia — registra bypass auditável e continua.
+    role_aware_block: bool = False
 
     # ── Suggestions (auto-discovery) ──
     suggestions_enabled: bool = False  # opt-in: ESTIXE_SUGGESTIONS_ENABLED=true

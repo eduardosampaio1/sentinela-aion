@@ -34,6 +34,7 @@ class TurnSummary(BaseModel):
     model_used: str = ""
     pii_types: list[str] = []
     risk_score: float = 0.0
+    risk_category: Optional[str] = None  # raw best-match risk category (P1.2 per-category baseline)
     decision: str = "continue"  # "continue" | "bypass" | "block"
     timestamp: float = 0.0
 
@@ -44,6 +45,11 @@ class TurnContext(BaseModel):
     tenant: str
     turns: list[TurnSummary] = []
     last_updated: float = 0.0
+    # Suspicion accumulator (surprise + momentum). A single decaying scalar that
+    # survives the sliding window — see aion.estixe.suspicion. Persisted so it is
+    # available synchronously at the start of the next turn.
+    suspicion: float = 0.0
+    suspicion_updated: float = 0.0
 
     def add_turn(self, turn: TurnSummary) -> None:
         max_turns = get_metis_settings().turn_context_max_turns
@@ -51,6 +57,19 @@ class TurnContext(BaseModel):
         if len(self.turns) > max_turns:
             self.turns = self.turns[-max_turns:]
         self.last_updated = time.time()
+
+    def record_suspicion(self, risk: float, params, now: float, category=None, roles=None) -> float:
+        """Advance the suspicion accumulator one turn (surprise + momentum).
+
+        ``category`` selects the per-category baseline (P1.2); ``roles`` (P1.3)
+        exempts categories legitimately accessed by the end-user's role.
+        Delegates the math to aion.estixe.suspicion (kept pure). Lazy import
+        avoids a shared→estixe circular import at module load.
+        """
+        from aion.estixe.suspicion import update_suspicion
+        self.suspicion = update_suspicion(self.suspicion, risk, params, category=category, roles=roles)
+        self.suspicion_updated = now
+        return self.suspicion
 
     @property
     def last_turn(self) -> Optional[TurnSummary]:

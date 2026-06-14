@@ -470,7 +470,15 @@ class Pipeline:
                 intent = context.metadata.get("detected_intent")
                 complexity = float(context.metadata.get("complexity_score", 0.0))
                 pii_types = list(context.metadata.get("pii_violations", []))
-                risk_score = float(context.metadata.get("risk_confidence", 0.0))
+                # Prefer the raw best-match score (P1.2): set even on sub-threshold turns,
+                # so the slow-burn accumulator actually sees the ramp. Falls back to the
+                # block-time risk_confidence.
+                risk_score = float(
+                    context.metadata.get(
+                        "risk_raw_confidence", context.metadata.get("risk_confidence", 0.0)
+                    )
+                )
+                risk_category = context.metadata.get("risk_raw_category")
                 decision_val = context.decision.value
                 policies = []
                 if context.estixe_result:
@@ -483,6 +491,7 @@ class Pipeline:
                     model_used=context.selected_model or "",
                     pii_types=pii_types,
                     risk_score=risk_score,
+                    risk_category=risk_category,
                     decision=decision_val,
                     timestamp=now,
                 )
@@ -490,6 +499,27 @@ class Pipeline:
                     session_id=context.session_id, tenant=context.tenant
                 )
                 turn_ctx.add_turn(turn)
+                # Suspicion accumulator (Titans P0): advance the decaying scalar with
+                # this turn's surprise BEFORE persisting, so it carries to next turn.
+                from aion.config import get_estixe_settings
+                _estixe_settings = get_estixe_settings()
+                if _estixe_settings.threat_suspicion_enabled:
+                    from aion.estixe.suspicion import SuspicionParams
+                    from aion.estixe.risk_classifier import get_category_baselines, get_role_authorizations
+                    turn_ctx.record_suspicion(
+                        risk=risk_score,
+                        params=SuspicionParams(
+                            eta=_estixe_settings.threat_suspicion_eta,
+                            theta=_estixe_settings.threat_suspicion_theta,
+                            baseline=_estixe_settings.threat_suspicion_baseline,
+                            baselines=get_category_baselines(),
+                            role_authorizations=get_role_authorizations(),
+                        ),
+                        now=now,
+                        category=risk_category,
+                        roles=context.metadata.get("user_roles"),
+                    )
+                    context.metadata["suspicion"] = round(turn_ctx.suspicion, 4)
                 _t1 = asyncio.create_task(_guarded_bg(get_turn_context_store().save(context.tenant, turn_ctx)))
                 _BG_TASKS.add(_t1)
                 _t1.add_done_callback(_BG_TASKS.discard)
